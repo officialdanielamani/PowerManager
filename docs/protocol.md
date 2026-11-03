@@ -73,7 +73,14 @@ Authorization: Bearer <device_id>.<secret>
 X-PM-Proto: 1
 ```
 
-The server closes with code `4401` on bad credentials and `4403` if the device was removed. On `4401`/`4403` the device stops retrying and shows "Not paired" on its local dashboard.
+Close codes from the server:
+
+| Code | Meaning | Device behaviour |
+|------|---------|------------------|
+| `4401` | Bad credentials (unknown device / wrong secret) | Stop retrying, show "Not paired – re-pair needed" on the local dashboard. Local admin and Wi-Fi are kept. |
+| `4403` | Device was **removed** by the admin | **Factory reset** (same as the `remove` command), reboot into first-boot AP mode |
+
+The server keeps the "removed" marker for the `device_id` so a device that was offline during removal still gets `4403` when it next connects.
 
 ### 2.1 Envelope
 
@@ -113,7 +120,8 @@ Commands (`cmd.c`):
 | `send_now` | – | Send `tel` right away |
 | `reset_trip` | – | Clear the over-current latch |
 | `get_state` | – | Reply with `state` |
-| `unpair` | – | Wipe server credentials, reply `cmd_ack`, close, go back to setup |
+| `remove` | – | Reply `cmd_ack`, close, then **factory reset**: wipe local admin, Wi-Fi, pairing, config, session, trip latch and buffer (AP password kept) → reboot into first-boot AP mode |
+| `set_default` | – | Not a device command: the server makes a new default config and sends it as `cfg` |
 
 Commands for an offline device are **queued** on the server and sent on reconnect (except `send_now`, which is dropped, and `relay`, which is replaced by the latest one).
 

@@ -103,7 +103,11 @@ Types: `kwh_exceeded`, `session_renew`, `max_amp`, `panel_open`, `no_voltage`, `
 
 The stats panel shows min / max / average of V, A, W and total kWh for the picked range (hour, day, week, month, all time, custom).
 
-CSV export uses raw data where it still exists (within the retention period), otherwise roll-ups. Timestamps are in **both** UTC and the display timezone.
+CSV export covers **exactly the range selected** in the history view (1 week shown → 1 week exported), for admin and viewers. It uses raw data where it still exists (within the retention period), otherwise roll-ups (with min/max/avg columns). Timestamps are in **both** UTC and the display timezone. File name: `<device_id>_<from>_<to>.csv`.
+
+## Removing a device
+
+`device.removed_at` is set and `secret_hash` is cleared. If "also delete history" is ticked, its `measurement`, `rollup`, `session`, `event`, `command` and `notification_rule` rows are deleted too. The `device_id` row stays (with `removed_at`) so the device gets close code `4403` if it reconnects. If the same hardware is paired again later, the row is reused (`removed_at` cleared) and, if history was kept, the old history shows again.
 
 ## Retention and size
 

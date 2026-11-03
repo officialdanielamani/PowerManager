@@ -32,7 +32,7 @@ Shows a **Synced / Pending sync** badge.
 | Section | Fields |
 |---------|--------|
 | General | Device ID (read-only), Nick Name, Info, Send data every [10 s – 1 h] |
-| Actions | [Renew Now] · [Set to Default] · [Remove Device] (confirm dialog) |
+| Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · [Remove Device] (confirm dialog with [ ] Also delete history; warns that the meter will **factory reset**) |
 | Limits | Max kWh per session (0 = unlimited) · Session reset: ( ) None ( ) Duration [D][H][M] ( ) Daily at [HH:MM] (display timezone) · [ ] Auto renew · Max A to switch relay off (0 = off) · [ ] Relay off if device offline for [X] min |
 | Notifications | [ ] kWh exceeded · [ ] Session renewed · [ ] Max A · [ ] Panel open · [ ] No voltage · [ ] Disconnected for [X] min · [ ] Reconnected |
 
@@ -46,7 +46,7 @@ Shows a **Synced / Pending sync** badge.
 - Latest data: V, A, W, PF, Hz, session kWh used / remaining.
 - Admin-only buttons: Relay ON/OFF, [Renew Now], [Reset Trip], [Send Data Now], [Configure].
 - History chart (V / A / W / kWh) with range: 1 h, 1 day, 1 week, 1 month, all time, custom; stats: min / max / avg.
-- [Export CSV] for the selected range.
+- [Export CSV] exports exactly the range currently shown (admin and viewers).
 - Recent events list (sessions, trips, tamper, AC loss, connect/disconnect).
 
 ### Settings

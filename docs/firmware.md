@@ -59,7 +59,8 @@ Boot with Wi-Fi ──▶ STA mode, local web UI at http://<ip>/ (mDNS: power-xx
 Date/time · Device ID / name / info · V, A, W, PF, Hz · session kWh used / max · next reset · auto renew · server connection status · last sync.
 
 - **Relay toggle**: ON is disabled in the UI **and refused in the handler** when quota is exceeded, the session expired, or the over-current trip is latched.
-- [Send Data Now] · [Reset Trip] (when tripped) · Wi-Fi settings · Pairing (re-pair / unpair) · Change local admin password.
+- [Send Data Now] · [Reset Trip] (when tripped) · Wi-Fi settings · Pairing status (re-pair only shown when not paired) · Change local admin password · [Factory Reset].
+- Removing the device is done from the **server** ([Remove Device]); the meter then factory-resets itself (see protocol §2 `remove` / `4403`).
 
 ## 5. Tasks (FreeRTOS)
 
@@ -105,17 +106,31 @@ With no valid time: telemetry uses `tv:0` + uptime (protocol §2.4), and **daily
 
 ## 9. LED
 
-Highest priority first:
+Only the highest-priority active state is shown. One-shot patterns (marked ⚡) play once over the current state, then it comes back.
 
 | Priority | State | Pattern |
 |----------|-------|---------|
-| 1 | Factory reset in progress | White fast flash |
-| 2 | Over-current tripped | **Red solid** (relay OFF) |
-| 3 | Quota exceeded / session expired | **Yellow blink** 1 Hz until renewed |
-| 4 | Setup / AP mode | Blue slow breathe |
-| 5 | Offline / server not replying | **Red blink** 1 Hz until online |
-| 6 | Data sent and `ack` received | **Green blink ×2**, then off |
-| – | Normal idle | Off (or very dim green, optional) |
+| 1 | Factory reset (BOOT held 10 s / removed by server) | White fast flash (10 Hz) |
+| 2 | Boot / self-test | Short R → G → B sweep (once at power-on) |
+| 3 | Over-current tripped (latched) | **Red solid** (relay OFF) |
+| 4 | Sensor fault (PZEM never answered since boot) | Red/yellow alternating 1 Hz |
+| 5 | Quota exceeded / session expired | **Yellow blink** 1 Hz until renewed |
+| 6 | Panel open (tamper) | Purple blink 1 Hz |
+| 7 | AC lost (no voltage) | Orange slow pulse (every 3 s) |
+| 8 | Setup / AP mode (first boot or Wi-Fi fallback) | Blue slow breathe |
+| 9 | Wi-Fi connecting | Blue blink 2 Hz |
+| 10 | Not paired (Wi-Fi OK, no server credentials / `4401`) | Cyan slow breathe |
+| 11 | Offline / server not replying | **Red blink** 1 Hz until online |
+| ⚡ | Data sent and `ack` received | **Green blink ×2** |
+| ⚡ | Config applied | Green long blink ×1 (500 ms) |
+| ⚡ | Command rejected (e.g. relay ON while quota exceeded) | Red blink ×3 fast |
+| ⚡ | Pairing success | Green blink ×5 fast |
+| – | Normal idle, relay ON | Very dim green solid |
+| – | Normal idle, relay OFF by user | Off |
+
+Notes:
+- Tamper and AC lost sit **below** trip/quota on purpose: the relay-blocking states matter more locally. Both are still reported to the server.
+- LED brightness is set in `config.h` (default low, so it does not light up a room).
 
 ## 10. Libraries (Arduino Library Manager)
 

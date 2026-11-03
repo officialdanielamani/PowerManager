@@ -100,10 +100,13 @@ Reset schedule modes:
 | Admin (exactly 1) | Everything: pair/configure/remove meters, relay, renew, settings, manage viewers |
 | Viewer (0..n, created by admin) | View dashboard, meter info, history; export CSV; change own password. **Cannot** change anything about meters. |
 
-## 7. Assumptions (confirm or correct)
+## 7. Confirmed behaviour
 
-- **A1 "Set to Default"** resets the meter's config (limits, interval, notifications) to factory defaults and pushes it. It does **not** unpair, rename or clear history.
-- **A2** After an *offline relay-off*, when the device comes back online the relay goes back to the user's wanted state (if no other rule blocks it).
-- **A3** Viewers may export CSV.
-- **A4** "Remove Device" sends `unpair` if the device is online (the device then wipes its server credentials and opens setup again). History is kept and marked as removed unless the admin ticks "also delete history".
-- **A5** Over-current trip is **latched**: relay OFF + red solid until reset from the server or the device dashboard ([Reset Trip]).
+- **B1 "Set to Default"** resets the meter's config (limits, interval, notifications) to factory defaults and pushes it. It does **not** unpair, rename or clear history.
+- **B2** After an *offline relay-off*, when the device comes back online the relay goes back to the user's wanted state (if no other rule blocks it).
+- **B3** Viewers may export CSV. The CSV contains **exactly the range shown** in the history view (e.g. view = 1 week → CSV = that week only).
+- **B4 "Remove Device"**:
+  - Server: the device is marked removed and its secret is revoked. History is **kept** unless the admin ticks "also delete history".
+  - Device: **full factory reset** — wipes local admin, Wi-Fi, pairing, config, session and buffer, then reboots into first-boot AP mode (create admin account). The AP password is kept, so the label stays valid.
+  - If the device is offline at removal time, the reset happens on its next connect (protocol §2: close code `4403`).
+- **B5** Over-current trip is **latched**: relay OFF + red solid until [Reset Trip] on the server or on the device dashboard.
