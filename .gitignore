@@ -13,6 +13,5 @@ firmware/**/build/
 .DS_Store
 .vscode/
 .idea/
-server/app/static/vendor/
 server/.env
 .pytest_cache/

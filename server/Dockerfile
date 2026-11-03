@@ -6,10 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Front-end libraries are downloaded once at build time (no CDN needed at runtime)
-COPY scripts/fetch_vendor.py scripts/fetch_vendor.py
-RUN python scripts/fetch_vendor.py /app/app/static/vendor
-
+# Front-end libraries (Bootstrap, icons, Chart.js) are already in app/static/vendor,
+# so the build needs no network access apart from pip.
 COPY . .
 RUN mkdir -p instance
 

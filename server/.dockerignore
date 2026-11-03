@@ -1,5 +1,4 @@
 instance/
-app/static/vendor/
 __pycache__/
 *.pyc
 .venv/

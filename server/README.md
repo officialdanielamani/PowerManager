@@ -48,7 +48,6 @@ Build behind a registry mirror: `docker compose build --build-arg BASE_IMAGE=mir
 cd server
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt pytest
-python scripts/fetch_vendor.py                     # Bootstrap, icons, Chart.js -> app/static/vendor
 python wsgi.py                                     # http://localhost:5000 (setup token is printed)
 python -m pytest -q tests
 ```
@@ -76,6 +75,8 @@ app/
   services/            ingest (protocol handling), incidents, commands, devconfig, history,
                        rollup, notify (in-app + Telegram), scheduler, hub (live connections)
   templates/, static/  Bootstrap UI (no build step)
+  static/vendor/       Bootstrap 5.3.3, Bootstrap Icons 1.11.3, Chart.js 4.4.1 (MIT, committed;
+                       scripts/fetch_vendor.py re-downloads them if needed)
 tools/sim_meter.py     simulated meter
 tests/                 pytest
 ```

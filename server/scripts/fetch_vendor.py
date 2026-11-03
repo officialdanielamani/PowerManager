@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Download front-end libraries into app/static/vendor (Docker build runs this automatically).
+"""Re-download the front-end libraries in app/static/vendor (they are committed to the repo).
 
-Uses npm registry tarballs, so no CDN is needed at runtime and the server works offline.
-Usage: python scripts/fetch_vendor.py [dest_dir]
+Only needed to restore deleted files or after changing a version below.
+Usage: python scripts/fetch_vendor.py [dest_dir] [--force]
 """
 import io
 import os
 import sys
 import tarfile
+import time
 import urllib.request
 
 REGISTRY = "https://registry.npmjs.org"
@@ -28,16 +29,30 @@ FILES = [
 ]
 
 
+def download(url, attempts=5):
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                return resp.read()
+        except OSError as exc:
+            if i == attempts - 1:
+                raise
+            wait = 2 ** (i + 1)
+            print(f"  failed ({exc}); retrying in {wait}s")
+            time.sleep(wait)
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    dest = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "..", "app", "static", "vendor")
+    args = [a for a in sys.argv[1:] if a != "--force"]
+    force = "--force" in sys.argv
+    dest = args[0] if args else os.path.join(here, "..", "app", "static", "vendor")
     for name, version, files in FILES:
-        if all(os.path.exists(os.path.join(dest, d)) for _, d in files):
+        if not force and all(os.path.exists(os.path.join(dest, d)) for _, d in files):
             continue
         url = f"{REGISTRY}/{name}/-/{name}-{version}.tgz"
         print(f"Downloading {name}@{version}")
-        with urllib.request.urlopen(url, timeout=60) as resp:
-            data = resp.read()
+        data = download(url)
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
             for src, dst in files:
                 out = os.path.join(dest, dst)
