@@ -76,7 +76,36 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | auto | started by auto-renew |
 
 ### `event`
-`id, device_fk, seq, ts, type, ch, data (JSON), notified_at`. Includes server-made events: `disconnected`, `reconnected`, `config_applied`, `config_rejected`.
+`id, device_fk, seq, ts, type, ch, data (JSON), notified_at`. Includes server-made events: `disconnected`, `reconnected`, `config_applied`, `config_rejected`, `server_started`.
+
+### `incident` (Historical Events)
+Pairs a **start** event with its **end** event so the UI can show "from → to, how long".
+
+| Column | Notes |
+|--------|-------|
+| id PK | |
+| device_fk, ch | ch null for device-wide incidents |
+| type | see table below |
+| started_at | UTC |
+| ended_at | UTC, **null = ongoing** |
+| duration_s | filled when closed |
+| start_event_fk, end_event_fk | links to `event` |
+| detail (JSON) | e.g. trip current, who reset the trip, close source |
+| time_estimated | bool, if a timestamp came from a device without valid time |
+
+| `type` | Starts on | Ends on | Shown as |
+|--------|-----------|---------|----------|
+| `power` | `ac_lost` | `ac_restored` | Power disconnected → connected again |
+| `offline` | server: WS closed / ping timeout | server: device reconnects (`hello`) | Offline → connected again |
+| `trip` | `overcurrent` (detail: A measured, A limit) | `trip_reset` (detail: by user, server/local) | Power trip → reset |
+| `tamper` | `tamper_open` | `tamper_close` | Tamper triggered → resolved |
+
+Rules:
+- At most **one open incident per (device, ch, type)**. A repeated start event while one is open is ignored; an end event with no open incident is stored as an event only.
+- **Offline times** use the server's clock. If the device sent `server_lost` / `server_back`, those times are stored in `detail` too (useful when the server itself was down).
+- **Server restart:** on startup the server writes `server_started`. For each device that was online when the server stopped, it opens an `offline` incident starting at `last_seen_at` with `detail.cause = "server_down"`, closed when the device reconnects.
+- **Missed end event:** if `hello.state` says the condition is gone (e.g. `tamper:false`) but the incident is still open, it is closed at the `hello` time with `detail.closed_by = "state_sync"`.
+- Incidents are **kept forever** (they are small) and are deleted only with "Remove Device → also delete history".
 
 ### `notification_rule`
 | Column | Notes |

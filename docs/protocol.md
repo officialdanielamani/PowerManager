@@ -163,12 +163,16 @@ Buffered items are sent oldest first, at most **50 items per message**. The devi
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch |
 | `ac_lost` / `ac_restored` | V < 50 V or PZEM not responding for 3 reads / back to normal |
+| `trip_reset` | Over-current latch cleared (`src`: server/local, `by`: username) |
 | `offline_relay_off` | Relay switched off because the server was unreachable longer than the limit |
+| `server_lost` / `server_back` | Device's own view of when it lost / regained the server (`ts` from the device clock). Lets the server see the real offline time even when the server itself was down. |
 | `relay` | Relay changed (`on`, `src`: server/local/rule) |
 
 Events are buffered the same way as telemetry (they share the `seq` counter) so none are lost while offline.
 
 Disconnect / reconnect notifications are produced **by the server** (from the WS connection + ping timeout), not by the device.
+
+**Conditions present at boot:** if the panel is open, AC is missing or the trip latch is set when the device starts, it sends the matching start event (`tamper_open`, `ac_lost`, `overcurrent` with `boot:1`), so no incident is missed across a reboot. The `state` in `hello` (`tamper`, `ac`, `tripped`) is also used by the server to close incidents whose end event was lost.
 
 ### 2.6 State
 

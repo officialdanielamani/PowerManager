@@ -47,7 +47,21 @@ Shows a **Synced / Pending sync** badge.
 - Admin-only buttons: Relay ON/OFF, [Renew Now], [Reset Trip], [Send Data Now], [Configure].
 - History chart (V / A / W / kWh) with range: 1 h, 1 day, 1 week, 1 month, all time, custom; stats: min / max / avg.
 - [Export CSV] exports exactly the range currently shown (admin and viewers).
-- Recent events list (sessions, trips, tamper, AC loss, connect/disconnect).
+- **Historical Events** (from the `incident` table, newest first):
+
+  | Type | Started | Ended | Duration | Details |
+  |------|---------|-------|----------|---------|
+  | Power disconnected | 2026-11-03 14:02:11 | 2026-11-03 14:20:45 | 18m 34s | – |
+  | Offline | 2026-11-02 23:10:05 | 2026-11-02 23:12:40 | 2m 35s | – |
+  | Power trip | 2026-11-01 19:44:02 | 2026-11-01 20:01:10 | 17m 08s | 10.6 A > 10.2 A · reset by admin (server) |
+  | Tamper | 2026-10-30 09:15:00 | **Ongoing** | 3d 4h | – |
+
+  - Times are in the display timezone; ongoing incidents are highlighted and their duration keeps counting.
+  - Filter by type (Power / Offline / Trip / Tamper, multi-select) and date range; paged, 25 per page.
+  - [Export CSV] exports the filtered list (UTC + local time, duration in seconds).
+  - `~` before a time marks an estimated timestamp.
+- Dashboard meter cards show a small badge for each **ongoing** incident (⚡ no power, ⛔ trip, 🔓 tamper, offline dot).
+- Session history (start, end, kWh used, end reason) as a second tab next to Historical Events.
 
 ### Settings
 | Tab | Content |
