@@ -24,6 +24,14 @@ class User(UserMixin, db.Model):
     is_enabled = db.Column(db.Boolean, nullable=False, default=True)
     # Rotated on password change -> logs out every other browser session.
     session_token = db.Column(db.String(64), nullable=False, default=lambda: secrets.token_hex(16))
+    # Viewer only: see every meter instead of only the linked ones.
+    view_all = db.Column(db.Boolean, nullable=False, default=False)
+    failed_logins = db.Column(db.Integer, nullable=False, default=0)
+    locked_until = db.Column(db.Integer)  # epoch; -1 = locked until an admin unlocks
+    telegram_chat_id = db.Column(db.String(32), nullable=False, default="")
+
+    meters = db.relationship("Device", secondary="meter_viewer", lazy="dynamic",
+                             backref=db.backref("viewers", lazy="dynamic"))
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -196,8 +204,17 @@ class Incident(db.Model):
     time_estimated = db.Column(db.Boolean, nullable=False, default=False)
 
 
+class MeterViewer(db.Model):
+    """Which view-only users may see which meter (many-to-many). Server-only: never sent to meters."""
+    __tablename__ = "meter_viewer"
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id", ondelete="CASCADE"), primary_key=True)
+    user_fk = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
+
+
 class NotificationRule(db.Model):
+    """Per meter AND per user: each account picks its own notifications."""
     device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), primary_key=True)
+    user_fk = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
     type = db.Column(db.String(20), primary_key=True)
     enabled = db.Column(db.Boolean, nullable=False, default=False)
     param = db.Column(db.Integer)
@@ -206,6 +223,7 @@ class NotificationRule(db.Model):
 class Notification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), index=True)
+    user_fk = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), index=True)
     type = db.Column(db.String(20), nullable=False)
     ts = db.Column(db.Integer, nullable=False, default=now)
     message = db.Column(db.String(300), nullable=False)

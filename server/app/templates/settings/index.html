@@ -32,6 +32,17 @@
   </div>
   {% endfor %}
   <div class="col-12 col-lg-6">
+    <form class="card" method="post" action="{{ url_for('settings.account_telegram') }}">{{ csrf() }}
+      <div class="card-header fw-semibold">My Telegram</div>
+      <div class="card-body">
+        <label class="form-label">Telegram chat ID</label>
+        <input class="form-control" name="telegram_chat_id" value="{{ current_user.telegram_chat_id }}" placeholder="e.g. 123456789" maxlength="20">
+        <div class="form-text">{% if s.get('telegram_enabled') == '1' %}Your notifications are also sent here. Empty = in-app only.{% else %}Telegram is not enabled by the admin yet.{% endif %}</div>
+      </div>
+      <div class="card-footer d-flex"><button type="button" class="btn btn-outline-secondary btn-sm" id="tgTest">Send test</button><button class="btn btn-primary btn-sm ms-auto">Save</button></div>
+    </form>
+  </div>
+  <div class="col-12 col-lg-6">
     <form class="card" method="post" action="{{ url_for('settings.account') }}">{{ csrf() }}<input type="hidden" name="what" value="password">
       <div class="card-header fw-semibold">Change password</div>
       <div class="card-body row g-2">
@@ -74,73 +85,128 @@
 </form>
 
 {% elif tab == 'users' %}
+{% set viewers = users|selectattr('role', 'equalto', 'viewer')|list %}
 <div class="row g-3">
-  <div class="col-12 col-xl-7">
-    <div class="card"><div class="card-header fw-semibold">Accounts</div>
+  <div class="col-12 col-xxl-8">
+    <form class="card" method="post" action="{{ url_for('settings.users') }}" id="bulkForm">{{ csrf() }}
+      <input type="hidden" name="what" value="bulk"><input type="hidden" name="scope" id="bulkScope" value="selected">
+      <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+        <span class="fw-semibold me-auto">View-only accounts ({{ viewers|length }})</span>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" name="action" value="enable" onclick="bulk('selected')">Enable selected</button>
+          <button class="btn btn-outline-secondary" name="action" value="disable" onclick="bulk('selected')">Disable selected</button>
+          <button class="btn btn-outline-secondary" name="action" value="unlock" onclick="bulk('selected')">Unlock selected</button>
+        </div>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-success" name="action" value="enable" onclick="return bulk('all', 'Enable ALL view-only accounts?')">Enable all</button>
+          <button class="btn btn-outline-danger" name="action" value="disable" onclick="return bulk('all', 'Disable ALL view-only accounts? They are logged out immediately.')">Disable all</button>
+        </div>
+      </div>
       <div class="table-responsive"><table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Username</th><th>Role</th><th>Email</th><th>Last login</th><th></th></tr></thead>
+        <thead><tr><th style="width:1%"><input class="form-check-input" type="checkbox" onclick="document.querySelectorAll('[name=user_ids]').forEach(function(c){c.checked=this.checked}.bind(this))"></th>
+          <th>Username</th><th>Status</th><th>Meters</th><th>Last login</th><th></th></tr></thead>
         <tbody>
-        {% for u in users %}
+        {% for u in viewers %}
+          {% set locked = u.locked_until and (u.locked_until == -1 or u.locked_until > now) %}
           <tr class="{{ 'text-body-tertiary' if not u.is_enabled }}">
-            <td>{{ u.username }}</td>
-            <td><span class="badge text-bg-{{ 'primary' if u.is_admin else 'secondary' }}">{{ u.role }}</span>{% if not u.is_enabled %} <span class="badge text-bg-dark">disabled</span>{% endif %}</td>
-            <td class="small">{{ u.email or '–' }}</td>
+            <td><input class="form-check-input" type="checkbox" name="user_ids" value="{{ u.id }}"></td>
+            <td>{{ u.username }}<div class="small text-body-secondary">{{ u.email or '' }}</div></td>
+            <td>{% if not u.is_enabled %}<span class="badge text-bg-dark">disabled</span>{% elif locked %}<span class="badge text-bg-danger">locked</span>{% else %}<span class="badge text-bg-success">active</span>{% endif %}
+              {% if u.failed_logins and not locked %}<span class="small text-body-secondary">{{ u.failed_logins }} failed</span>{% endif %}</td>
+            <td class="small">{% if u.view_all %}<span class="badge text-bg-info">all meters</span>{% else %}{{ user_meters.get(u.id, [])|join(', ') or '–' }}{% endif %}</td>
             <td class="small">{{ u.last_login_at|dt }}</td>
-            <td class="text-end text-nowrap">
-              {% if not u.is_admin %}
-              <form method="post" action="{{ url_for('settings.users') }}" class="d-inline">{{ csrf() }}<input type="hidden" name="what" value="toggle"><input type="hidden" name="user_id" value="{{ u.id }}">
-                <button class="btn btn-sm btn-outline-secondary">{{ 'Disable' if u.is_enabled else 'Enable' }}</button></form>
-              <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#pw{{ u.id }}">Password</button>
-              <form method="post" action="{{ url_for('settings.users') }}" class="d-inline" onsubmit="return confirm('Delete viewer {{ u.username }}?')">{{ csrf() }}<input type="hidden" name="what" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}">
-                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button></form>
-              {% endif %}
-            </td>
+            <td class="text-end text-nowrap"><button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#u{{ u.id }}">Manage</button></td>
           </tr>
-          {% if not u.is_admin %}
-          <tr class="collapse" id="pw{{ u.id }}"><td colspan="5">
-            <form method="post" action="{{ url_for('settings.users') }}" class="row g-2">{{ csrf() }}<input type="hidden" name="what" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}">
-              {{ pw_fields('New password for ' ~ u.username) }}<div class="col-12 text-end"><button class="btn btn-sm btn-primary">Set password</button></div>
-            </form></td></tr>
-          {% endif %}
+          <tr class="collapse" id="u{{ u.id }}"><td colspan="6" class="bg-body-tertiary">
+            <div class="row g-3 p-2">
+              <div class="col-lg-6">
+                <div class="fw-semibold small mb-1">Meters this user can see</div>
+                <div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="view_all" id="va{{ u.id }}" {{ 'checked' if u.view_all }}>
+                  <label class="form-check-label" for="va{{ u.id }}">View all meters</label></div>
+                {% for m in meters %}
+                <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="meters" value="{{ m.id }}" id="m{{ u.id }}_{{ m.id }}" {{ 'checked' if (u.id, m.id) in links }}>
+                  <label class="form-check-label small" for="m{{ u.id }}_{{ m.id }}">{{ m.name }}</label></div>
+                {% else %}<div class="small text-body-secondary">No meters yet.</div>{% endfor %}
+                <div class="mt-2"><button class="btn btn-sm btn-primary" form="acc{{ u.id }}">Save access</button></div>
+              </div>
+              <div class="col-lg-6">
+                <div class="fw-semibold small mb-1">Reset password</div>
+                <div class="row g-2">
+                  <div class="col-6"><input class="form-control form-control-sm" type="password" form="pw{{ u.id }}" name="password" placeholder="New password" required minlength="10" autocomplete="new-password"></div>
+                  <div class="col-6"><input class="form-control form-control-sm" type="password" form="pw{{ u.id }}" name="confirm" placeholder="Confirm" required autocomplete="new-password"></div>
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                  <button class="btn btn-sm btn-primary" form="pw{{ u.id }}">Set password</button>
+                  {% if locked or u.failed_logins %}<button class="btn btn-sm btn-outline-secondary" form="un{{ u.id }}">Unlock</button>{% endif %}
+                  <button class="btn btn-sm btn-outline-secondary" form="tg{{ u.id }}">{{ 'Disable' if u.is_enabled else 'Enable' }}</button>
+                  <button class="btn btn-sm btn-outline-danger ms-auto" form="del{{ u.id }}"><i class="bi bi-trash"></i> Delete account</button>
+                </div>
+              </div>
+            </div>
+          </td></tr>
+        {% else %}
+          <tr><td colspan="6" class="text-body-secondary">No view-only accounts yet.</td></tr>
         {% endfor %}
         </tbody>
       </table></div>
-    </div>
+    </form>
+    {# Per-user forms live outside the bulk form (forms cannot be nested); inputs use form="…". #}
+    {% for u in viewers %}
+    <form id="acc{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="access"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
+    <form id="pw{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
+    <form id="un{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="unlock"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
+    <form id="tg{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="toggle"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
+    <form id="del{{ u.id }}" method="post" action="{{ url_for('settings.users') }}" onsubmit="return confirm('Delete view-only account {{ u.username }}? This cannot be undone.')">{{ csrf() }}<input type="hidden" name="what" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
+    {% endfor %}
   </div>
-  <div class="col-12 col-xl-5">
-    <form class="card" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="add">
-      <div class="card-header fw-semibold">Add viewer (view only)</div>
+  <div class="col-12 col-xxl-4">
+    <form class="card mb-3" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="add">
+      <div class="card-header fw-semibold">Add view-only account</div>
       <div class="card-body row g-2">
         <div class="col-12"><label class="form-label">Username</label><input class="form-control" name="username" required maxlength="32"></div>
         {{ pw_fields('Password') }}
         <div class="col-md-6"><label class="form-label">Email <span class="text-body-tertiary">(optional)</span></label><input class="form-control" type="email" name="email" maxlength="254"></div>
         <div class="col-md-6"><label class="form-label">Phone <span class="text-body-tertiary">(optional)</span></label><input class="form-control" name="phone" maxlength="20" placeholder="+60…"></div>
-        <div class="col-12 form-text">Viewers can see meters, history and events and export CSV. They cannot change anything.</div>
+        <div class="col-12"><label class="form-label">Meters</label>
+          <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="view_all" id="newVa"><label class="form-check-label" for="newVa">View all meters</label></div>
+          {% for m in meters %}<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" name="meters" value="{{ m.id }}" id="nm{{ m.id }}"><label class="form-check-label small" for="nm{{ m.id }}">{{ m.name }}</label></div>{% endfor %}
+        </div>
+        <div class="col-12 form-text">View-only users see only their meters (info, history, events, CSV) and choose their own notifications. They cannot change anything.</div>
       </div>
-      <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Add viewer</button></div>
+      <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Add account</button></div>
+    </form>
+    <form class="card" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="login_policy">
+      <div class="card-header fw-semibold">Login protection (view-only accounts)</div>
+      <div class="card-body row g-2">
+        <div class="col-6"><label class="form-label">Max failed logins</label><input class="form-control" type="number" min="0" max="100" name="login_max_attempts" value="{{ s.get('login_max_attempts') }}"><div class="form-text">0 = no lock</div></div>
+        <div class="col-6"><label class="form-label">Lock for</label><div class="input-group"><input class="form-control" type="number" min="0" max="10080" name="login_lock_minutes" value="{{ s.get('login_lock_minutes') }}"><span class="input-group-text">min</span></div><div class="form-text">0 = until you unlock</div></div>
+        <div class="col-12 form-text">The admin account is never locked (so nobody can lock you out), but every login form is limited to 5 tries per minute per IP address.</div>
+      </div>
+      <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Save</button></div>
     </form>
   </div>
 </div>
 
 {% elif tab == 'notifications' %}
 <form class="card" method="post" action="{{ url_for('settings.notifications') }}" style="max-width:720px">{{ csrf() }}
-  <div class="card-header fw-semibold">Channels</div>
+  <div class="card-header fw-semibold">Telegram</div>
   <div class="card-body">
-    <p class="small text-body-secondary">In-app notifications (bell in the menu) are always on. Which events notify is set per meter in <em>Configure → Set Notification</em>.</p>
+    <p class="small text-body-secondary">In-app notifications are always on. Each user chooses their own notifications per meter (meter → <em>Notification Options</em>) and adds their own Telegram chat ID in <em>Settings → Account</em>. Here you set the one bot that sends them.</p>
     <div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" name="telegram_enabled" id="tg" {{ 'checked' if s.get('telegram_enabled') == '1' }}>
-      <label class="form-check-label" for="tg">Also send to Telegram <span class="badge text-bg-warning">beta</span></label></div>
-    <div class="row g-2">
-      <div class="col-md-7"><label class="form-label">Bot token</label><input class="form-control" name="telegram_bot_token" value="{{ s.get('telegram_bot_token') }}" autocomplete="off" placeholder="123456:ABC…"></div>
-      <div class="col-md-5"><label class="form-label">Chat ID</label><input class="form-control" name="telegram_chat_id" value="{{ s.get('telegram_chat_id') }}" placeholder="e.g. 123456789"></div>
-      <div class="col-12 form-text">Create a bot with @BotFather, send it a message, then get your chat ID from <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code>.</div>
-    </div>
+      <label class="form-check-label" for="tg">Send notifications to Telegram</label></div>
+    <label class="form-label">Bot token</label><input class="form-control" name="telegram_bot_token" value="{{ s.get('telegram_bot_token') }}" autocomplete="off" placeholder="123456:ABC…">
+    <div class="form-text">Create a bot with @BotFather. Each user then sends the bot a message and gets their chat ID from <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code>.</div>
   </div>
-  <div class="card-footer d-flex"><button type="button" class="btn btn-outline-secondary btn-sm" id="tgTest">Send test (saved settings)</button><button class="btn btn-primary btn-sm ms-auto">Save</button></div>
+  <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Save</button></div>
 </form>
 {% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
+function bulk(scope, question) {
+  document.getElementById('bulkScope').value = scope;
+  return question ? confirm(question) : true;
+}
 var t = document.getElementById('tgTest');
 if (t) t.addEventListener('click', function () {
   PM.post("{{ url_for('settings.notifications_test') }}", {}).then(function (r) { PM.toast(r.ok ? 'Test message sent' : ('Failed: ' + r.error), r.ok ? 'success' : 'danger'); });

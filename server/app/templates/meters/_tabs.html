@@ -1,0 +1,10 @@
+{# Three pages per meter: Info (everyone), Notifications (own options), Configuration (admin). #}
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item"><a class="nav-link {{ 'active' if active == 'info' }}" href="{{ url_for('meters.info', pk=d.id) }}"><i class="bi bi-speedometer2 me-1"></i>Info</a></li>
+  {% if not d.removed_at %}
+  <li class="nav-item"><a class="nav-link {{ 'active' if active == 'notifications' }}" href="{{ url_for('meters.notifications', pk=d.id) }}"><i class="bi bi-bell me-1"></i>Notification Options</a></li>
+  {% if current_user.is_admin %}
+  <li class="nav-item"><a class="nav-link {{ 'active' if active == 'configure' }}" href="{{ url_for('meters.configure', pk=d.id) }}"><i class="bi bi-sliders me-1"></i>Configuration</a></li>
+  {% endif %}
+  {% endif %}
+</ul>

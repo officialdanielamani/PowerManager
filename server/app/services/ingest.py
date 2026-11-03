@@ -11,6 +11,10 @@ log = logging.getLogger(__name__)
 
 MAX_FUTURE_S = 300
 FIELDS = ("v", "a", "w", "pf", "hz", "e")
+# Physically possible ranges; anything outside is stored as "no value" (bad sensor read or
+# a misbehaving client). Generous on purpose.
+LIMITS = {"v": (0, 400), "a": (0, 200), "w": (0, 80000), "pf": (0, 1.0001), "hz": (0, 70),
+          "e": (0, 10_000_000)}
 
 
 # ---------------------------------------------------------------- helpers
@@ -165,7 +169,9 @@ def h_tel(conn, device, msg):
                 continue
             row = {"device_fk": device.id, "gen": device.pair_gen, "ch": idx, "seq": seq, "ts": ts, "time_estimated": est}
             for f in FIELDS:
-                row[f] = _f(ch.get(f))
+                val = _f(ch.get(f))
+                lo, hi = LIMITS[f]
+                row[f] = val if val is not None and lo <= val <= hi else None
             rows.append(row)
         if rows:
             db.session.execute(sqlite_insert(Measurement).values(rows).on_conflict_do_nothing())

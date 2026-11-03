@@ -12,20 +12,21 @@ _scheduler = None
 
 
 def check_disconnected():
-    """'Device disconnected for X minutes' notifications."""
+    """'Device disconnected for X minutes' notifications (X is chosen per user)."""
     for inc in Incident.query.filter_by(type="offline", ended_at=None).all():
-        if (inc.detail or {}).get("notified"):
+        device = db.session.get(Device, inc.device_fk)
+        if device is None or device.removed_at:
             continue
-        r = notify.rule(inc.device_fk, "disconnected")
-        if r is None or not r.enabled:
-            continue
-        minutes = r.param or devconfig.DISCONNECTED_DEFAULT_MIN
-        if now() - inc.started_at >= minutes * 60:
-            device = db.session.get(Device, inc.device_fk)
-            if device is None or device.removed_at:
+        done = set((inc.detail or {}).get("notified_users", []))
+        newly = []
+        for user, rule in notify.subscribers(device, "disconnected"):
+            minutes = rule.param or devconfig.DISCONNECTED_DEFAULT_MIN
+            if user.id in done or now() - inc.started_at < minutes * 60:
                 continue
-            notify.notify(device, "disconnected", f"Disconnected for more than {minutes} min")
-            inc.detail = {**(inc.detail or {}), "notified": True}
+            notify.notify(device, "disconnected", f"Disconnected for more than {minutes} min", only_user=user)
+            newly.append(user.id)
+        if newly:
+            inc.detail = {**(inc.detail or {}), "notified_users": sorted(done | set(newly))}
     db.session.commit()
 
 

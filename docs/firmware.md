@@ -65,7 +65,8 @@ The page is one embedded HTML file (`src/webui.h`): no CDN, no extra files, no f
 Date/time · Device ID / name / info · V, A, W, PF, Hz · session kWh used / max · next reset · auto renew · server connection status · last sync.
 
 - **Relay toggle**: ON is disabled in the UI **and refused in the handler** when quota is exceeded, the session expired, or the over-current trip is latched.
-- [Send Data Now] · [Reset Trip] (when tripped) · Wi-Fi settings · Pairing status (re-pair only shown when not paired) · Change local admin password · [Factory Reset].
+- [Send Data Now] · [Reset Trip] (when tripped) · Wi-Fi settings · Pairing status (re-pair only shown when not paired) · Change local admin password · [Factory Reset] · **Check OTA Update** (greyed out; future).
+- The meter never knows which server users can see it: user links exist only on the server.
 - Removing the device is done from the **server** ([Remove Device]); the meter then factory-resets itself (see protocol §2 `remove` / `4403`).
 
 ## 5. Tasks (FreeRTOS)

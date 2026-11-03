@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 from simple_websocket import ConnectionClosed
 
 from ..extensions import db, limiter, sock
-from ..models import Channel, Device, NotificationRule, PairingCode, now
+from ..models import Channel, Device, PairingCode, now
 from ..services import devconfig, hub, ingest
 
 bp = Blueprint("device_api", __name__)
@@ -25,7 +25,7 @@ def normalize_code(code):
 
 
 def ensure_device_defaults(device, reset=False):
-    """Channels, config and notification rules for a (re)paired device."""
+    """Channels and config for a (re)paired device. Notification options are per user."""
     n = devconfig.channel_count(device)
     existing = {c.idx for c in device.channels}
     for i in range(n):
@@ -33,14 +33,6 @@ def ensure_device_defaults(device, reset=False):
             device.channels.append(Channel(idx=i, label=f"CH{i + 1}"))
     if reset or not device.cfg or len(device.cfg.get("ch", [])) != n:
         device.cfg = devconfig.default_cfg(n)
-    for ntype, _label in devconfig.NOTIFY_TYPES:
-        rule = db.session.get(NotificationRule, (device.id, ntype))
-        if rule is None:
-            rule = NotificationRule(device_fk=device.id, type=ntype)
-            db.session.add(rule)
-        if reset or rule.enabled is None:
-            rule.enabled = False
-            rule.param = devconfig.DISCONNECTED_DEFAULT_MIN if ntype == "disconnected" else None
 
 
 @bp.post("/api/v1/pair")
@@ -127,10 +119,14 @@ def device_ws(ws):
             pass
         ws.close(reason=close_code, message="removed" if close_code == 4403 else "unauthorized")
         return
-    conn = hub.Connection(device.id, ws)
+    # A meter stays connected for hours. Never keep a database connection checked out while
+    # waiting for its next message: load the device per message and release the session after.
+    device_pk, device_id = device.id, device.device_id
+    conn = hub.Connection(device_pk, ws)
     hub.register(conn)
     ingest.on_connect(device, conn)
-    log.info("Device %s connected", device.device_id)
+    db.session.remove()
+    log.info("Device %s connected", device_id)
     last_rx = time.monotonic()
     reason = "connection_lost"
     try:
@@ -151,13 +147,17 @@ def device_ws(ws):
             if not isinstance(msg, dict):
                 continue
             try:
+                device = db.session.get(Device, device_pk)
+                if device is None or device.removed_at is not None:
+                    conn.send({"t": "bye", "code": 4403})
+                    conn.close(4403)
+                    continue
                 ingest.handle(conn, device, msg)
             except Exception:
-                log.exception("Error handling %s from %s", msg.get("t"), device.device_id)
+                log.exception("Error handling %s from %s", msg.get("t"), device_id)
                 db.session.rollback()
-            if device.removed_at is not None:
-                conn.send({"t": "bye", "code": 4403})
-                conn.close(4403)
+            finally:
+                db.session.remove()  # give the connection back to the pool
         while not conn.outbox.empty():  # flush (e.g. the `remove` command)
             ws.send(conn.outbox.get_nowait())
     except ConnectionClosed:
@@ -168,13 +168,15 @@ def device_ws(ws):
         # "offline (server down)" incident from last_seen (ingest.mark_all_offline_on_startup).
         if hub.unregister(conn) and not replaced and not hub.SHUTDOWN.is_set():
             try:
-                db.session.rollback()
-                fresh = db.session.get(Device, device.id)
+                fresh = db.session.get(Device, device_pk)
                 if fresh is not None:
                     ingest.on_disconnect(fresh, reason)
             except Exception:
-                log.exception("Error recording disconnect of %s", device.device_id)
-        log.info("Device %s disconnected (%s)", device.device_id, reason)
+                log.exception("Error recording disconnect of %s", device_id)
+                db.session.rollback()
+            finally:
+                db.session.remove()
+        log.info("Device %s disconnected (%s)", device_id, reason)
         if conn.close_code and conn.close_code != 1000:
             try:
                 ws.close(reason=conn.close_code)

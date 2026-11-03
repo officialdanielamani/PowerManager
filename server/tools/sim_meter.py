@@ -197,7 +197,10 @@ class Meter:
                                    kwh=round(self.session_kwh(), 4))
             if time.time() - self.last_report >= self.cfg().get("report_s", 60) * self.args.speed:
                 self.report()
-            cur = json.dumps(self.state_msg(), sort_keys=True)
+            # like the firmware: send "state" only on real changes, not on every kWh tick
+            st = self.state_msg()
+            st["sess"] = {k: v for k, v in st["sess"].items() if k != "kwh"}
+            cur = json.dumps(st, sort_keys=True)
             if cur != prev_state:
                 prev_state = cur
                 self.send({"t": "state", **self.state_msg()})

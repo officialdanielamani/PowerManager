@@ -4,13 +4,16 @@
 {% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
 {% macro chk(name, default) -%}{{ 'checked' if (f.get(name) == 'on' if f else default) }}{%- endmacro %}
 {% block content %}
+<h1 class="h4 mb-1">{{ d.name }}</h1>
+<div class="text-body-secondary small mb-3">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
+{% set active = 'configure' %}{% include "meters/_tabs.html" %}
 <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
-  <h1 class="h4 mb-0">Configure Meter Device</h1>
+  <h2 class="h5 mb-0">Configuration</h2>
   {% if d.synced %}<span class="badge text-bg-success">Synced</span>{% else %}<span class="badge text-bg-info">Pending sync</span>{% endif %}
   <span class="badge {{ 'text-bg-success' if online else 'text-bg-secondary' }}">{{ 'Online' if online else 'Offline' }}</span>
   <a href="{{ url_for('meters.info', pk=d.id) }}" class="btn btn-sm btn-outline-secondary ms-auto">Close</a>
 </div>
-{% if new %}<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Meter <strong>{{ d.device_id }}</strong> paired. Give it a name and set its limits.</div>{% endif %}
+{% if new %}<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Meter <strong>{{ d.device_id }}</strong> paired. Give it a name, set its limits and link it to users. Each user (you too) picks their notifications in <em>Notification Options</em>.</div>{% endif %}
 {% if d.cfg_error %}<div class="alert alert-danger">The device rejected the last config: <code>{{ d.cfg_error }}</code></div>{% endif %}
 {% for e in errors %}<div class="alert alert-danger py-2">{{ e }}</div>{% endfor %}
 
@@ -30,7 +33,7 @@
         <div class="form-text">10 s – 1 h. Limits are checked on the meter every second regardless.</div></div>
       <div class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
-        <button type="button" class="btn btn-outline-secondary" data-action="set_default" data-confirm="Reset limits, interval and notifications to defaults? Name, info and history are kept."><i class="bi bi-arrow-counterclockwise me-1"></i>Set to Default</button>
+        <button type="button" class="btn btn-outline-secondary" data-action="set_default" data-confirm="Reset limits and send interval to defaults? Name, info, linked users, notification options and history are kept."><i class="bi bi-arrow-counterclockwise me-1"></i>Set to Default</button>
         <button type="button" class="btn btn-outline-danger ms-auto" data-bs-toggle="modal" data-bs-target="#removeModal"><i class="bi bi-trash me-1"></i>Remove Device</button>
       </div>
     </div></div>
@@ -76,18 +79,16 @@
   </div>
 
   <div class="col-12">
-    <div class="card"><div class="card-header fw-semibold">Set Notification</div><div class="card-body">
-      <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-2">
-      {% for r in rules %}
-        <div class="col d-flex align-items-center gap-2">
-          <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="notify_{{ r.type }}" id="n_{{ r.type }}" {{ chk('notify_' ~ r.type, r.enabled) }}>
-            <label class="form-check-label" for="n_{{ r.type }}">{{ r.label }}</label></div>
-          {% if r.type == 'disconnected' %}
-          <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="1" max="1440" name="notify_disconnected_min" value="{{ val('notify_disconnected_min', r.param) }}"><span class="input-group-text">min</span></div>
-          {% endif %}
+    <div class="card"><div class="card-header fw-semibold">Link this meter to users</div><div class="card-body">
+      <p class="small text-body-secondary mb-2">View-only users only see meters linked to them. This list stays on the server; it is never sent to the meter.</p>
+      {% for v in viewers %}
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" name="viewers" value="{{ v.id }}" id="v{{ v.id }}" {{ 'checked' if v.id in linked or v.view_all }} {{ 'disabled' if v.view_all }}>
+          <label class="form-check-label" for="v{{ v.id }}">{{ v.username }}{% if v.view_all %} <span class="badge text-bg-light">sees all meters</span>{% endif %}{% if not v.is_enabled %} <span class="badge text-bg-dark">disabled</span>{% endif %}</label>
         </div>
+      {% else %}
+        <div class="small text-body-secondary">No view-only users yet. Create them in <a href="{{ url_for('settings.index', tab='users') }}">Settings → Users</a>.</div>
       {% endfor %}
-      </div>
     </div></div>
   </div>
 </div>

@@ -92,6 +92,9 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <p><button onclick="chpw()">Change password</button></p></div>
 <div class="card"><h2>Wi-Fi</h2><p class="mut">Connected to <b id="curSsid"></b>. Changing it restarts the meter.</p>
 <button class="sec" onclick="show('wifi');scan(1)">Change Wi-Fi</button></div>
+<div class="card"><h2>Firmware</h2><p class="mut">Installed: <b id="fwVer"></b></p>
+<button class="sec" disabled title="Coming in a later version">Check OTA Update</button>
+<p class="mut">Over-the-air updates from the server are coming in a later version.</p></div>
 <div class="card"><h2>Maintenance</h2><div class="row">
 <button class="sec" onclick="if(confirm('Restart the meter?'))post('/api/reboot').then(r=>note(r.message,'inf'))">Restart</button>
 <button class="bad" onclick="if(confirm('Erase admin, Wi-Fi, pairing and buffered data? The meter returns to first setup.'))post('/api/factory_reset').then(r=>note(r.message,'inf'))">Factory reset</button></div>
@@ -107,7 +110,7 @@ function post(u,b){return api(u,{method:'POST',body:JSON.stringify(b||{})})}
 function note(t,k){$('msg').innerHTML=t?'<div class="msg '+(k||'err')+'">'+esc(t)+'</div>':''}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function show(v){['setup','wifi','login','dash','settings'].forEach(function(n){$('v-'+n).classList.toggle('hide',n!=v)});
- var inside=v=='dash'||v=='settings';$('btnSet').classList.toggle('hide',!inside);$('btnOut').classList.toggle('hide',!inside);
+ var inside=v=='dash'||v=='settings';$('fwVer').textContent=S.fw||'';$('btnSet').classList.toggle('hide',!inside);$('btnOut').classList.toggle('hide',!inside);
  $('wcancel').classList.toggle('hide',!S.wifi);$('wifiTitle').textContent=S.wifi?'Change Wi-Fi':'2. Connect to Wi-Fi';
  if(v=='wifi')scan(0);note('')}
 function route(){api('/api/status').then(function(s){S=s;$('hid').textContent=s.device_id?s.device_id+' · v'+s.fw:'';

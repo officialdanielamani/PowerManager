@@ -14,10 +14,16 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | email | str(254) | |
 | phone | str(16) | E.164, e.g. `+60123456789` |
 | created_at, last_login_at | int | |
-| is_active | bool | admin can disable viewers |
+| is_enabled | bool | admin can disable viewers (also logs them out) |
+| view_all | bool | viewer sees every meter |
+| failed_logins, locked_until | int | viewer login lockout; `locked_until = -1` = until admin unlocks |
+| telegram_chat_id | str | this user's Telegram chat (bot token is global) |
+
+### `meter_viewer`
+`device_fk, user_fk` (PK together). Which view-only users may see which meter. Server-only; never sent to meters.
 
 ### `setting` (key/value)
-`server_address`, `server_port`, `server_tls`, `timezone` (IANA name, e.g. `Asia/Kuala_Lumpur`), `raw_retention_days` (default 90), `telegram_bot_token`, `telegram_chat_id` (future), `setup_done`.
+`server_address`, `server_port`, `server_tls`, `timezone` (IANA name, e.g. `Asia/Kuala_Lumpur`), `raw_retention_days` (default 90), `telegram_enabled`, `telegram_bot_token`, `login_max_attempts` (5), `login_lock_minutes` (15).
 
 ### `pairing_code`
 | Column | Notes |
@@ -114,14 +120,17 @@ Rules:
 ### `notification_rule`
 | Column | Notes |
 |--------|-------|
-| device_fk, type | PK together |
+| device_fk, user_fk, type | PK together: **per meter and per user** |
 | enabled | bool |
 | param | e.g. minutes for `disconnected` |
 
-Types: `kwh_exceeded`, `session_renew`, `max_amp`, `panel_open`, `no_voltage`, `disconnected` (param = minutes), `reconnected`.
+Types: `kwh_exceeded`, `session_renew`, `max_amp`, `panel_open`, `no_voltage`, `disconnected` (param = minutes), `reconnected`. Rules of a user who loses access to a meter are deleted.
 
 ### `notification`
-`id, event_fk, channel (inapp/telegram), sent_at, status, error`. A **cooldown** per (device, type) — default 10 min — stops repeated events from spamming.
+`id, device_fk, user_fk, type, ts, message, read`. One row per receiving user, so each user has their own list and unread count. A **cooldown** per (device, user, type) — 10 min, only for `max_amp`, `panel_open`, `no_voltage` — stops repeated spam.
+
+### Schema upgrades
+`app/migrations.py` upgrades an existing database in place at start-up (v0.1 → v0.2: new user columns, `notification.user_fk`, per-user `notification_rule`; old rules and Telegram chat ID are given to the admin).
 
 ### `command`
 `id, device_fk, c, params (JSON), created_by, created_at, sent_at, acked_at, ok, err`. Queued while the device is offline (see protocol §2.3).

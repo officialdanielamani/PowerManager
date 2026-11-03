@@ -1,9 +1,9 @@
 from flask import Blueprint, jsonify, render_template, request
-from flask_login import login_required
+from flask_login import current_user, login_required
 
 from ..extensions import db
 from ..models import Device, Incident, Notification
-from ..services import devconfig, hub, settings
+from ..services import access, devconfig, hub, settings
 
 bp = Blueprint("main", __name__)
 
@@ -52,8 +52,8 @@ def meter_summary(d):
 @bp.get("/")
 @login_required
 def dashboard():
-    devices = Device.query.filter(Device.removed_at.is_(None)).order_by(Device.name).all()
-    removed = Device.query.filter(Device.removed_at.isnot(None)).order_by(Device.name).all()
+    devices = access.visible_devices(current_user).all()
+    removed = access.visible_devices(current_user, removed=True).all()
     return render_template("dashboard.html", meters=[meter_summary(d) for d in devices],
                            removed=removed)
 
@@ -61,7 +61,7 @@ def dashboard():
 @bp.get("/api/ui/meters")
 @login_required
 def meters_json():
-    devices = Device.query.filter(Device.removed_at.is_(None)).order_by(Device.name).all()
+    devices = access.visible_devices(current_user).all()
     return jsonify(meters=[meter_summary(d) for d in devices])
 
 
@@ -69,7 +69,7 @@ def meters_json():
 @login_required
 def notifications():
     page = request.args.get("page", 1, type=int)
-    q = Notification.query.order_by(Notification.ts.desc())
+    q = Notification.query.filter_by(user_fk=current_user.id).order_by(Notification.ts.desc())
     pagination = q.paginate(page=page, per_page=50, error_out=False)
     names = {d.id: d.name for d in Device.query.all()}
     return render_template("notifications.html", pagination=pagination, names=names)
@@ -78,6 +78,15 @@ def notifications():
 @bp.post("/notifications/read-all")
 @login_required
 def notifications_read_all():
-    Notification.query.filter_by(read=False).update({"read": True})
+    Notification.query.filter_by(user_fk=current_user.id, read=False).update({"read": True})
     db.session.commit()
     return jsonify(ok=True)
+
+
+@bp.get("/firmware")
+@login_required
+def firmware():
+    if not current_user.is_admin:
+        from flask import abort
+        abort(403)
+    return render_template("firmware.html")

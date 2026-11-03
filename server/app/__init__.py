@@ -10,7 +10,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .config import Config
 from .extensions import csrf, db, limiter, login_manager, sock
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 log = logging.getLogger("powermanager")
 
 
@@ -64,6 +64,8 @@ def create_app(overrides=None):
 
     with app.app_context():
         event.listen(db.engine, "connect", _sqlite_pragmas)
+        from . import migrations
+        migrations.run()  # upgrade tables created by an older version first
         db.create_all()
         _setup_token(app)
         if not app.config["TESTING"]:
@@ -87,7 +89,7 @@ def create_app(overrides=None):
         from .models import Notification
         unread = 0
         if current_user.is_authenticated:
-            unread = Notification.query.filter_by(read=False).count()
+            unread = Notification.query.filter_by(user_fk=current_user.id, read=False).count()
         return {"app_version": __version__, "unread_notifications": unread}
 
     from .services import incidents, settings

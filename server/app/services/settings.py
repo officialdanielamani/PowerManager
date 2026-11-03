@@ -12,6 +12,8 @@ DEFAULTS = {
     "server_tls": "1",
     "timezone": "UTC",
     "raw_retention_days": "90",
+    "login_max_attempts": "5",      # viewer accounts; 0 = no lockout
+    "login_lock_minutes": "15",     # 0 = locked until the admin unlocks
     "telegram_enabled": "0",
     "telegram_bot_token": "",
     "telegram_chat_id": "",

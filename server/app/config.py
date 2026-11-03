@@ -30,7 +30,10 @@ class Config:
         self.INSTANCE_DIR = _instance_dir()
         self.SECRET_KEY = _secret_key(self.INSTANCE_DIR)
         self.SQLALCHEMY_DATABASE_URI = "sqlite:///" + os.path.join(self.INSTANCE_DIR, "powermanager.db")
-        self.SQLALCHEMY_ENGINE_OPTIONS = {"connect_args": {"timeout": 15, "check_same_thread": False}}
+        # Every gunicorn thread may need a connection at the same time (SQLite connections are
+        # cheap); meter WebSocket threads release theirs between messages.
+        self.SQLALCHEMY_ENGINE_OPTIONS = {"connect_args": {"timeout": 15, "check_same_thread": False},
+                                          "pool_size": 20, "max_overflow": 200, "pool_timeout": 10}
         self.SESSION_COOKIE_HTTPONLY = True
         self.SESSION_COOKIE_SAMESITE = "Lax"
         self.REMEMBER_COOKIE_HTTPONLY = True

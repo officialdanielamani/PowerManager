@@ -5,7 +5,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 
 from ..extensions import db, limiter
 from ..models import User, now
-from ..services import validation
+from ..services import settings, validation
 
 bp = Blueprint("auth", __name__)
 
@@ -40,6 +40,32 @@ def setup():
     return render_template("setup.html", errors=errors, form=form, need_token=need_token)
 
 
+def is_locked(user):
+    """Viewer accounts lock after too many failed logins (Settings → Users → Login protection).
+    The admin is never locked (an attacker could otherwise lock you out); the per-IP rate
+    limit still applies to everyone."""
+    if user.role != "viewer" or not user.locked_until:
+        return False
+    if user.locked_until == -1:
+        return True
+    if user.locked_until > now():
+        return True
+    user.locked_until = None
+    user.failed_logins = 0
+    return False
+
+
+def register_failure(user):
+    if user.role != "viewer":
+        return
+    limit = settings.get_int("login_max_attempts", 5)
+    user.failed_logins = (user.failed_logins or 0) + 1
+    if limit and user.failed_logins >= limit:
+        minutes = settings.get_int("login_lock_minutes", 15)
+        user.locked_until = now() + minutes * 60 if minutes else -1
+    db.session.commit()
+
+
 @bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute", methods=["POST"])
 def login():
@@ -49,12 +75,18 @@ def login():
     if request.method == "POST":
         username = (request.form.get("username") or "").strip().lower()
         user = User.query.filter_by(username=username).first()
-        if user is None or not user.check_password(request.form.get("password", "")):
+        if user is not None and is_locked(user):
+            error = "This account is locked after too many failed logins. Ask the admin to unlock it."
+        elif user is None or not user.check_password(request.form.get("password", "")):
             error = "Wrong username or password"
+            if user is not None:
+                register_failure(user)
         elif not user.is_enabled:
             error = "This account is disabled"
         else:
             user.last_login_at = now()
+            user.failed_logins = 0
+            user.locked_until = None
             db.session.commit()
             login_user(user, remember=request.form.get("remember") == "on")
             nxt = request.args.get("next", "")

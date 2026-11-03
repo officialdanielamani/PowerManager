@@ -99,12 +99,27 @@ Reset schedule modes:
 
 | Role | Can |
 |------|-----|
-| Admin (exactly 1) | Everything: pair/configure/remove meters, relay, renew, settings, manage viewers |
-| Viewer (0..n, created by admin) | View dashboard, meter info, history; export CSV; change own password. **Cannot** change anything about meters. |
+| Admin (exactly 1) | Everything: pair/configure/remove meters, relay, renew, settings, manage view-only accounts, link meters to users |
+| View-only (0..n, created by admin) | See **only the meters linked to them** (or all meters if *View all meters* is ticked): info, history, events, CSV export. Choose **their own** notifications per meter. Change own password / email / phone / Telegram chat ID. **Cannot** change anything about meters. |
+
+- A meter can be linked to many view-only users; a user can be linked to many meters. Links are set from the meter (*Configuration → Link this meter to users*) or from the user (*Settings → Users → Manage*).
+- Links live only on the server. They are **never sent to the meter**.
+- Admin can create, delete, enable/disable (selected or all), unlock and reset the password of view-only accounts.
+- Login protection: view-only accounts lock after *N* failed logins (default 5) for *M* minutes (default 15; 0 = until the admin unlocks). The admin account is never locked (otherwise anyone could lock you out); every login form is rate limited to 5 tries per minute per IP.
+
+### Pages per meter
+
+| Page | Who | Content |
+|------|-----|---------|
+| Info | admin + linked viewers | Live data, history, events, sessions, CSV |
+| Notification Options | admin + linked viewers | **Per account**: each user ticks the notifications they want for this meter |
+| Configuration | admin | Name, info, interval, limits, session, linked users, Renew / Set to Default / Remove |
+
+Example: meter "Dryer A" — admin ticks *Panel open* + *No voltage*; the tenant ticks everything. Each gets only what they chose (in-app, plus Telegram if they set a chat ID).
 
 ## 7. Confirmed behaviour
 
-- **B1 "Set to Default"** resets the meter's config (limits, interval, notifications) to factory defaults and pushes it. It does **not** unpair, rename or clear history.
+- **B1 "Set to Default"** resets the meter's config (limits, interval, session) to defaults and pushes it. It does **not** unpair, rename, change linked users, change anyone's notification options or clear history.
 - **B2** After an *offline relay-off*, when the device comes back online the relay goes back to the user's wanted state (if no other rule blocks it).
 - **B3** Viewers may export CSV. The CSV contains **exactly the range shown** in the history view (e.g. view = 1 week → CSV = that week only).
 - **B4 "Remove Device"**:
@@ -112,3 +127,34 @@ Reset schedule modes:
   - Device: **full factory reset** — wipes local admin, Wi-Fi, pairing, config, session and buffer, then reboots into first-boot AP mode (create admin account). The AP password is kept, so the label stays valid.
   - If the device is offline at removal time, the reset happens on its next connect (protocol §2: close code `4403`).
 - **B5** Over-current trip is **latched**: relay OFF + red solid until [Reset Trip] on the server or on the device dashboard.
+
+## 8. Capacity and security
+
+### How many meters?
+
+Each connected meter uses one server thread (default pool: 100) and **no database connection while idle** (one is taken only while a message is handled). Measured with the simulator:
+
+| Test | Result |
+|------|--------|
+| 30 meters, each reporting every 10 s, for 90 s | 30/30 online, server worker **0.7% CPU, 85 MB RAM**, 0 errors |
+| Dashboard / history API while 30 meters are connected | 20–140 ms |
+
+So 30 meters is comfortable; ~90 is possible with the defaults (raise `GUNICORN_THREADS` above that). SQLite handles this write rate easily.
+
+### Can someone send fake readings?
+
+Not without that meter's secret:
+
+- Every meter gets its **own 256-bit secret** at pairing. The server stores only a hash. The WebSocket is refused (`4401`) without the right `device_id` + secret.
+- The secret travels only inside TLS (HTTPS/WSS through Cloudflare). The meter checks the server certificate against built-in root CAs, so it cannot be tricked into talking to a fake server.
+- Pairing codes are single-use, expire after 10 minutes, and pairing is rate limited (10/min per IP).
+- Readings outside physical ranges (e.g. > 400 V, PF > 1) are stored as "no value".
+- A second connection with the same credentials replaces the first; both events are logged.
+
+Remaining risks and how to reduce them:
+
+| Risk | Mitigation |
+|------|------------|
+| Someone with **physical access** reads the secret from the meter's flash | Panel tamper switch + event; *Remove Device* revokes that one meter. Future: enable ESP32 flash + NVS encryption. |
+| Plain `ws://` on an untrusted LAN exposes the secret | Use TLS (Cloudflare) — on the LAN only if you trust it |
+| Bot / WAF challenges blocking meters | Bypass `/ws/device` and `/api/v1/pair` in Cloudflare Access/WAF only |

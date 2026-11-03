@@ -1,8 +1,10 @@
+import secrets
+
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user
 
 from ..extensions import db
-from ..models import Device, User
+from ..models import Device, MeterViewer, NotificationRule, User, now
 from ..services import devconfig, hub, notify, settings, validation
 from .decorators import admin_required
 
@@ -18,8 +20,16 @@ def index():
     if tab not in TABS or (tab != "account" and not current_user.is_admin):
         tab = "account"
     host, port, tls, configured = settings.public_server(request)
+    names = {d.id: d.name for d in Device.query.filter(Device.removed_at.is_(None))}
+    user_meters = {}
+    for link in MeterViewer.query.all():
+        if link.device_fk in names:
+            user_meters.setdefault(link.user_fk, []).append(names[link.device_fk])
     return render_template(
         "settings/index.html", tab=tab, users=User.query.order_by(User.role, User.username).all(),
+        meters=Device.query.filter(Device.removed_at.is_(None)).order_by(Device.name).all(),
+        links={(m.user_fk, m.device_fk) for m in MeterViewer.query.all()}, now=now(),
+        user_meters={k: sorted(v) for k, v in user_meters.items()},
         zones=settings.zone_names(), s=settings, detected=(host, port, tls), configured=configured)
 
 
@@ -33,6 +43,17 @@ def _errors(tab, errs):
     for e in errs:
         flash(e, "danger")
     return redirect(url_for("settings.index", tab=tab))
+
+
+@bp.post("/account/telegram")
+@login_required
+def account_telegram():
+    chat = (request.form.get("telegram_chat_id") or "").strip()
+    if chat and not (chat.lstrip("-").isdigit() and len(chat) <= 20):
+        return _errors("account", ["Telegram chat ID is a number, e.g. 123456789"])
+    current_user.telegram_chat_id = chat
+    db.session.commit()
+    return _back("account", "Telegram chat ID saved.")
 
 
 @bp.post("/account")
@@ -112,6 +133,23 @@ def _repush_daily_configs():
             hub.send(d.id, {"t": "cfg", **devconfig.to_device(d.cfg, d.cfg_ver_wanted)})
 
 
+def _set_access(user, view_all, meter_ids):
+    user.view_all = view_all
+    MeterViewer.query.filter_by(user_fk=user.id).delete()
+    valid = {d.id for d in Device.query.all()}
+    for mid in meter_ids:
+        if mid in valid:
+            db.session.add(MeterViewer(device_fk=mid, user_fk=user.id))
+    if not view_all:  # drop notification options for meters the user can no longer see
+        (NotificationRule.query.filter(NotificationRule.user_fk == user.id,
+                                       NotificationRule.device_fk.notin_(meter_ids or [-1]))
+         .delete(synchronize_session=False))
+
+
+def _ids(name):
+    return {int(x) for x in request.form.getlist(name) if x.isdigit()}
+
+
 @bp.post("/users")
 @admin_required
 def users():
@@ -134,21 +172,62 @@ def users():
         u = User(username=username, role="viewer", email=email, phone=phone)
         u.set_password(f["password"])
         db.session.add(u)
+        db.session.flush()
+        _set_access(u, f.get("view_all") == "on", _ids("meters"))
         db.session.commit()
         return _back("users", f"Viewer '{username}' created.")
+    if what == "bulk":
+        action = f.get("action")
+        q = User.query.filter_by(role="viewer")
+        if f.get("scope") != "all":
+            q = q.filter(User.id.in_(_ids("user_ids") or {-1}))
+        n = 0
+        for u in q.all():
+            if action == "disable":
+                u.is_enabled = False
+                u.session_token = secrets.token_hex(16)  # log them out now
+            elif action == "enable":
+                u.is_enabled = True
+            elif action == "unlock":
+                u.failed_logins, u.locked_until = 0, None
+            else:
+                abort(400)
+            n += 1
+        db.session.commit()
+        return _back("users", f"{action.capitalize()}d {n} viewer account(s)." if n else "No accounts selected.",
+                     "success" if n else "warning")
+    if what == "login_policy":
+        attempts, minutes = (f.get("login_max_attempts") or "").strip(), (f.get("login_lock_minutes") or "").strip()
+        if not attempts.isdigit() or int(attempts) > 100 or not minutes.isdigit() or int(minutes) > 10080:
+            return _errors("users", ["Attempts must be 0–100 and minutes 0–10080"])
+        settings.set_many({"login_max_attempts": attempts, "login_lock_minutes": minutes})
+        return _back("users", "Login protection saved.")
     user = db.session.get(User, f.get("user_id", type=int))
     if user is None or user.role != "viewer":
         abort(404)
     if what == "toggle":
         user.is_enabled = not user.is_enabled
+        if not user.is_enabled:
+            user.session_token = secrets.token_hex(16)
         msg = f"Viewer '{user.username}' {'enabled' if user.is_enabled else 'disabled'}."
+    elif what == "unlock":
+        user.failed_logins, user.locked_until = 0, None
+        msg = f"Viewer '{user.username}' unlocked."
+    elif what == "access":
+        _set_access(user, f.get("view_all") == "on", _ids("meters"))
+        msg = f"Meter access for '{user.username}' saved."
     elif what == "reset_password":
         err = validation.password(f.get("password"), f.get("confirm"))
         if err:
             return _errors("users", [err])
         user.set_password(f["password"])
-        msg = f"Password for '{user.username}' changed."
+        user.failed_logins, user.locked_until = 0, None
+        msg = f"Password for '{user.username}' changed (account unlocked, logged out everywhere)."
     elif what == "delete":
+        MeterViewer.query.filter_by(user_fk=user.id).delete()
+        NotificationRule.query.filter_by(user_fk=user.id).delete()
+        from ..models import Notification
+        Notification.query.filter_by(user_fk=user.id).delete()
         db.session.delete(user)
         msg = f"Viewer '{user.username}' deleted."
     else:
@@ -164,14 +243,16 @@ def notifications():
     settings.set_many({
         "telegram_enabled": "1" if f.get("telegram_enabled") == "on" else "0",
         "telegram_bot_token": (f.get("telegram_bot_token") or "").strip(),
-        "telegram_chat_id": (f.get("telegram_chat_id") or "").strip(),
     })
     return _back("notifications", "Notification settings saved.")
 
 
 @bp.post("/notifications/test")
-@admin_required
+@login_required
 def notifications_test():
-    ok, err = notify.send_telegram(settings.get("telegram_bot_token"), settings.get("telegram_chat_id"),
+    """Send a test message to the current user's own Telegram chat."""
+    if settings.get("telegram_enabled") != "1":
+        return jsonify(ok=False, error="Telegram is not enabled by the admin")
+    ok, err = notify.send_telegram(settings.get("telegram_bot_token"), current_user.telegram_chat_id,
                                    "PowerManager test message ✅")
     return jsonify(ok=ok, error=err)

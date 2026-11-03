@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Notifications · {{ d.name }} · PowerManager{% endblock %}
+{% block content %}
+<h1 class="h4 mb-1">{{ d.name }}</h1>
+<div class="text-body-secondary small mb-3">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
+{% set active = 'notifications' %}{% include "meters/_tabs.html" %}
+<form method="post" class="card" style="max-width:720px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card-header fw-semibold">My notifications for this meter</div>
+  <div class="card-body">
+    <p class="small text-body-secondary">These options are <strong>only for your account ({{ current_user.username }})</strong>. Every user picks their own, so nobody gets notifications they did not ask for.</p>
+    {% for r in rules %}
+    <div class="d-flex align-items-center gap-2 py-2 border-bottom">
+      <div class="form-check form-switch mb-0 flex-grow-1">
+        <input class="form-check-input" type="checkbox" role="switch" name="notify_{{ r.type }}" id="n_{{ r.type }}" {{ 'checked' if r.enabled }}>
+        <label class="form-check-label" for="n_{{ r.type }}">{{ r.label }}</label>
+      </div>
+      {% if r.type == 'disconnected' %}
+      <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="1" max="1440" name="notify_disconnected_min" value="{{ r.param }}"><span class="input-group-text">min</span></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="small text-body-secondary mt-3">
+      Delivered in the <a href="{{ url_for('main.notifications') }}">Notifications</a> page{% if telegram %}{% if has_chat %} and to your Telegram{% else %}. Add your Telegram chat ID in <a href="{{ url_for('settings.index', tab='account') }}">Settings → Account</a> to also get them on Telegram{% endif %}{% endif %}.
+    </div>
+  </div>
+  <div class="card-footer text-end"><button class="btn btn-primary">Save my options</button></div>
+</form>
+{% endblock %}

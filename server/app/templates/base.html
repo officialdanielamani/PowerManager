@@ -30,6 +30,9 @@
       {% endif %}
       <li><a class="nav-link {% if request.endpoint == 'main.notifications' %}active{% endif %}" href="{{ url_for('main.notifications') }}"><i class="bi bi-bell me-2"></i>Notifications
         {% if unread_notifications %}<span class="badge text-bg-danger ms-1">{{ unread_notifications }}</span>{% endif %}</a></li>
+      {% if current_user.is_admin %}
+      <li><a class="nav-link {% if request.endpoint == 'main.firmware' %}active{% endif %}" href="{{ url_for('main.firmware') }}"><i class="bi bi-cpu me-2"></i>Firmware</a></li>
+      {% endif %}
       <li><a class="nav-link {% if request.blueprint == 'settings' %}active{% endif %}" href="{{ url_for('settings.index') }}"><i class="bi bi-gear me-2"></i>Settings</a></li>
     </ul>
     <hr>

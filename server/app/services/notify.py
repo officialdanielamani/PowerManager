@@ -1,4 +1,8 @@
-"""Notifications: in-app always, Telegram optional. A cooldown stops repeated spam."""
+"""Notifications per meter AND per user: every account chooses its own (meters/<id>/notifications).
+
+Each matching account gets its own in-app notification; Telegram goes to that account's chat ID
+(the bot token is set once by the admin). A cooldown stops repeated spam per user.
+"""
 import json
 import logging
 import threading
@@ -6,8 +10,8 @@ import urllib.parse
 import urllib.request
 
 from ..extensions import db
-from ..models import Notification, NotificationRule, now
-from . import settings
+from ..models import Notification, NotificationRule, User, now
+from . import access, settings
 
 log = logging.getLogger(__name__)
 COOLDOWN_S = 600
@@ -15,27 +19,35 @@ COOLDOWN_S = 600
 COOLDOWN_TYPES = {"max_amp", "panel_open", "no_voltage"}
 
 
-def rule(device_pk, ntype):
-    return db.session.get(NotificationRule, (device_pk, ntype))
+def subscribers(device, ntype):
+    """(user, rule) pairs that want `ntype` for this meter and may still see it."""
+    out = []
+    for r in NotificationRule.query.filter_by(device_fk=device.id, type=ntype, enabled=True).all():
+        user = db.session.get(User, r.user_fk)
+        if user is not None and user.is_enabled and access.can_view(user, device):
+            out.append((user, r))
+    return out
 
 
-def notify(device, ntype, message, force=False):
-    """Create a notification if the device's rule for `ntype` is enabled."""
-    r = rule(device.id, ntype)
-    if not force and (r is None or not r.enabled):
-        return None
-    if ntype in COOLDOWN_TYPES:
-        last = (Notification.query.filter_by(device_fk=device.id, type=ntype)
-                .order_by(Notification.ts.desc()).first())
-        if last is not None and now() - last.ts < COOLDOWN_S:
-            return None
+def notify(device, ntype, message, only_user=None):
+    """Create a notification for every account subscribed to `ntype` on this meter."""
+    created = []
     text = f"[{device.name}] {message}"
-    n = Notification(device_fk=device.id, type=ntype, message=text[:300])
-    if settings.get("telegram_enabled") == "1":
-        token, chat = settings.get("telegram_bot_token"), settings.get("telegram_chat_id")
-        threading.Thread(target=_telegram_bg, args=(token, chat, text), daemon=True).start()
-    db.session.add(n)
-    return n
+    for user, _rule in subscribers(device, ntype):
+        if only_user is not None and user.id != only_user.id:
+            continue
+        if ntype in COOLDOWN_TYPES:
+            last = (Notification.query.filter_by(device_fk=device.id, user_fk=user.id, type=ntype)
+                    .order_by(Notification.ts.desc()).first())
+            if last is not None and now() - last.ts < COOLDOWN_S:
+                continue
+        n = Notification(device_fk=device.id, user_fk=user.id, type=ntype, message=text[:300])
+        db.session.add(n)
+        created.append(n)
+        if settings.get("telegram_enabled") == "1" and user.telegram_chat_id:
+            threading.Thread(target=_telegram_bg, daemon=True,
+                             args=(settings.get("telegram_bot_token"), user.telegram_chat_id, text)).start()
+    return created
 
 
 def send_telegram(token, chat_id, text):

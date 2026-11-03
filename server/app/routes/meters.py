@@ -10,9 +10,10 @@ from flask import (Blueprint, Response, abort, flash, jsonify, redirect, render_
 from flask_login import current_user, login_required
 
 from ..extensions import db
-from ..models import (Command, Device, Event, Incident, Measurement, Notification, NotificationRule,
+from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
+                      NotificationRule, User,
                       PairingCode, Rollup, RollupDirty, Session, now)
-from ..services import commands, devconfig, history, hub, incidents, ingest, settings, validation
+from ..services import access, commands, devconfig, history, hub, incidents, ingest, settings, validation
 from .decorators import admin_required
 from .device_api import ensure_device_defaults
 from .main import meter_summary
@@ -24,6 +25,7 @@ CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
 
 def _device(pk, allow_removed=False):
+    """Admin pages: any meter. Shared pages use access.device_for_current_user()."""
     d = db.session.get(Device, pk)
     if d is None or (d.removed_at and not allow_removed):
         abort(404)
@@ -74,14 +76,31 @@ def _push_config(device):
     return hub.send(device.id, msg) is not None
 
 
-def _rules(device):
-    rules = {r.type: r for r in NotificationRule.query.filter_by(device_fk=device.id).all()}
+def _rules(device, user):
+    rules = {r.type: r for r in NotificationRule.query.filter_by(device_fk=device.id, user_fk=user.id).all()}
     out = []
     for ntype, label in devconfig.NOTIFY_TYPES:
         r = rules.get(ntype)
         out.append({"type": ntype, "label": label, "enabled": bool(r and r.enabled),
                     "param": (r.param if r and r.param else devconfig.DISCONNECTED_DEFAULT_MIN)})
     return out
+
+
+def _viewers():
+    return User.query.filter_by(role="viewer").order_by(User.username).all()
+
+
+def _set_viewers(device, user_ids):
+    MeterViewer.query.filter_by(device_fk=device.id).delete()
+    valid = {u.id for u in _viewers()}
+    for uid in user_ids:
+        if uid in valid:
+            db.session.add(MeterViewer(device_fk=device.id, user_fk=uid))
+    # Notification rules of users who can no longer see the meter are dropped.
+    for r in NotificationRule.query.filter_by(device_fk=device.id).all():
+        u = db.session.get(User, r.user_fk)
+        if u is not None and u.role == "viewer" and not u.view_all and r.user_fk not in user_ids:
+            db.session.delete(r)
 
 
 @bp.route("/<int:pk>/configure", methods=["GET", "POST"])
@@ -98,21 +117,11 @@ def configure(pk):
         errors += [err] if err else []
         cfg, cfg_errors = devconfig.parse_form(form, device)
         errors += cfg_errors
-        disc_min = form.get("notify_disconnected_min", "5").strip() or "5"
-        if not disc_min.isdigit() or not 1 <= int(disc_min) <= 1440:
-            errors.append("Disconnected notification minutes must be 1–1440")
         if not errors:
             device.name, device.info = name, info
             config_changed = cfg != device.cfg
             device.cfg = cfg
-            for ntype, _label in devconfig.NOTIFY_TYPES:
-                r = db.session.get(NotificationRule, (device.id, ntype))
-                if r is None:
-                    r = NotificationRule(device_fk=device.id, type=ntype)
-                    db.session.add(r)
-                r.enabled = form.get(f"notify_{ntype}") == "on"
-                if ntype == "disconnected":
-                    r.param = int(disc_min)
+            _set_viewers(device, {int(x) for x in form.getlist("viewers") if x.isdigit()})
             if config_changed or not device.synced:
                 if config_changed:
                     device.cfg_ver_wanted += 1
@@ -127,16 +136,44 @@ def configure(pk):
     cfg = device.cfg or devconfig.default_cfg(devconfig.channel_count(device))
     dur = int(cfg.get("dur_min", 1440))
     return render_template("meters/configure.html", d=device, cfg=cfg, errors=errors,
-                           waiting=waiting, rules=_rules(device), online=hub.is_online(device.id),
+                           waiting=waiting, online=hub.is_online(device.id),
+                           viewers=_viewers(), linked={v.user_fk for v in MeterViewer.query.filter_by(device_fk=device.id)},
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
                            form=request.form if errors else None)
 
 
+@bp.route("/<int:pk>/notifications", methods=["GET", "POST"])
+@login_required
+def notifications(pk):
+    """Each account (admin or viewer) picks its own notifications for this meter."""
+    device = access.device_for_current_user(pk)
+    if request.method == "POST":
+        form = request.form
+        disc_min = (form.get("notify_disconnected_min") or "5").strip()
+        if not disc_min.isdigit() or not 1 <= int(disc_min) <= 1440:
+            flash("Disconnected minutes must be 1–1440", "danger")
+            return redirect(url_for("meters.notifications", pk=pk))
+        for ntype, _label in devconfig.NOTIFY_TYPES:
+            r = db.session.get(NotificationRule, (device.id, current_user.id, ntype))
+            if r is None:
+                r = NotificationRule(device_fk=device.id, user_fk=current_user.id, type=ntype)
+                db.session.add(r)
+            r.enabled = form.get(f"notify_{ntype}") == "on"
+            if ntype == "disconnected":
+                r.param = int(disc_min)
+        db.session.commit()
+        flash("Your notification options for this meter were saved.", "success")
+        return redirect(url_for("meters.notifications", pk=pk))
+    return render_template("meters/notifications.html", d=device, rules=_rules(device, current_user),
+                           telegram=settings.get("telegram_enabled") == "1",
+                           has_chat=bool(current_user.telegram_chat_id))
+
+
 @bp.get("/<int:pk>/sync-status")
 @login_required
 def sync_status(pk):
-    d = _device(pk)
+    d = access.device_for_current_user(pk)
     return jsonify(synced=d.synced, online=hub.is_online(d.id), error=d.cfg_error,
                    wanted=d.cfg_ver_wanted, applied=d.cfg_ver_applied)
 
@@ -145,7 +182,7 @@ def sync_status(pk):
 
 def _delete_history(device):
     for model in (Measurement, Rollup, RollupDirty, Session, Incident, Command, Notification,
-                  NotificationRule):
+                  NotificationRule, MeterViewer):
         model.query.filter_by(device_fk=device.id).delete(synchronize_session=False)
     PairingCode.query.filter_by(device_fk=device.id).update({"device_fk": None})
     Event.query.filter_by(device_fk=device.id).delete(synchronize_session=False)
@@ -239,7 +276,7 @@ def incident_detail_text(inc):
 @bp.get("/<int:pk>")
 @login_required
 def info(pk):
-    device = _device(pk, allow_removed=True)
+    device = access.device_for_current_user(pk, allow_removed=True)
     types, start, end = _incident_filters()
     page = request.args.get("page", 1, type=int)
     pagination = _incident_query(device, types, start, end).paginate(page=page, per_page=25, error_out=False)
@@ -255,7 +292,7 @@ def info(pk):
 @bp.get("/<int:pk>/live")
 @login_required
 def live(pk):
-    return jsonify(meter_summary(_device(pk, allow_removed=True)))
+    return jsonify(meter_summary(access.device_for_current_user(pk, allow_removed=True)))
 
 
 def _range_args(device):
@@ -268,7 +305,7 @@ def _range_args(device):
 @bp.get("/<int:pk>/history")
 @login_required
 def history_json(pk):
-    device = _device(pk, allow_removed=True)
+    device = access.device_for_current_user(pk, allow_removed=True)
     start, end = _range_args(device)
     ch = request.args.get("ch", 0, type=int)
     data = history.query(device.id, ch, start, end)
@@ -304,7 +341,7 @@ def _fname_ts(ts):
 @bp.get("/<int:pk>/export.csv")
 @login_required
 def export_csv(pk):
-    device = _device(pk, allow_removed=True)
+    device = access.device_for_current_user(pk, allow_removed=True)
     start, end = _range_args(device)
     ch = request.args.get("ch", 0, type=int)
     source, header, rows = history.csv_rows(device.id, ch, start, end)
@@ -317,7 +354,7 @@ def export_csv(pk):
 @bp.get("/<int:pk>/incidents.csv")
 @login_required
 def incidents_csv(pk):
-    device = _device(pk, allow_removed=True)
+    device = access.device_for_current_user(pk, allow_removed=True)
     types, start, end = _incident_filters()
     rows = []
     for inc in _incident_query(device, types, start, end).all():

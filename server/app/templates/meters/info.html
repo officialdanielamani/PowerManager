@@ -17,11 +17,11 @@
     <button class="btn btn-sm btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
     <button class="btn btn-sm btn-outline-danger {{ '' if m.status == 'tripped' else 'd-none' }}" data-action="reset_trip" id="btnResetTrip"><i class="bi bi-shield-check me-1"></i>Reset Trip</button>
     <button class="btn btn-sm btn-outline-secondary" data-action="send_now"><i class="bi bi-send me-1"></i>Send Data Now</button>
-    <a class="btn btn-sm btn-primary" href="{{ url_for('meters.configure', pk=d.id) }}"><i class="bi bi-sliders me-1"></i>Configure</a>
     {% endif %}
   </div>
 </div>
 
+{% set active = 'info' %}{% include "meters/_tabs.html" %}
 <div class="row g-3 mb-3">
   <div class="col-12 col-lg-5">
     <div class="card h-100"><div class="card-header fw-semibold">Meter</div><div class="card-body">
