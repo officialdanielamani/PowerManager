@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+server/instance/
+
+# Arduino / PlatformIO
+firmware/**/build/
+.pio/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

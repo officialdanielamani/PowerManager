@@ -1,0 +1,225 @@
+# Meter ⇄ Server Protocol (v1)
+
+All times are **UTC epoch seconds**. All messages are JSON. Field names are short to keep payloads small on the ESP32.
+
+## 1. Pairing
+
+### 1.1 Server side
+
+1. Admin clicks **[Add New Meter]**.
+2. The server creates a pairing code: 8 characters from `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0/O/1/I/L), shown as `XXXX-XXXX`. It is valid for **10 minutes** and can be used **once**.
+3. The page shows:
+   - QR code
+   - Server address, port, TLS on/off (from *Settings → Server*)
+   - Pairing code
+   - Countdown + [Regenerate]
+4. The page polls `GET /meters/pairing/<code>/status`. When the status becomes `paired`, it redirects to **Configure Meter Device** for the new meter.
+
+QR content (JSON, kept short):
+
+```json
+{"pm":1,"h":"power.example.com","p":443,"s":1,"c":"K7P29QXM"}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `pm` | QR format version |
+| `h` | host |
+| `p` | port |
+| `s` | 1 = TLS (https/wss), 0 = plain |
+| `c` | pairing code (no dash) |
+
+Manual entry on the device uses the same four fields: **Server address**, **Port**, **Secure**, **Pairing code**.
+
+### 1.2 Device side
+
+`POST {scheme}://{h}:{p}/api/v1/pair`
+
+```json
+{
+  "code": "K7P29QXM",
+  "device_id": "MTR23H4R",
+  "fw": "0.1.0",
+  "hw": "esp32s3-supermini",
+  "proto": 1,
+  "caps": {
+    "sensor": "pzem004t",
+    "channels": 1,
+    "relays": 1,
+    "inputs": ["tamper"],
+    "rtc": false
+  }
+}
+```
+
+Responses:
+
+| HTTP | Body | Meaning |
+|------|------|---------|
+| 200 | `{"secret":"<32B base64url>","ws":"/ws/device","time":1762170000,"config":{…}}` | Paired. The device stores `secret`, host, port, TLS in NVS. |
+| 400 | `{"err":"bad_request"}` | Malformed |
+| 404 | `{"err":"invalid_code"}` | Unknown / used / expired |
+| 409 | `{"err":"already_paired"}` | This `device_id` is already active on the server (admin must remove it first) |
+| 429 | `{"err":"rate_limited"}` | Too many attempts |
+
+The server stores only a **hash** of `secret`.
+
+## 2. Runtime WebSocket
+
+`wss://{h}:{p}/ws/device`, with headers:
+
+```
+Authorization: Bearer <device_id>.<secret>
+X-PM-Proto: 1
+```
+
+The server closes with code `4401` on bad credentials and `4403` if the device was removed. On `4401`/`4403` the device stops retrying and shows "Not paired" on its local dashboard.
+
+### 2.1 Envelope
+
+```json
+{"t":"<type>", "id":123, ...}
+```
+
+`id` is a message counter per connection, used to match acknowledgements. Unknown `t` values are ignored (forward compatibility).
+
+### 2.2 Device → Server
+
+| `t` | When | Body |
+|-----|------|------|
+| `hello` | First message after connect | `fw, proto, boot` (boot counter), `up` (uptime s), `tv` (time valid bool), `ts`, `cfg_ver`, `caps`, `state` |
+| `tel` | Each report interval, on [Send Data Now], and when sending buffered data | see 2.4 |
+| `evt` | A state change happens | see 2.5 |
+| `state` | After any relay/session change, and in response to `get_state` | see 2.6 |
+| `cfg_ack` | After applying a config | `ver`, `ok`, `err?` |
+| `cmd_ack` | After a command | `ref` (cmd id), `ok`, `err?` (`quota_exceeded`, `session_expired`, `tripped`, `unknown_cmd`) |
+
+### 2.3 Server → Device
+
+| `t` | When | Body |
+|-----|------|------|
+| `welcome` | Reply to `hello` | `time` (server UTC), `cfg_ver` (wanted), `last_seq` (highest telemetry seq stored) |
+| `ack` | After storing `tel` | `last_seq`, `time` |
+| `cfg` | Config changed or device `cfg_ver` is outdated | `ver`, `cfg` (see 3) |
+| `cmd` | Admin action | `c` + params, see table below |
+| `time` | Periodic (hourly) | `time` |
+
+Commands (`cmd.c`):
+
+| `c` | Params | Device behaviour |
+|-----|--------|------------------|
+| `relay` | `on: bool` | Set the wanted relay state. ON is **rejected** if quota exceeded, session expired or tripped. |
+| `renew` | – | End the current session (`manual`), start a new one, clear quota/expired flags |
+| `send_now` | – | Send `tel` right away |
+| `reset_trip` | – | Clear the over-current latch |
+| `get_state` | – | Reply with `state` |
+| `unpair` | – | Wipe server credentials, reply `cmd_ack`, close, go back to setup |
+
+Commands for an offline device are **queued** on the server and sent on reconnect (except `send_now`, which is dropped, and `relay`, which is replaced by the latest one).
+
+### 2.4 Telemetry
+
+```json
+{
+  "t": "tel", "id": 42,
+  "items": [
+    {
+      "seq": 10233, "ts": 1762170000, "tv": 1,
+      "ch": [ {"i":0, "v":230.1, "a":4.21, "w":960.2, "pf":0.98, "hz":50.0, "e":12.345} ]
+    }
+  ]
+}
+```
+
+| Field | Unit / meaning |
+|-------|----------------|
+| `seq` | Strictly increasing per device, survives reboot (kept in NVS, stored in blocks so it is not written every time). The server ignores `seq ≤ last stored` → no duplicates when data is resent. |
+| `ts` | Time of the reading |
+| `tv` | 1 = clock was valid. 0 = the device had no valid time; then `ts` holds **uptime seconds** and the item also has `boot`. The server fixes the time using the `hello` (`up` + `ts` of that boot) when possible, otherwise marks the item `time_estimated`. |
+| `v` V, `a` A, `w` W, `pf` 0–1, `hz` Hz, `e` kWh | PZEM values. `e` is the PZEM's total energy register. |
+| channel missing / `null` values | Sensor not responding (e.g. AC lost: the PZEM measurement side is powered from AC) |
+
+Buffered items are sent oldest first, at most **50 items per message**. The device deletes items from its buffer only after an `ack` with `last_seq ≥ seq`.
+
+### 2.5 Events
+
+```json
+{"t":"evt","id":43,"ts":1762170000,"tv":1,"e":"overcurrent","ch":0,"val":10.6}
+```
+
+| `e` | Meaning |
+|-----|---------|
+| `overcurrent` | A > `amp_max` → relay OFF, latched |
+| `quota` | Session kWh ≥ `kwh_max` → relay OFF |
+| `session_end` | Session ended (`reason`: quota/expired/manual) |
+| `session_start` | New session (`sid`, `auto`: bool) |
+| `tamper_open` / `tamper_close` | Panel switch |
+| `ac_lost` / `ac_restored` | V < 50 V or PZEM not responding for 3 reads / back to normal |
+| `offline_relay_off` | Relay switched off because the server was unreachable longer than the limit |
+| `relay` | Relay changed (`on`, `src`: server/local/rule) |
+
+Events are buffered the same way as telemetry (they share the `seq` counter) so none are lost while offline.
+
+Disconnect / reconnect notifications are produced **by the server** (from the WS connection + ping timeout), not by the device.
+
+### 2.6 State
+
+```json
+{
+  "t":"state","id":44,
+  "relay":[{"i":0,"on":false,"want":true,"block":"quota"}],
+  "tripped":false, "tamper":false, "ac":true,
+  "sess":{"sid":17,"start":1762128000,"kwh":2.000,"max":2.0,"status":"quota","next_reset":1762189200}
+}
+```
+
+`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`.
+
+## 3. Config document
+
+The server sends the whole config every time (no partial updates).
+
+```json
+{
+  "ver": 7,
+  "cfg": {
+    "report_s": 60,
+    "offline_off_min": 3,
+    "sess": {
+      "mode": "daily",
+      "daily_utc_min": 1020,
+      "dur_min": 1440,
+      "auto": true
+    },
+    "ch": [ {"i":0, "kwh_max":2.0, "amp_max":10.2} ]
+  }
+}
+```
+
+| Field | Range | Default | Notes |
+|-------|-------|---------|-------|
+| `report_s` | 10–3600 | 60 | |
+| `offline_off_min` | 0–1440 | 0 | 0 = disabled |
+| `sess.mode` | `daily` / `duration` / `none` | `none` | `none` = no time limit |
+| `sess.daily_utc_min` | 0–1439 | – | Local reset time converted to UTC by the server. Example: 01:00 at UTC+08:00 → 17:00 UTC → `1020` |
+| `sess.dur_min` | 1–525600 | – | Duration mode; UI enters days/hours/minutes |
+| `sess.auto` | bool | false | |
+| `ch[].kwh_max` | 0–100000 | 0 | 0 = unlimited |
+| `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |
+
+The device checks every value. If anything is out of range it rejects the **whole** config (`cfg_ack ok:false err:"<field>"`) and keeps the old one.
+
+## 4. Timing
+
+| Item | Value |
+|------|-------|
+| Control loop (read PZEM, check limits) | 1 s |
+| WS ping (device) | 30 s; disconnect if no pong in 10 s |
+| Server marks device offline | No message/ping for 75 s |
+| Reconnect backoff | 2, 4, 8, 16, 32, 60 s (max), with random jitter |
+| Server `time` push | hourly + in every `ack` |
+
+## 5. Versioning
+
+- `proto` = 1 for this document. A breaking change bumps it; the server supports the current and previous version.
+- New optional fields may be added without a bump; both sides ignore unknown fields.
