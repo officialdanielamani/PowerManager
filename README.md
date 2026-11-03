@@ -2,14 +2,14 @@
 
 Self-hosted energy meter system: ESP32 meters measure and switch loads, and a Docker server manages them, applies session/kWh limits and keeps history.
 
-> **Status:** server v0.1 is working (pairing, live data, limits, history, events, users). Meter firmware is next. The documents in `docs/` are the contract both sides are built against.
+> **Status:** server v0.1 and meter firmware v0.1 are written. The server is tested end-to-end with a simulated meter; the firmware compiles cleanly and is waiting for hardware testing. The documents in `docs/` are the contract both sides are built against.
 
 ## Components
 
 | Part | Tech | Folder |
 |------|------|--------|
 | Server | Python 3.11, Flask, SQLite, WebSocket, runs in Docker — see [server/README.md](server/README.md) | `server/` |
-| Meter firmware | ESP32-S3 Super Mini, Arduino IDE (Arduino-ESP32 core 3.x) | `firmware/` |
+| Meter firmware | ESP32-S3 Super Mini, Arduino IDE (Arduino-ESP32 core 3.x) — see [firmware/README.md](firmware/README.md) | `firmware/` |
 | Docs | Markdown | `docs/` |
 
 ## Documents

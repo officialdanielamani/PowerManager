@@ -80,6 +80,8 @@ Close codes from the server:
 | `4401` | Bad credentials (unknown device / wrong secret) | Stop retrying, show "Not paired – re-pair needed" on the local dashboard. Local admin and Wi-Fi are kept. |
 | `4403` | Device was **removed** by the admin | **Factory reset** (same as the `remove` command), reboot into first-boot AP mode |
 
+Before closing with `4401` / `4403` the server sends `{"t":"bye","code":4401|4403}`, because some WebSocket client libraries (including the one used on the ESP32) do not expose the close code. Devices act on whichever they see first.
+
 The server keeps the "removed" marker for the `device_id` so a device that was offline during removal still gets `4403` when it next connects.
 
 ### 2.1 Envelope

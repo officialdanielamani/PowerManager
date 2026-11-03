@@ -119,6 +119,12 @@ def device_ws(ws):
     if close_code is not None:
         log.info("WS rejected (%s) for %s", close_code,
                  device.device_id if device else request.headers.get("Authorization", "")[:20])
+        # The close code is not visible in every WebSocket client library (the ESP32 one hides
+        # it), so say it in a message first (docs/protocol.md §2).
+        try:
+            ws.send(json.dumps({"t": "bye", "code": close_code}))
+        except ConnectionClosed:
+            pass
         ws.close(reason=close_code, message="removed" if close_code == 4403 else "unauthorized")
         return
     conn = hub.Connection(device.id, ws)
@@ -150,6 +156,7 @@ def device_ws(ws):
                 log.exception("Error handling %s from %s", msg.get("t"), device.device_id)
                 db.session.rollback()
             if device.removed_at is not None:
+                conn.send({"t": "bye", "code": 4403})
                 conn.close(4403)
         while not conn.outbox.empty():  # flush (e.g. the `remove` command)
             ws.send(conn.outbox.get_nowait())

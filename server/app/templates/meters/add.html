@@ -36,7 +36,13 @@
       Waiting for the meter to pair… this page will continue on its own.
     </div>
     <a href="{{ url_for('meters.add') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-clockwise me-1"></i>Regenerate code</a>
-    <details class="mt-3 small text-body-secondary"><summary>QR content</summary><code>{{ payload }}</code></details>
+    <div class="mt-3">
+      <label class="form-label small text-body-secondary mb-1">Pairing text: if the phone cannot read the QR, copy this and paste it on the meter's page</label>
+      <div class="input-group input-group-sm">
+        <input class="form-control font-monospace" id="pairText" value="{{ payload }}" readonly>
+        <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('pairText').value).then(function(){PM.toast('Copied','success')})"><i class="bi bi-clipboard"></i> Copy</button>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

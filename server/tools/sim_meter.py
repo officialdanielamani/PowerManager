@@ -272,6 +272,10 @@ class Meter:
             self.command(msg)
         elif t == "pong":
             pass
+        elif t == "bye":
+            self.log("BYE", msg.get("code"))
+            if msg.get("code") == 4403:
+                self.factory_reset()
 
     def command(self, msg):
         c, ref = msg.get("c"), msg.get("ref")
