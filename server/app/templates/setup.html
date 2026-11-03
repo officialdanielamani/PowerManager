@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}First-time setup · PowerManager{% endblock %}
+{% block auth %}
+<div class="card shadow-sm">
+  <div class="card-body p-4">
+    <h2 class="h5 mb-1">Create admin account</h2>
+    <p class="text-body-secondary small mb-3">This runs only once. All fields are required.</p>
+    {% for e in errors %}<div class="alert alert-danger py-2">{{ e }}</div>{% endfor %}
+    <form method="post" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if need_token %}
+      <div class="mb-3">
+        <label class="form-label">Setup token</label>
+        <input class="form-control" name="setup_token" required autocomplete="off" value="{{ form.get('setup_token', '') }}">
+        <div class="form-text">Printed in the server log (<code>docker logs powermanager</code>).</div>
+      </div>
+      {% endif %}
+      <div class="mb-3">
+        <label class="form-label">Username</label>
+        <input class="form-control" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\-]{3,32}" value="{{ form.get('username', '') }}" autocomplete="username">
+        <div class="form-text">3–32 characters, not case sensitive.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Password</label>
+        <input class="form-control" type="password" name="password" required minlength="10" maxlength="128" autocomplete="new-password" data-strength>
+        <div class="form-text">At least 10 characters with upper, lower, digit and symbol.</div>
+        <div class="progress mt-1" style="height:4px"><div class="progress-bar" data-strength-bar></div></div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Confirm password</label>
+        <input class="form-control" type="password" name="confirm" required maxlength="128" autocomplete="new-password">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Phone number</label>
+        <input class="form-control" name="phone" required maxlength="20" placeholder="+60123456789" value="{{ form.get('phone', '') }}">
+      </div>
+      <div class="mb-4">
+        <label class="form-label">Email</label>
+        <input class="form-control" type="email" name="email" required maxlength="254" value="{{ form.get('email', '') }}">
+      </div>
+      <button class="btn btn-primary w-100">Create admin &amp; continue</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

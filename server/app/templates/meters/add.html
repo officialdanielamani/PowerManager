@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Add New Meter · PowerManager{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Add New Meter</h1>
+{% if not configured %}
+<div class="alert alert-warning">
+  <i class="bi bi-exclamation-triangle me-1"></i>
+  The public server address is not set, so the address you are browsing from is used
+  (<code>{{ host }}:{{ port }}</code>). If meters reach the server by another address
+  (e.g. your Cloudflare Tunnel domain), set it in <a href="{{ url_for('settings.index', tab='server') }}">Settings → Server</a>.
+</div>
+{% endif %}
+<div class="row g-4">
+  <div class="col-12 col-lg-5">
+    <div class="card">
+      <div class="card-body text-center">
+        <div class="pm-qr mx-auto mb-3">{{ qr_svg|safe }}</div>
+        <div class="small text-body-secondary">On the meter's page choose <strong>Take photo of QR</strong>, or type the details on the right.</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-7">
+    <div class="card mb-3">
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Server address</dt><dd class="col-sm-8"><code class="fs-6" data-copy>{{ host }}</code></dd>
+          <dt class="col-sm-4">Port</dt><dd class="col-sm-8"><code class="fs-6" data-copy>{{ port }}</code></dd>
+          <dt class="col-sm-4">Secure (TLS)</dt><dd class="col-sm-8">{{ 'Yes (https / wss)' if tls else 'No (http / ws)' }}</dd>
+          <dt class="col-sm-4">Pairing code</dt><dd class="col-sm-8"><code class="fs-3 letter-spaced" data-copy>{{ code_display }}</code></dd>
+          <dt class="col-sm-4">Expires in</dt><dd class="col-sm-8"><span id="countdown" class="fw-semibold"></span></dd>
+        </dl>
+      </div>
+    </div>
+    <div class="alert alert-info d-flex align-items-center" id="pairState">
+      <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+      Waiting for the meter to pair… this page will continue on its own.
+    </div>
+    <a href="{{ url_for('meters.add') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-clockwise me-1"></i>Regenerate code</a>
+    <details class="mt-3 small text-body-secondary"><summary>QR content</summary><code>{{ payload }}</code></details>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var expires = {{ expires_at }} * 1000, el = document.getElementById('countdown'), state = document.getElementById('pairState');
+  var drift = Date.now() - {{ expires_at - ttl }} * 1000;
+  function tick() {
+    var left = Math.max(0, Math.round((expires - (Date.now() - drift)) / 1000));
+    el.textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+  }
+  tick(); setInterval(tick, 1000);
+  var stop = PM.poll("{{ url_for('meters.pairing_status', code=code) }}", 2000, function (d) {
+    if (d.status === 'paired') { stop(); state.className = 'alert alert-success'; state.textContent = 'Paired! Opening configuration…'; location.href = d.url; }
+    else if (d.status === 'expired') { stop(); state.className = 'alert alert-warning'; state.textContent = 'Code expired. Click "Regenerate code".'; }
+  });
+})();
+</script>
+{% endblock %}

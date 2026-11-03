@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Login · PowerManager{% endblock %}
+{% block auth %}
+<div class="card shadow-sm">
+  <div class="card-body p-4">
+    {% if error %}<div class="alert alert-danger py-2">{{ error }}</div>{% endif %}
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label">Username</label>
+        <input class="form-control" name="username" required autofocus autocomplete="username" maxlength="32">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Password</label>
+        <input class="form-control" type="password" name="password" required autocomplete="current-password" maxlength="128">
+      </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="remember" id="remember">
+        <label class="form-check-label" for="remember">Remember me</label>
+      </div>
+      <button class="btn btn-primary w-100">Login</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

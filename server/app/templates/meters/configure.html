@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Configure {{ d.name }} · PowerManager{% endblock %}
+{% set f = form %}
+{% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
+{% macro chk(name, default) -%}{{ 'checked' if (f.get(name) == 'on' if f else default) }}{%- endmacro %}
+{% block content %}
+<div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+  <h1 class="h4 mb-0">Configure Meter Device</h1>
+  {% if d.synced %}<span class="badge text-bg-success">Synced</span>{% else %}<span class="badge text-bg-info">Pending sync</span>{% endif %}
+  <span class="badge {{ 'text-bg-success' if online else 'text-bg-secondary' }}">{{ 'Online' if online else 'Offline' }}</span>
+  <a href="{{ url_for('meters.info', pk=d.id) }}" class="btn btn-sm btn-outline-secondary ms-auto">Close</a>
+</div>
+{% if new %}<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Meter <strong>{{ d.device_id }}</strong> paired. Give it a name and set its limits.</div>{% endif %}
+{% if d.cfg_error %}<div class="alert alert-danger">The device rejected the last config: <code>{{ d.cfg_error }}</code></div>{% endif %}
+{% for e in errors %}<div class="alert alert-danger py-2">{{ e }}</div>{% endfor %}
+
+<form method="post" id="cfgForm">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="row g-3">
+  <div class="col-12 col-xl-6">
+    <div class="card h-100"><div class="card-header fw-semibold">General</div><div class="card-body">
+      <div class="mb-3"><label class="form-label">Device ID</label>
+        <input class="form-control" value="{{ d.device_id }}" disabled><div class="form-text">Set at pairing, cannot be changed. FW {{ d.fw or '?' }}</div></div>
+      <div class="mb-3"><label class="form-label">Nick Name</label>
+        <input class="form-control" name="name" required maxlength="40" value="{{ val('name', d.name) }}"></div>
+      <div class="mb-3"><label class="form-label">Info</label>
+        <input class="form-control" name="info" maxlength="200" value="{{ val('info', d.info) }}" placeholder="e.g. Basement"></div>
+      <div class="mb-3"><label class="form-label">Send data every</label>
+        <div class="input-group"><input class="form-control" type="number" name="report_s" min="10" max="3600" required value="{{ val('report_s', cfg.report_s) }}"><span class="input-group-text">seconds</span></div>
+        <div class="form-text">10 s – 1 h. Limits are checked on the meter every second regardless.</div></div>
+      <div class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
+        <button type="button" class="btn btn-outline-secondary" data-action="set_default" data-confirm="Reset limits, interval and notifications to defaults? Name, info and history are kept."><i class="bi bi-arrow-counterclockwise me-1"></i>Set to Default</button>
+        <button type="button" class="btn btn-outline-danger ms-auto" data-bs-toggle="modal" data-bs-target="#removeModal"><i class="bi bi-trash me-1"></i>Remove Device</button>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="col-12 col-xl-6">
+    <div class="card h-100"><div class="card-header fw-semibold">Set Limit</div><div class="card-body">
+      {% for ch in cfg.ch %}{% set i = loop.index0 %}
+      {% if cfg.ch|length > 1 %}<div class="fw-semibold small mb-1">Channel {{ i + 1 }}</div>{% endif %}
+      <div class="row g-2 mb-3">
+        <div class="col-sm-6"><label class="form-label">Max kWh per session</label>
+          <div class="input-group"><input class="form-control" type="number" step="0.001" min="0" max="100000" name="kwh_max_{{ i }}" value="{{ val('kwh_max_' ~ i, ch.kwh_max) }}"><span class="input-group-text">kWh</span></div>
+          <div class="form-text">0 = unlimited</div></div>
+        <div class="col-sm-6"><label class="form-label">Max current (relay off)</label>
+          <div class="input-group"><input class="form-control" type="number" step="0.1" min="0" max="{{ amp_rating }}" name="amp_max_{{ i }}" value="{{ val('amp_max_' ~ i, ch.amp_max) }}"><span class="input-group-text">A</span></div>
+          <div class="form-text">0 = off. Trip stays latched until [Reset Trip].</div></div>
+      </div>
+      {% endfor %}
+      <label class="form-label">Session time limit</label>
+      {% set mode = val('sess_mode', cfg.sess_mode) %}
+      <div class="mb-2">
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_none" value="none" {{ 'checked' if mode == 'none' }}><label class="form-check-label" for="m_none">None</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_dur" value="duration" {{ 'checked' if mode == 'duration' }}><label class="form-check-label" for="m_dur">Duration</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_daily" value="daily" {{ 'checked' if mode == 'daily' }}><label class="form-check-label" for="m_daily">Every day at</label></div>
+      </div>
+      <div class="row g-2 mb-2" data-mode="duration">
+        <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="365" name="dur_d" value="{{ val('dur_d', dur_d) }}"><span class="input-group-text">days</span></div></div>
+        <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="23" name="dur_h" value="{{ val('dur_h', dur_h) }}"><span class="input-group-text">h</span></div></div>
+        <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="59" name="dur_m" value="{{ val('dur_m', dur_m) }}"><span class="input-group-text">min</span></div></div>
+      </div>
+      <div class="mb-2" data-mode="daily">
+        <div class="input-group input-group-sm" style="max-width:240px"><input class="form-control" type="time" name="daily_at" value="{{ val('daily_at', cfg.daily_at) }}"><span class="input-group-text">{{ tz_label() }}</span></div>
+      </div>
+      <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="auto" id="auto" {{ chk('auto', cfg.auto) }}>
+        <label class="form-check-label" for="auto">Auto renew session</label>
+        <div class="form-text">Off: when the session ends the relay stays OFF until [Renew Now].</div></div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="offline_off" id="offline_off" {{ chk('offline_off', cfg.offline_off) }}>
+          <label class="form-check-label" for="offline_off">Relay off if device offline for</label></div>
+        <div class="input-group input-group-sm" style="width:150px"><input class="form-control" type="number" min="1" max="1440" name="offline_off_min" value="{{ val('offline_off_min', cfg.offline_off_min) }}"><span class="input-group-text">min</span></div>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="col-12">
+    <div class="card"><div class="card-header fw-semibold">Set Notification</div><div class="card-body">
+      <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-2">
+      {% for r in rules %}
+        <div class="col d-flex align-items-center gap-2">
+          <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="notify_{{ r.type }}" id="n_{{ r.type }}" {{ chk('notify_' ~ r.type, r.enabled) }}>
+            <label class="form-check-label" for="n_{{ r.type }}">{{ r.label }}</label></div>
+          {% if r.type == 'disconnected' %}
+          <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="1" max="1440" name="notify_disconnected_min" value="{{ val('notify_disconnected_min', r.param) }}"><span class="input-group-text">min</span></div>
+          {% endif %}
+        </div>
+      {% endfor %}
+      </div>
+    </div></div>
+  </div>
+</div>
+<div class="d-flex gap-2 mt-3">
+  <button class="btn btn-primary"><i class="bi bi-save me-1"></i>Save</button>
+  <a href="{{ url_for('meters.info', pk=d.id) }}" class="btn btn-outline-secondary">Cancel</a>
+</div>
+</form>
+
+<div class="modal fade" id="removeModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">Remove {{ d.name }}?</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <p>The meter will be unpaired and will <strong>factory reset</strong> itself (back to "create admin account"). If it is offline, it resets when it next connects.</p>
+    <div class="form-check"><input class="form-check-input" type="checkbox" id="delHistory"><label class="form-check-label" for="delHistory">Also delete history (readings, events, sessions)</label></div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-danger" id="removeBtn">Remove</button></div>
+</div></div></div>
+
+<div class="modal fade" id="waitModal" data-bs-backdrop="static" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-body text-center p-4" id="waitBody">
+  <div class="spinner-border mb-3"></div><div>Sending config to the meter…</div>
+</div></div></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var actionUrl = "{{ url_for('meters.action', pk=d.id) }}", infoUrl = "{{ url_for('meters.info', pk=d.id) }}";
+  function syncMode() {
+    var m = document.querySelector('input[name=sess_mode]:checked').value;
+    document.querySelectorAll('[data-mode]').forEach(function (el) { el.style.display = el.dataset.mode === m ? '' : 'none'; });
+  }
+  document.querySelectorAll('input[name=sess_mode]').forEach(function (r) { r.addEventListener('change', syncMode); });
+  syncMode();
+  PM.bindActions(actionUrl);
+  document.getElementById('removeBtn').addEventListener('click', function () {
+    PM.post(actionUrl, {action: 'remove', delete_history: document.getElementById('delHistory').checked}).then(function (r) {
+      if (r.ok) location.href = r.redirect; else PM.toast(r.message || r.error, 'danger');
+    });
+  });
+  {% if waiting %}
+  var modal = new bootstrap.Modal('#waitModal'); modal.show();
+  var body = document.getElementById('waitBody'), started = Date.now();
+  var stop = PM.poll("{{ url_for('meters.sync_status', pk=d.id) }}", 1000, function (s) {
+    if (s.synced) { stop(); body.innerHTML = '<i class="bi bi-check-circle text-success display-6"></i><div class="mt-2">Saved and confirmed by the device.</div>'; setTimeout(function () { location.href = infoUrl; }, 900); }
+    else if (s.error) { stop(); body.innerHTML = '<i class="bi bi-x-circle text-danger display-6"></i><div class="mt-2">The device rejected the config: <code>' + PM.esc(s.error) + '</code></div><button class="btn btn-secondary mt-3" data-bs-dismiss="modal">Back to form</button>'; }
+    else if (!s.online || Date.now() - started > 15000) { stop(); body.innerHTML = '<i class="bi bi-clock-history text-info display-6"></i><div class="mt-2">Saved. The device ' + (s.online ? 'did not confirm yet' : 'is offline') + '; the config will apply when it reconnects (Pending sync).</div><a class="btn btn-primary mt-3" href="' + infoUrl + '">OK</a>'; }
+  });
+  {% endif %}
+})();
+</script>
+{% endblock %}

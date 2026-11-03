@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}PowerManager{% endblock %}</title>
+  <script>
+    (function () {
+      var t = localStorage.getItem('pm-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-bs-theme', t);
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+{% if current_user.is_authenticated %}
+<div class="pm-layout">
+  <nav class="pm-sidebar d-flex flex-column p-3" id="pmSidebar">
+    <a href="{{ url_for('main.dashboard') }}" class="pm-brand mb-3 text-decoration-none">
+      <i class="bi bi-lightning-charge-fill text-warning"></i> PowerManager
+    </a>
+    <ul class="nav nav-pills flex-column gap-1 mb-auto">
+      <li><a class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}" href="{{ url_for('main.dashboard') }}"><i class="bi bi-grid me-2"></i>Dashboard</a></li>
+      {% if current_user.is_admin %}
+      <li><a class="nav-link {% if request.endpoint == 'meters.add' %}active{% endif %}" href="{{ url_for('meters.add') }}"><i class="bi bi-plus-circle me-2"></i>Add New Meter</a></li>
+      {% endif %}
+      <li><a class="nav-link {% if request.endpoint == 'main.notifications' %}active{% endif %}" href="{{ url_for('main.notifications') }}"><i class="bi bi-bell me-2"></i>Notifications
+        {% if unread_notifications %}<span class="badge text-bg-danger ms-1">{{ unread_notifications }}</span>{% endif %}</a></li>
+      <li><a class="nav-link {% if request.blueprint == 'settings' %}active{% endif %}" href="{{ url_for('settings.index') }}"><i class="bi bi-gear me-2"></i>Settings</a></li>
+    </ul>
+    <hr>
+    <div class="small text-body-secondary mb-2"><i class="bi bi-person-circle me-1"></i>{{ current_user.username }}
+      <span class="badge text-bg-{{ 'primary' if current_user.is_admin else 'secondary' }}">{{ current_user.role }}</span></div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" id="themeToggle" title="Toggle theme"><i class="bi bi-circle-half"></i></button>
+      <form method="post" action="{{ url_for('auth.logout') }}" class="flex-grow-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-danger w-100"><i class="bi bi-box-arrow-right me-1"></i>Logout</button>
+      </form>
+    </div>
+    <div class="small text-body-tertiary mt-2">v{{ app_version }}</div>
+  </nav>
+  <div class="pm-main">
+    <header class="pm-topbar d-md-none d-flex align-items-center p-2 border-bottom">
+      <button class="btn btn-outline-secondary btn-sm me-2" id="sidebarToggle"><i class="bi bi-list"></i></button>
+      <span class="fw-semibold"><i class="bi bi-lightning-charge-fill text-warning"></i> PowerManager</span>
+    </header>
+    <main class="p-3 p-md-4">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+        <div class="alert alert-{{ cat if cat != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+          {{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% else %}
+<main class="pm-auth d-flex align-items-center justify-content-center p-3">
+  <div class="pm-auth-card w-100">
+    <div class="text-center mb-4">
+      <div class="display-6"><i class="bi bi-lightning-charge-fill text-warning"></i></div>
+      <h1 class="h4">PowerManager</h1>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}<div class="alert alert-{{ cat if cat != 'message' else 'info' }}">{{ msg }}</div>{% endfor %}
+    {% endwith %}
+    {% block auth %}{% endblock %}
+  </div>
+</main>
+{% endif %}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toasts"></div>
+<script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

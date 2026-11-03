@@ -103,6 +103,8 @@ With no valid time: telemetry uses `tv:0` + uptime (protocol §2.4), and **daily
 - Ring buffer file on LittleFS, fixed-size records (~40 B). **Default 500 items** (≈ 8 h at 60 s); configurable, minimum 30.
 - When full, the oldest items are overwritten (events are kept before telemetry when space runs out).
 - Items are removed only after the server `ack` (protocol §2.4). The buffer survives reboot.
+- Telemetry **and events** go through this same buffer in `seq` order — a live event never jumps the queue (protocol §2.4 ordering rule).
+- The `net` task sends a `ping` message every 30 s and treats a missing `pong` (10 s) as a lost connection.
 
 ## 9. LED
 

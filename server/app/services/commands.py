@@ -1,0 +1,79 @@
+"""Commands from the server to a meter, queued while it is offline (docs/protocol.md §2.3)."""
+from ..extensions import db
+from ..models import Command, now
+from . import hub
+
+KNOWN = {"relay", "renew", "send_now", "reset_trip", "get_state", "remove"}
+QUEUE_MAX_AGE_S = 7 * 86400
+
+
+def relay_block_reason(device):
+    """Why relay ON is not allowed right now (server-side check), or None."""
+    st = device.last_state or {}
+    if st.get("tripped"):
+        return "tripped"
+    status = (st.get("sess") or {}).get("status")
+    if status == "quota":
+        return "quota_exceeded"
+    if status == "expired":
+        return "session_expired"
+    return None
+
+
+def _message(cmd):
+    msg = {"t": "cmd", "c": cmd.c, "ref": cmd.id}
+    msg.update(cmd.params or {})
+    return msg
+
+
+def issue(device, c, params=None, user=None):
+    """Create a command and send it if the device is connected.
+
+    Returns (command, error). error is a short code for the UI."""
+    if c not in KNOWN:
+        return None, "unknown_cmd"
+    params = params or {}
+    if c == "relay" and params.get("on"):
+        reason = relay_block_reason(device)
+        if reason:
+            return None, reason
+    online = hub.is_online(device.id)
+    if c == "send_now" and not online:
+        return None, "offline"
+    if c == "relay":
+        # Only the latest relay command matters.
+        (Command.query.filter_by(device_fk=device.id, c="relay", sent_at=None, cancelled=False)
+         .update({"cancelled": True}))
+    cmd = Command(device_fk=device.id, c=c, params=params,
+                  created_by=user.id if user else None)
+    db.session.add(cmd)
+    db.session.flush()
+    if online and hub.send(device.id, _message(cmd)) is not None:
+        cmd.sent_at = now()
+    db.session.commit()
+    return cmd, None
+
+
+def flush_pending(device, conn):
+    """Send queued commands after (re)connect."""
+    pending = (Command.query
+               .filter(Command.device_fk == device.id, Command.sent_at.is_(None),
+                       Command.cancelled.is_(False),
+                       Command.created_at >= now() - QUEUE_MAX_AGE_S)
+               .order_by(Command.id).all())
+    for cmd in pending:
+        if cmd.c == "send_now":
+            cmd.cancelled = True
+            continue
+        conn.send(_message(cmd))
+        cmd.sent_at = now()
+
+
+def ack(device, ref, ok, err=None):
+    cmd = db.session.get(Command, ref) if isinstance(ref, int) else None
+    if cmd is None or cmd.device_fk != device.id:
+        return None
+    cmd.acked_at = now()
+    cmd.ok = bool(ok)
+    cmd.err = (err or None) and str(err)[:40]
+    return cmd

@@ -2,13 +2,13 @@
 
 Self-hosted energy meter system: ESP32 meters measure and switch loads, and a Docker server manages them, applies session/kWh limits and keeps history.
 
-> **Status:** foundation / design stage. There is no code yet. The documents in `docs/` are the contract both sides will be built against.
+> **Status:** server v0.1 is working (pairing, live data, limits, history, events, users). Meter firmware is next. The documents in `docs/` are the contract both sides are built against.
 
 ## Components
 
 | Part | Tech | Folder |
 |------|------|--------|
-| Server | Python 3.11, Flask, SQLite, WebSocket, runs in Docker | `server/` |
+| Server | Python 3.11, Flask, SQLite, WebSocket, runs in Docker — see [server/README.md](server/README.md) | `server/` |
 | Meter firmware | ESP32-S3 Super Mini, Arduino IDE (Arduino-ESP32 core 3.x) | `firmware/` |
 | Docs | Markdown | `docs/` |
 
@@ -29,6 +29,7 @@ Same style as [ElectroManager](https://github.com/officialdanielamani/ElectroMan
 ```bash
 cd PowerManager/server
 docker compose up -d --build
+docker logs powermanager      # shows the one-time setup token
 ```
 
 The server is exposed to the internet through a Cloudflare Tunnel (HTTPS/WSS). See `docs/architecture.md`.

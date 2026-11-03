@@ -88,7 +88,9 @@ The server keeps the "removed" marker for the `device_id` so a device that was o
 {"t":"<type>", "id":123, ...}
 ```
 
-`id` is a message counter per connection, used to match acknowledgements. Unknown `t` values are ignored (forward compatibility).
+`id` is a message counter per connection (informational). Unknown `t` values are ignored (forward compatibility).
+
+Other close codes: `1001` = server is shutting down (reconnect with backoff), `4000` = replaced by a newer connection of the same device (do not fight it; just reconnect normally).
 
 ### 2.2 Device → Server
 
@@ -99,7 +101,8 @@ The server keeps the "removed" marker for the `device_id` so a device that was o
 | `evt` | A state change happens | see 2.5 |
 | `state` | After any relay/session change, and in response to `get_state` | see 2.6 |
 | `cfg_ack` | After applying a config | `ver`, `ok`, `err?` |
-| `cmd_ack` | After a command | `ref` (cmd id), `ok`, `err?` (`quota_exceeded`, `session_expired`, `tripped`, `unknown_cmd`) |
+| `cmd_ack` | After a command | `ref` (copied from the `cmd`), `ok`, `err?` (`quota_exceeded`, `session_expired`, `tripped`, `unknown_cmd`) |
+| `ping` | Every 30 s | – (server replies `pong`) |
 
 ### 2.3 Server → Device
 
@@ -108,8 +111,9 @@ The server keeps the "removed" marker for the `device_id` so a device that was o
 | `welcome` | Reply to `hello` | `time` (server UTC), `cfg_ver` (wanted), `last_seq` (highest telemetry seq stored) |
 | `ack` | After storing `tel` | `last_seq`, `time` |
 | `cfg` | Config changed or device `cfg_ver` is outdated | `ver`, `cfg` (see 3) |
-| `cmd` | Admin action | `c` + params, see table below |
+| `cmd` | Admin action | `c`, `ref` (command number, echo it in `cmd_ack`) + params, see table below |
 | `time` | Periodic (hourly) | `time` |
+| `pong` | Reply to `ping` | `time` |
 
 Commands (`cmd.c`):
 
@@ -141,13 +145,15 @@ Commands for an offline device are **queued** on the server and sent on reconnec
 
 | Field | Unit / meaning |
 |-------|----------------|
-| `seq` | Strictly increasing per device, survives reboot (kept in NVS, stored in blocks so it is not written every time). The server ignores `seq ≤ last stored` → no duplicates when data is resent. |
+| `seq` | Strictly increasing per device, survives reboot (kept in NVS, stored in blocks so it is not written every time). The server stores each `seq` once → resending is safe. After a factory reset `seq` starts again at 1; the server handles this because every (re)pairing starts a new *pairing generation*. |
 | `ts` | Time of the reading |
 | `tv` | 1 = clock was valid. 0 = the device had no valid time; then `ts` holds **uptime seconds** and the item also has `boot`. The server fixes the time using the `hello` (`up` + `ts` of that boot) when possible, otherwise marks the item `time_estimated`. |
 | `v` V, `a` A, `w` W, `pf` 0–1, `hz` Hz, `e` kWh | PZEM values. `e` is the PZEM's total energy register. |
 | channel missing / `null` values | Sensor not responding (e.g. AC lost: the PZEM measurement side is powered from AC) |
 
-Buffered items are sent oldest first, at most **50 items per message**. The device deletes items from its buffer only after an `ack` with `last_seq ≥ seq`.
+**Ordering rule:** telemetry items and events share **one ordered queue** on the device (the offline buffer). Nothing bypasses it, not even a live event, so `seq` arrives in increasing order and an `ack` with `last_seq` safely confirms everything up to it.
+
+Items are sent oldest first, at most **50 items per message**. After sending, the device waits for the `ack` (resends after 5 s without one). It deletes items from its buffer only after an `ack` with `last_seq ≥ seq`.
 
 ### 2.5 Events
 
@@ -226,7 +232,7 @@ The device checks every value. If anything is out of range it rejects the **whol
 | Item | Value |
 |------|-------|
 | Control loop (read PZEM, check limits) | 1 s |
-| WS ping (device) | 30 s; disconnect if no pong in 10 s |
+| `ping` message (device) | every 30 s; reconnect if no `pong` within 10 s |
 | Server marks device offline | No message/ping for 75 s |
 | Reconnect backoff | 2, 4, 8, 16, 32, 60 s (max), with random jitter |
 | Server `time` push | hourly + in every `ack` |

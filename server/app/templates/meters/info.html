@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
+{% block title %}{{ d.name }} · PowerManager{% endblock %}
+{% block content %}
+{% if d.removed_at %}
+<div class="alert alert-secondary"><i class="bi bi-archive me-1"></i>This meter was removed on {{ d.removed_at|dt }}. History is kept for viewing.</div>
+{% endif %}
+<div class="d-flex align-items-start flex-wrap gap-2 mb-3" data-meter="{{ d.id }}" id="meterHead">
+  <div>
+    <h1 class="h4 mb-0">{{ d.name }} <span class="pm-dot {{ 'on' if m.online else 'off' }}" data-field="online"></span></h1>
+    <div class="text-body-secondary small">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
+  </div>
+  <div class="ms-auto d-flex flex-wrap gap-2">
+    {% if current_user.is_admin and not d.removed_at %}
+    <button class="btn btn-sm btn-success" data-action="relay_on" id="btnRelayOn"><i class="bi bi-toggle-on me-1"></i>Relay ON</button>
+    <button class="btn btn-sm btn-outline-secondary" data-action="relay_off"><i class="bi bi-toggle-off me-1"></i>Relay OFF</button>
+    <button class="btn btn-sm btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
+    <button class="btn btn-sm btn-outline-danger {{ '' if m.status == 'tripped' else 'd-none' }}" data-action="reset_trip" id="btnResetTrip"><i class="bi bi-shield-check me-1"></i>Reset Trip</button>
+    <button class="btn btn-sm btn-outline-secondary" data-action="send_now"><i class="bi bi-send me-1"></i>Send Data Now</button>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('meters.configure', pk=d.id) }}"><i class="bi bi-sliders me-1"></i>Configure</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-5">
+    <div class="card h-100"><div class="card-header fw-semibold">Meter</div><div class="card-body">
+      <dl class="row mb-0 small">
+        <dt class="col-6">Status</dt><dd class="col-6" data-field="status">{{ status_badge(m.status) }}</dd>
+        <dt class="col-6">Relay</dt><dd class="col-6"><span class="badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span></dd>
+        <dt class="col-6">kWh per session</dt><dd class="col-6">{% for c in cfg.get('ch', []) %}{{ c.kwh_max if c.kwh_max else 'Unlimited' }}{% if c.kwh_max %} kWh{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
+        <dt class="col-6">Session restarts</dt><dd class="col-6">{{ m.session_desc }}{% if m.next_reset %}<br><span class="text-body-secondary">next: <span data-field="next_reset">{{ m.next_reset }}</span></span>{% endif %}</dd>
+        <dt class="col-6">Auto renew</dt><dd class="col-6">{{ 'Yes' if m.auto else 'No' }}</dd>
+        <dt class="col-6">Max current</dt><dd class="col-6">{% for c in cfg.get('ch', []) %}{{ (c.amp_max ~ ' A') if c.amp_max else 'Off' }}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
+        <dt class="col-6">Offline relay-off</dt><dd class="col-6">{{ ('after ' ~ cfg.offline_off_min ~ ' min') if cfg.get('offline_off') else 'Off' }}</dd>
+        <dt class="col-6">Send data every</dt><dd class="col-6">{{ cfg.get('report_s', 60) }} s</dd>
+        <dt class="col-6">Last online</dt><dd class="col-6" data-field="last_seen">{{ m.last_seen }}</dd>
+        <dt class="col-6">Config</dt><dd class="col-6">{% if d.synced %}<span class="badge text-bg-success">Synced</span>{% else %}<span class="badge text-bg-info">Pending sync</span>{% endif %}</dd>
+      </dl>
+    </div></div>
+  </div>
+  <div class="col-12 col-lg-7">
+    <div class="card h-100"><div class="card-header fw-semibold d-flex">Latest data <span class="ms-auto small text-body-secondary fw-normal" data-field="reading_at">{{ m.reading_at }}</span></div>
+      <div class="card-body" id="latest">
+        {# filled by JS (PM.renderLatest) #}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header d-flex flex-wrap align-items-center gap-2">
+    <span class="fw-semibold me-2">Historical data</span>
+    <div class="btn-group btn-group-sm" role="group" id="rangeBtns">
+      {% for r, label in [('1h','1 Hour'),('1d','1 Day'),('1w','1 Week'),('1m','1 Month'),('all','All time'),('custom','Custom')] %}
+      <button type="button" class="btn btn-outline-secondary {{ 'active' if r == '1d' }}" data-range="{{ r }}">{{ label }}</button>
+      {% endfor %}
+    </div>
+    {% if channels|length > 1 %}
+    <select class="form-select form-select-sm w-auto" id="chSel">{% for c in channels %}<option value="{{ c.idx }}">{{ c.label }}</option>{% endfor %}</select>
+    {% endif %}
+    <div class="d-none align-items-center gap-1" id="customRange">
+      <input type="datetime-local" class="form-control form-control-sm" id="fromIn">
+      <span>–</span>
+      <input type="datetime-local" class="form-control form-control-sm" id="toIn">
+      <button class="btn btn-sm btn-primary" id="applyCustom">Apply</button>
+    </div>
+    <a class="btn btn-sm btn-outline-primary ms-auto" id="csvBtn" href="#"><i class="bi bi-download me-1"></i>Export CSV</a>
+  </div>
+  <div class="card-body">
+    <div class="d-flex flex-wrap gap-2 mb-2 small" id="seriesBtns">
+      <button class="btn btn-sm btn-outline-secondary active" data-series="w">Power (W)</button>
+      <button class="btn btn-sm btn-outline-secondary" data-series="a">Current (A)</button>
+      <button class="btn btn-sm btn-outline-secondary" data-series="v">Voltage (V)</button>
+      <button class="btn btn-sm btn-outline-secondary" data-series="kwh">Energy (kWh)</button>
+      <span class="ms-auto text-body-secondary" id="rangeLabel"></span>
+    </div>
+    <div class="pm-chart"><canvas id="chart"></canvas></div>
+    <div class="row g-2 mt-2 small" id="stats"></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <ul class="nav nav-tabs card-header-tabs">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabEvents">Historical Events</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSessions">Sessions</button></li>
+    </ul>
+  </div>
+  <div class="card-body tab-content">
+    <div class="tab-pane fade show active" id="tabEvents">
+      <form class="d-flex flex-wrap gap-2 align-items-center mb-3" method="get">
+        {% for t, label in incident_types.items() %}
+        <div class="form-check form-check-inline mb-0">
+          <input class="form-check-input" type="checkbox" name="type" value="{{ t }}" id="t_{{ t }}" {{ 'checked' if t in sel_types }}>
+          <label class="form-check-label small" for="t_{{ t }}">{{ label }}</label>
+        </div>
+        {% endfor %}
+        <input type="datetime-local" class="form-control form-control-sm w-auto" name="from" value="{{ f_from }}">
+        <input type="datetime-local" class="form-control form-control-sm w-auto" name="to" value="{{ f_to }}">
+        <button class="btn btn-sm btn-outline-primary">Filter</button>
+        <a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('meters.incidents_csv', pk=d.id) }}?{{ request.query_string.decode() }}"><i class="bi bi-download me-1"></i>Export CSV</a>
+      </form>
+      <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>Type</th><th>Started</th><th>Ended</th><th>Duration</th><th>Details</th></tr></thead>
+        <tbody>
+        {% for inc in pagination.items %}
+          {% set est = '~' if inc.time_estimated else '' %}
+          <tr class="{{ 'table-warning' if not inc.ended_at }}">
+            <td>{% set t = inc.type %}{% if t == 'offline' %}<span class="badge text-bg-secondary"><i class="bi bi-wifi-off"></i> Offline</span>{% else %}{% include "_incident_badge.html" %}{% endif %}</td>
+            <td class="text-nowrap">{{ est }}{{ inc.started_at|dt }}</td>
+            <td class="text-nowrap">{% if inc.ended_at %}{{ est }}{{ inc.ended_at|dt }}{% else %}<strong>Ongoing</strong>{% endif %}</td>
+            <td class="text-nowrap">{{ (inc.duration_s if inc.ended_at else now - inc.started_at)|duration }}</td>
+            <td class="small text-body-secondary">{{ detail_text(inc) }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-body-secondary">No events.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% if pagination.pages > 1 %}
+      <nav><ul class="pagination pagination-sm mb-0">
+        {% for p in range(1, pagination.pages + 1) %}
+        {% set args = request.args.to_dict(flat=False) %}{% set _ = args.update({'page': [p]}) %}
+        <li class="page-item {{ 'active' if p == pagination.page }}"><a class="page-link" href="?{% for k, vs in args.items() %}{% for v in vs %}{{ k }}={{ v|urlencode }}&{% endfor %}{% endfor %}">{{ p }}</a></li>
+        {% endfor %}
+      </ul></nav>
+      {% endif %}
+      <div class="small text-body-tertiary mt-2">Times in {{ tz_label() }}. "~" = estimated time (meter clock was not set).</div>
+    </div>
+    <div class="tab-pane fade" id="tabSessions">
+      <div class="table-responsive">
+      <table class="table table-sm">
+        <thead><tr><th>#</th><th>Started</th><th>Ended</th><th>kWh used</th><th>Limit</th><th>End reason</th></tr></thead>
+        <tbody>
+        {% for s in sessions %}
+          <tr><td>{{ s.sid }}</td><td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
+            <td>{{ '%.3f'|format(s.kwh_used) }}</td><td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
+            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td></tr>
+        {% else %}
+          <tr><td colspan="6" class="text-body-secondary">No sessions yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
+<script>
+PM.meterInfo({
+  live: "{{ url_for('meters.live', pk=d.id) }}",
+  history: "{{ url_for('meters.history_json', pk=d.id) }}",
+  csv: "{{ url_for('meters.export_csv', pk=d.id) }}",
+  action: "{{ url_for('meters.action', pk=d.id) }}",
+  initial: {{ m|tojson }}
+});
+</script>
+{% endblock %}

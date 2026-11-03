@@ -46,24 +46,26 @@
 
 ```
 server/
-  Dockerfile            python:3.11-slim, pip install, gunicorn
-  docker-compose.yml    port 5000, volume ./instance:/app/instance, TZ not needed (UTC internally)
-  .env.example          SECRET_KEY, SETUP_TOKEN (optional)
-  app/ ...
+  Dockerfile            python:3.11-slim (BASE_IMAGE build arg), pip install, front-end libs fetched at build
+  docker-compose.yml    port 5000, volume ./instance:/app/instance (DB + secret key)
+  .env.example          SECRET_KEY, SETUP_TOKEN, GUNICORN_THREADS
+  app/                  Flask app (routes/, services/, templates/, static/)
+  tools/sim_meter.py    simulated meter for testing without hardware
+  tests/                pytest
 ```
 
-Run it: download the zip or clone → `cd server` → `docker compose up -d --build`.
+Run it: download the zip or clone → `cd server` → `docker compose up -d --build`. See `server/README.md`.
 
 ### First run
 
 1. No admin in the DB → every request redirects to `/setup`.
-2. If `SETUP_TOKEN` is set in the env, the setup page asks for it. The token is printed in the container log. This stops a stranger on the internet from creating the admin before you do.
+2. The setup page asks for a **setup token**. If `SETUP_TOKEN` is not set in the env, a random one is generated at each start and printed in the container log (`docker logs powermanager`). This stops a stranger on the internet from creating the admin before you do. `SETUP_TOKEN=off` disables the check (LAN only).
 3. After the admin is created, `/setup` is permanently disabled.
 
 ## 4. Cloudflare Tunnel notes
 
 - Tunnel ingress → `http://powermanager:5000` (or `http://localhost:5000`).
-- Cloudflare supports WebSockets through tunnels. Idle WS connections are closed after ~100 s, so the device **pings every 30 s**.
+- Cloudflare supports WebSockets through tunnels. Idle WS connections are closed after ~100 s, so the device sends a `ping` message **every 30 s**.
 - The device connects with `wss://<host>/ws/device` and validates the TLS certificate against an embedded set of root CAs (Cloudflare edge certificates chain to well-known public roots).
 - If **Cloudflare Access** (Zero Trust login) protects the site, add a bypass for `/ws/device` and `/api/v1/pair`, otherwise the meter gets a login page. Also make sure Bot Fight Mode / WAF challenges do not apply to those paths.
 - Flask runs behind `ProxyFix` so it sees the real `https` scheme and host.

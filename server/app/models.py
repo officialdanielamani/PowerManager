@@ -1,0 +1,227 @@
+"""Database models. All timestamps are UTC epoch seconds (int). See docs/data-model.md."""
+import secrets
+import time
+
+from flask_login import UserMixin
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from .extensions import db
+
+
+def now():
+    return int(time.time())
+
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(32), unique=True, nullable=False)  # stored lower-case
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(10), nullable=False, default="viewer")  # admin | viewer
+    email = db.Column(db.String(254), nullable=False, default="")
+    phone = db.Column(db.String(16), nullable=False, default="")
+    created_at = db.Column(db.Integer, nullable=False, default=now)
+    last_login_at = db.Column(db.Integer)
+    is_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    # Rotated on password change -> logs out every other browser session.
+    session_token = db.Column(db.String(64), nullable=False, default=lambda: secrets.token_hex(16))
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+        self.session_token = secrets.token_hex(16)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def get_id(self):
+        return f"{self.id}:{self.session_token}"
+
+    @property
+    def is_active(self):
+        return self.is_enabled
+
+    @property
+    def is_admin(self):
+        return self.role == "admin"
+
+
+class Setting(db.Model):
+    key = db.Column(db.String(64), primary_key=True)
+    value = db.Column(db.Text, nullable=False, default="")
+
+
+class PairingCode(db.Model):
+    code = db.Column(db.String(8), primary_key=True)
+    created_at = db.Column(db.Integer, nullable=False, default=now)
+    expires_at = db.Column(db.Integer, nullable=False)
+    used_at = db.Column(db.Integer)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"))
+    created_by = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+
+class Device(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.String(16), unique=True, nullable=False)
+    name = db.Column(db.String(40), nullable=False)
+    info = db.Column(db.String(200), nullable=False, default="")
+    secret_hash = db.Column(db.String(255))
+    fw = db.Column(db.String(32), default="")
+    hw = db.Column(db.String(64), default="")
+    proto = db.Column(db.Integer, default=1)
+    caps = db.Column(db.JSON, nullable=False, default=dict)
+    paired_at = db.Column(db.Integer)
+    last_seen_at = db.Column(db.Integer)
+    online = db.Column(db.Boolean, nullable=False, default=False)
+    cfg = db.Column(db.JSON, nullable=False, default=dict)  # UI-level config (see services/devconfig.py)
+    cfg_ver_wanted = db.Column(db.Integer, nullable=False, default=1)
+    cfg_ver_applied = db.Column(db.Integer, nullable=False, default=0)
+    cfg_error = db.Column(db.String(200))
+    last_state = db.Column(db.JSON, nullable=False, default=dict)
+    last_reading = db.Column(db.JSON, nullable=False, default=dict)  # {"ts":..,"ch":[...]}
+    last_seq = db.Column(db.Integer, nullable=False, default=0)
+    # Incremented on every (re)pairing. The device's seq counter restarts after a factory
+    # reset, so uniqueness of seq is per pairing generation.
+    pair_gen = db.Column(db.Integer, nullable=False, default=1)
+    removed_at = db.Column(db.Integer)
+
+    channels = db.relationship("Channel", backref="device", cascade="all, delete-orphan",
+                               order_by="Channel.idx")
+
+    @property
+    def synced(self):
+        return self.cfg_ver_applied >= self.cfg_ver_wanted
+
+    def set_secret(self, secret):
+        self.secret_hash = generate_password_hash(secret)
+
+    def check_secret(self, secret):
+        return bool(self.secret_hash) and check_password_hash(self.secret_hash, secret)
+
+
+class Channel(db.Model):
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), primary_key=True)
+    idx = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(20), nullable=False, default="CH1")
+
+
+class Measurement(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False)
+    ch = db.Column(db.Integer, nullable=False, default=0)
+    gen = db.Column(db.Integer, nullable=False, default=1)
+    seq = db.Column(db.Integer, nullable=False)
+    ts = db.Column(db.Integer, nullable=False)
+    v = db.Column(db.Float)
+    a = db.Column(db.Float)
+    w = db.Column(db.Float)
+    pf = db.Column(db.Float)
+    hz = db.Column(db.Float)
+    e = db.Column(db.Float)
+    time_estimated = db.Column(db.Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("device_fk", "gen", "ch", "seq", name="uq_measurement_seq"),
+        db.Index("ix_measurement_dev_ts", "device_fk", "ch", "ts"),
+    )
+
+
+class Rollup(db.Model):
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), primary_key=True)
+    ch = db.Column(db.Integer, primary_key=True)
+    period = db.Column(db.String(1), primary_key=True)  # h | d
+    bucket_start = db.Column(db.Integer, primary_key=True)
+    n = db.Column(db.Integer, nullable=False, default=0)
+    v_min = db.Column(db.Float)
+    v_max = db.Column(db.Float)
+    v_avg = db.Column(db.Float)
+    a_min = db.Column(db.Float)
+    a_max = db.Column(db.Float)
+    a_avg = db.Column(db.Float)
+    w_min = db.Column(db.Float)
+    w_max = db.Column(db.Float)
+    w_avg = db.Column(db.Float)
+    pf_avg = db.Column(db.Float)
+    hz_avg = db.Column(db.Float)
+    kwh = db.Column(db.Float, nullable=False, default=0.0)
+
+
+class RollupDirty(db.Model):
+    """Buckets that received new raw data and need their roll-up rebuilt."""
+    device_fk = db.Column(db.Integer, primary_key=True)
+    ch = db.Column(db.Integer, primary_key=True)
+    period = db.Column(db.String(1), primary_key=True)
+    bucket_start = db.Column(db.Integer, primary_key=True)
+
+
+class Session(db.Model):
+    __tablename__ = "meter_session"
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False)
+    gen = db.Column(db.Integer, nullable=False, default=1)
+    sid = db.Column(db.Integer, nullable=False)
+    started_at = db.Column(db.Integer)
+    ended_at = db.Column(db.Integer)
+    kwh_used = db.Column(db.Float, nullable=False, default=0.0)
+    kwh_max = db.Column(db.Float, nullable=False, default=0.0)
+    end_reason = db.Column(db.String(10))  # quota | expired | manual
+    auto = db.Column(db.Boolean, nullable=False, default=False)
+
+    __table_args__ = (db.UniqueConstraint("device_fk", "gen", "sid", name="uq_session_sid"),)
+
+
+class Event(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+    gen = db.Column(db.Integer, nullable=False, default=1)
+    seq = db.Column(db.Integer)  # null for server-made events
+    ts = db.Column(db.Integer, nullable=False)
+    type = db.Column(db.String(32), nullable=False)
+    ch = db.Column(db.Integer)
+    data = db.Column(db.JSON, nullable=False, default=dict)
+    time_estimated = db.Column(db.Boolean, nullable=False, default=False)
+
+    __table_args__ = (db.UniqueConstraint("device_fk", "gen", "seq", name="uq_event_seq"),)
+
+
+class Incident(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+    ch = db.Column(db.Integer)
+    type = db.Column(db.String(10), nullable=False)  # power | offline | trip | tamper
+    started_at = db.Column(db.Integer, nullable=False)
+    ended_at = db.Column(db.Integer)
+    duration_s = db.Column(db.Integer)
+    start_event_fk = db.Column(db.Integer, db.ForeignKey("event.id"))
+    end_event_fk = db.Column(db.Integer, db.ForeignKey("event.id"))
+    detail = db.Column(db.JSON, nullable=False, default=dict)
+    time_estimated = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class NotificationRule(db.Model):
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), primary_key=True)
+    type = db.Column(db.String(20), primary_key=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=False)
+    param = db.Column(db.Integer)
+
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), index=True)
+    type = db.Column(db.String(20), nullable=False)
+    ts = db.Column(db.Integer, nullable=False, default=now)
+    message = db.Column(db.String(300), nullable=False)
+    read = db.Column(db.Boolean, nullable=False, default=False)
+    telegram_status = db.Column(db.String(20))  # null | sent | failed | off
+
+
+class Command(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+    c = db.Column(db.String(20), nullable=False)
+    params = db.Column(db.JSON, nullable=False, default=dict)
+    created_by = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.Integer, nullable=False, default=now)
+    sent_at = db.Column(db.Integer)
+    acked_at = db.Column(db.Integer)
+    ok = db.Column(db.Boolean)
+    err = db.Column(db.String(40))
+    cancelled = db.Column(db.Boolean, nullable=False, default=False)

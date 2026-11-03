@@ -1,0 +1,12 @@
+services:
+  powermanager:
+    build: .
+    container_name: powermanager
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./instance:/app/instance
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped

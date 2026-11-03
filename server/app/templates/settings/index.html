@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Settings · PowerManager{% endblock %}
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
+{% macro pw_fields(label='New password') %}
+  <div class="col-md-6"><label class="form-label">{{ label }}</label><input class="form-control" type="password" name="password" required minlength="10" maxlength="128" autocomplete="new-password"></div>
+  <div class="col-md-6"><label class="form-label">Confirm</label><input class="form-control" type="password" name="confirm" required maxlength="128" autocomplete="new-password"></div>
+{% endmacro %}
+{% block content %}
+<h1 class="h4 mb-3">Settings</h1>
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'account' }}" href="?tab=account">Account</a></li>
+  {% if current_user.is_admin %}
+  <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'server' }}" href="?tab=server">Server</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'users' }}" href="?tab=users">Users</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'notifications' }}" href="?tab=notifications">Notifications</a></li>
+  {% endif %}
+</ul>
+
+{% if tab == 'account' %}
+<div class="row g-3">
+  {% for what, label, field in [('username', 'Change username', current_user.username), ('phone', 'Change phone number', current_user.phone), ('email', 'Change email', current_user.email)] %}
+  <div class="col-12 col-lg-6">
+    <form class="card" method="post" action="{{ url_for('settings.account') }}">{{ csrf() }}<input type="hidden" name="what" value="{{ what }}">
+      <div class="card-header fw-semibold">{{ label }}</div>
+      <div class="card-body row g-2">
+        <div class="col-md-6"><label class="form-label">New {{ what }}</label>
+          <input class="form-control" name="{{ what }}" value="{{ field }}" {% if what == 'email' %}type="email" maxlength="254"{% elif what == 'phone' %}maxlength="20" placeholder="+60123456789"{% else %}maxlength="32"{% endif %} {{ 'required' if current_user.is_admin or what == 'username' }}></div>
+        <div class="col-md-6"><label class="form-label">Current password</label><input class="form-control" type="password" name="current_password" required autocomplete="current-password"></div>
+      </div>
+      <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Save</button></div>
+    </form>
+  </div>
+  {% endfor %}
+  <div class="col-12 col-lg-6">
+    <form class="card" method="post" action="{{ url_for('settings.account') }}">{{ csrf() }}<input type="hidden" name="what" value="password">
+      <div class="card-header fw-semibold">Change password</div>
+      <div class="card-body row g-2">
+        <div class="col-12"><label class="form-label">Current password</label><input class="form-control" type="password" name="current_password" required autocomplete="current-password"></div>
+        {{ pw_fields() }}
+        <div class="col-12 form-text">At least 10 characters with upper, lower, digit and symbol. Other logged-in sessions will be logged out.</div>
+      </div>
+      <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Change password</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'server' %}
+<form class="card" method="post" action="{{ url_for('settings.server') }}" style="max-width:720px">{{ csrf() }}
+  <div class="card-header fw-semibold">Public server address (used in the pairing QR)</div>
+  <div class="card-body row g-3">
+    <div class="col-md-6"><label class="form-label">Address</label>
+      <input class="form-control" name="server_address" value="{{ s.get('server_address') }}" placeholder="{{ detected[0] }}">
+      <div class="form-text">Host name or IP, e.g. <code>power.example.com</code> (Cloudflare Tunnel) or <code>192.168.1.10</code>. Empty = the address you are browsing from.</div></div>
+    <div class="col-md-3"><label class="form-label">Port</label>
+      <input class="form-control" name="server_port" value="{{ s.get('server_port') }}" placeholder="default">
+      <div class="form-text">Empty = 443 (TLS) / 80.</div></div>
+    <div class="col-md-3 d-flex align-items-center"><div class="form-check form-switch mt-3">
+      <input class="form-check-input" type="checkbox" name="server_tls" id="tls" {{ 'checked' if s.get('server_tls') == '1' }}>
+      <label class="form-check-label" for="tls">Secure (TLS)</label></div></div>
+    <div class="col-12 small text-body-secondary">Currently used for pairing: <code>{{ 'https' if detected[2] else 'http' }}://{{ detected[0] }}:{{ detected[1] }}</code>{% if not configured %} (auto-detected){% endif %}</div>
+  </div>
+  <div class="card-header fw-semibold border-top">Time &amp; data</div>
+  <div class="card-body row g-3">
+    <div class="col-md-8"><label class="form-label">Display time zone</label>
+      <select class="form-select" name="timezone">
+        {% for z in zones %}<option value="{{ z }}" {{ 'selected' if z == s.get('timezone') }}>{{ z }} ({{ s.utc_offset_str(z) }})</option>{% endfor %}
+      </select>
+      <div class="form-text">Everything is stored in UTC; this only changes how times are shown and the daily session reset time.</div></div>
+    <div class="col-md-4"><label class="form-label">Keep raw readings</label>
+      <div class="input-group"><input class="form-control" type="number" min="7" max="3650" name="raw_retention_days" value="{{ s.get('raw_retention_days') }}"><span class="input-group-text">days</span></div>
+      <div class="form-text">Hourly summaries: 2 years. Daily: forever.</div></div>
+  </div>
+  <div class="card-footer text-end"><button class="btn btn-primary">Save</button></div>
+</form>
+
+{% elif tab == 'users' %}
+<div class="row g-3">
+  <div class="col-12 col-xl-7">
+    <div class="card"><div class="card-header fw-semibold">Accounts</div>
+      <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Username</th><th>Role</th><th>Email</th><th>Last login</th><th></th></tr></thead>
+        <tbody>
+        {% for u in users %}
+          <tr class="{{ 'text-body-tertiary' if not u.is_enabled }}">
+            <td>{{ u.username }}</td>
+            <td><span class="badge text-bg-{{ 'primary' if u.is_admin else 'secondary' }}">{{ u.role }}</span>{% if not u.is_enabled %} <span class="badge text-bg-dark">disabled</span>{% endif %}</td>
+            <td class="small">{{ u.email or '–' }}</td>
+            <td class="small">{{ u.last_login_at|dt }}</td>
+            <td class="text-end text-nowrap">
+              {% if not u.is_admin %}
+              <form method="post" action="{{ url_for('settings.users') }}" class="d-inline">{{ csrf() }}<input type="hidden" name="what" value="toggle"><input type="hidden" name="user_id" value="{{ u.id }}">
+                <button class="btn btn-sm btn-outline-secondary">{{ 'Disable' if u.is_enabled else 'Enable' }}</button></form>
+              <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#pw{{ u.id }}">Password</button>
+              <form method="post" action="{{ url_for('settings.users') }}" class="d-inline" onsubmit="return confirm('Delete viewer {{ u.username }}?')">{{ csrf() }}<input type="hidden" name="what" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button></form>
+              {% endif %}
+            </td>
+          </tr>
+          {% if not u.is_admin %}
+          <tr class="collapse" id="pw{{ u.id }}"><td colspan="5">
+            <form method="post" action="{{ url_for('settings.users') }}" class="row g-2">{{ csrf() }}<input type="hidden" name="what" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}">
+              {{ pw_fields('New password for ' ~ u.username) }}<div class="col-12 text-end"><button class="btn btn-sm btn-primary">Set password</button></div>
+            </form></td></tr>
+          {% endif %}
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="col-12 col-xl-5">
+    <form class="card" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="add">
+      <div class="card-header fw-semibold">Add viewer (view only)</div>
+      <div class="card-body row g-2">
+        <div class="col-12"><label class="form-label">Username</label><input class="form-control" name="username" required maxlength="32"></div>
+        {{ pw_fields('Password') }}
+        <div class="col-md-6"><label class="form-label">Email <span class="text-body-tertiary">(optional)</span></label><input class="form-control" type="email" name="email" maxlength="254"></div>
+        <div class="col-md-6"><label class="form-label">Phone <span class="text-body-tertiary">(optional)</span></label><input class="form-control" name="phone" maxlength="20" placeholder="+60…"></div>
+        <div class="col-12 form-text">Viewers can see meters, history and events and export CSV. They cannot change anything.</div>
+      </div>
+      <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Add viewer</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'notifications' %}
+<form class="card" method="post" action="{{ url_for('settings.notifications') }}" style="max-width:720px">{{ csrf() }}
+  <div class="card-header fw-semibold">Channels</div>
+  <div class="card-body">
+    <p class="small text-body-secondary">In-app notifications (bell in the menu) are always on. Which events notify is set per meter in <em>Configure → Set Notification</em>.</p>
+    <div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" name="telegram_enabled" id="tg" {{ 'checked' if s.get('telegram_enabled') == '1' }}>
+      <label class="form-check-label" for="tg">Also send to Telegram <span class="badge text-bg-warning">beta</span></label></div>
+    <div class="row g-2">
+      <div class="col-md-7"><label class="form-label">Bot token</label><input class="form-control" name="telegram_bot_token" value="{{ s.get('telegram_bot_token') }}" autocomplete="off" placeholder="123456:ABC…"></div>
+      <div class="col-md-5"><label class="form-label">Chat ID</label><input class="form-control" name="telegram_chat_id" value="{{ s.get('telegram_chat_id') }}" placeholder="e.g. 123456789"></div>
+      <div class="col-12 form-text">Create a bot with @BotFather, send it a message, then get your chat ID from <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code>.</div>
+    </div>
+  </div>
+  <div class="card-footer d-flex"><button type="button" class="btn btn-outline-secondary btn-sm" id="tgTest">Send test (saved settings)</button><button class="btn btn-primary btn-sm ms-auto">Save</button></div>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+var t = document.getElementById('tgTest');
+if (t) t.addEventListener('click', function () {
+  PM.post("{{ url_for('settings.notifications_test') }}", {}).then(function (r) { PM.toast(r.ok ? 'Test message sent' : ('Failed: ' + r.error), r.ok ? 'success' : 'danger'); });
+});
+</script>
+{% endblock %}

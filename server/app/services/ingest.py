@@ -1,0 +1,343 @@
+"""Handle messages from a connected meter (docs/protocol.md §2)."""
+import logging
+
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+from ..extensions import db
+from ..models import Device, Event, Incident, Measurement, RollupDirty, Session, now
+from . import commands, devconfig, incidents, notify
+
+log = logging.getLogger(__name__)
+
+MAX_FUTURE_S = 300
+FIELDS = ("v", "a", "w", "pf", "hz", "e")
+
+
+# ---------------------------------------------------------------- helpers
+
+def _f(value):
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_ts(conn, item):
+    """Return (ts, estimated) for an item that may have been recorded without valid time."""
+    t = now()
+    try:
+        ts = int(item.get("ts", 0))
+    except (TypeError, ValueError):
+        return t, True
+    if item.get("tv", 1):
+        if ts <= 0 or ts > t + MAX_FUTURE_S:
+            return t, True
+        return ts, False
+    # ts holds uptime seconds of boot `boot`
+    if conn is not None and conn.boot_epoch is not None and item.get("boot") == conn.boot:
+        return min(conn.boot_epoch + ts, t), True
+    return t, True
+
+
+def _mark_dirty(device_pk, ch, ts):
+    hour = ts - ts % 3600
+    day = ts - ts % 86400
+    stmt = sqlite_insert(RollupDirty).values([
+        {"device_fk": device_pk, "ch": ch, "period": "h", "bucket_start": hour},
+        {"device_fk": device_pk, "ch": ch, "period": "d", "bucket_start": day},
+    ]).on_conflict_do_nothing()
+    db.session.execute(stmt)
+
+
+def server_event(device, etype, data=None, ts=None):
+    ev = Event(device_fk=device.id, gen=device.pair_gen, seq=None, ts=ts or now(), type=etype,
+               data=data or {})
+    db.session.add(ev)
+    db.session.flush()
+    return ev
+
+
+def _bump_seq(device, seq):
+    try:
+        seq = int(seq)
+    except (TypeError, ValueError):
+        return
+    if seq > device.last_seq:
+        device.last_seq = seq
+
+
+# ---------------------------------------------------------------- connect / disconnect
+
+def on_connect(device, conn):
+    t = now()
+    was_offline = incidents.find_open(device.id, "offline") is not None
+    device.online = True
+    device.last_seen_at = t
+    ev = server_event(device, "reconnected" if was_offline else "connected", ts=t)
+    inc = incidents.close_incident(device.id, "offline", t, event=ev)
+    if inc is not None:
+        notify.notify(device, "reconnected",
+                      f"Reconnected after {incidents.fmt_duration(inc.duration_s)} offline")
+    db.session.commit()
+
+
+def on_disconnect(device, reason="connection_lost"):
+    t = now()
+    device.online = False
+    if device.removed_at:
+        db.session.commit()
+        return
+    ev = server_event(device, "disconnected", {"reason": reason}, ts=t)
+    # A timeout means the device went silent after its last message; a closed socket is "now".
+    start = (device.last_seen_at or t) if reason == "ping_timeout" else t
+    incidents.open_incident(device.id, "offline", start, event=ev, detail={"cause": reason})
+    db.session.commit()
+
+
+# ---------------------------------------------------------------- dispatcher
+
+def handle(conn, device, msg):
+    """Process one message. Returns nothing; replies go through conn.send()."""
+    t = msg.get("t")
+    device.last_seen_at = now()
+    handler = HANDLERS.get(t)
+    if handler is None:
+        return  # unknown types are ignored (forward compatibility)
+    handler(conn, device, msg)
+    db.session.commit()
+
+
+def h_ping(conn, device, msg):
+    conn.send({"t": "pong", "time": now()})
+
+
+def h_hello(conn, device, msg):
+    try:
+        up = int(msg.get("up", 0))
+    except (TypeError, ValueError):
+        up = 0
+    conn.boot = msg.get("boot")
+    conn.boot_epoch = now() - up
+    device.fw = str(msg.get("fw", device.fw or ""))[:32]
+    try:
+        device.proto = int(msg.get("proto", 1))
+    except (TypeError, ValueError):
+        device.proto = 1
+    if isinstance(msg.get("caps"), dict):
+        caps = dict(device.caps or {})
+        caps.update(msg["caps"])
+        device.caps = caps
+    state = msg.get("state")
+    if isinstance(state, dict):
+        _apply_state(device, state)
+        _reconcile_incidents(device, state)
+    try:
+        dev_ver = int(msg.get("cfg_ver", 0))
+    except (TypeError, ValueError):
+        dev_ver = 0
+    if dev_ver == device.cfg_ver_wanted:
+        device.cfg_ver_applied = dev_ver
+    conn.send({"t": "welcome", "time": now(), "cfg_ver": device.cfg_ver_wanted,
+               "last_seq": device.last_seq})
+    if dev_ver != device.cfg_ver_wanted:
+        conn.send({"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted)})
+    commands.flush_pending(device, conn)
+
+
+def h_tel(conn, device, msg):
+    items = msg.get("items") or []
+    newest = None
+    for item in items[:200]:
+        if not isinstance(item, dict) or "seq" not in item:
+            continue
+        ts, est = resolve_ts(conn, item)
+        try:
+            seq = int(item["seq"])
+        except (TypeError, ValueError):
+            continue
+        rows = []
+        for ch in item.get("ch") or []:
+            if not isinstance(ch, dict):
+                continue
+            try:
+                idx = int(ch.get("i", 0))
+            except (TypeError, ValueError):
+                continue
+            row = {"device_fk": device.id, "gen": device.pair_gen, "ch": idx, "seq": seq, "ts": ts, "time_estimated": est}
+            for f in FIELDS:
+                row[f] = _f(ch.get(f))
+            rows.append(row)
+        if rows:
+            db.session.execute(sqlite_insert(Measurement).values(rows).on_conflict_do_nothing())
+            for row in rows:
+                _mark_dirty(device.id, row["ch"], ts)
+        _bump_seq(device, seq)
+        if newest is None or ts >= newest["ts"]:
+            newest = {"ts": ts, "est": est, "ch": [
+                {"i": r["ch"], **{f: r[f] for f in FIELDS}} for r in rows]}
+    if newest is not None and newest["ch"] and newest["ts"] >= (device.last_reading or {}).get("ts", 0):
+        device.last_reading = newest
+    conn.send({"t": "ack", "last_seq": device.last_seq, "time": now()})
+
+
+def h_evt(conn, device, msg):
+    if "seq" not in msg:
+        return
+    try:
+        seq = int(msg["seq"])
+    except (TypeError, ValueError):
+        return
+    exists = Event.query.filter_by(device_fk=device.id, gen=device.pair_gen, seq=seq).first()
+    if exists is None:
+        ts, est = resolve_ts(conn, msg)
+        data = {k: v for k, v in msg.items() if k not in ("t", "id", "seq", "ts", "tv", "e", "ch", "boot")}
+        ch = msg.get("ch")
+        ev = Event(device_fk=device.id, gen=device.pair_gen, seq=seq, ts=ts, type=str(msg.get("e", "unknown"))[:32],
+                   ch=ch if isinstance(ch, int) else None, data=data, time_estimated=est)
+        db.session.add(ev)
+        db.session.flush()
+        process_event(device, ev)
+    _bump_seq(device, seq)
+    conn.send({"t": "ack", "last_seq": device.last_seq, "time": now()})
+
+
+def h_state(conn, device, msg):
+    _apply_state(device, msg)
+
+
+def h_cfg_ack(conn, device, msg):
+    try:
+        ver = int(msg.get("ver", 0))
+    except (TypeError, ValueError):
+        return
+    if msg.get("ok"):
+        if ver >= device.cfg_ver_applied:
+            device.cfg_ver_applied = ver
+        device.cfg_error = None
+        server_event(device, "config_applied", {"ver": ver})
+    else:
+        device.cfg_error = str(msg.get("err", "rejected"))[:200]
+        server_event(device, "config_rejected", {"ver": ver, "err": device.cfg_error})
+
+
+def h_cmd_ack(conn, device, msg):
+    commands.ack(device, msg.get("ref"), msg.get("ok"), msg.get("err"))
+
+
+HANDLERS = {
+    "ping": h_ping,
+    "hello": h_hello,
+    "tel": h_tel,
+    "evt": h_evt,
+    "state": h_state,
+    "cfg_ack": h_cfg_ack,
+    "cmd_ack": h_cmd_ack,
+}
+
+
+# ---------------------------------------------------------------- state / events
+
+def _apply_state(device, state):
+    clean = {k: state[k] for k in ("relay", "tripped", "tamper", "ac", "sess") if k in state}
+    merged = dict(device.last_state or {})
+    merged.update(clean)
+    merged["at"] = now()
+    device.last_state = merged
+    sess = clean.get("sess")
+    if isinstance(sess, dict) and isinstance(sess.get("sid"), int):
+        s = _session(device, sess["sid"])
+        if sess.get("start"):
+            s.started_at = s.started_at or int(sess["start"])
+        s.kwh_used = _f(sess.get("kwh")) or 0.0
+        s.kwh_max = _f(sess.get("max")) or 0.0
+
+
+def _session(device, sid):
+    s = Session.query.filter_by(device_fk=device.id, gen=device.pair_gen, sid=sid).first()
+    if s is None:
+        s = Session(device_fk=device.id, gen=device.pair_gen, sid=sid)
+        db.session.add(s)
+        db.session.flush()
+    return s
+
+
+def _reconcile_incidents(device, state):
+    """Close incidents whose end event was lost; open ones whose start was missed."""
+    t = now()
+    checks = []
+    if "tamper" in state:
+        checks.append(("tamper", bool(state["tamper"])))
+    if "ac" in state:
+        checks.append(("power", state["ac"] is False))
+    if "tripped" in state:
+        checks.append(("trip", bool(state["tripped"])))
+    for itype, active in checks:
+        open_inc = incidents.find_open(device.id, itype)
+        if active and open_inc is None:
+            incidents.open_incident(device.id, itype, t, detail={"opened_by": "state_sync"})
+        elif not active and open_inc is not None:
+            incidents.close_incident(device.id, itype, t, detail={"closed_by": "state_sync"})
+
+
+def process_event(device, ev):
+    d = ev.data or {}
+    est = ev.time_estimated
+    e = ev.type
+    if e == "overcurrent":
+        incidents.open_incident(device.id, "trip", ev.ts, ch=None, event=ev, estimated=est,
+                                detail={"a": d.get("val"), "limit": d.get("limit"), "ch": ev.ch})
+        notify.notify(device, "max_amp", f"Over-current trip: {d.get('val')} A")
+    elif e == "trip_reset":
+        incidents.close_incident(device.id, "trip", ev.ts, event=ev, estimated=est,
+                                 detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
+    elif e == "tamper_open":
+        incidents.open_incident(device.id, "tamper", ev.ts, event=ev, estimated=est)
+        notify.notify(device, "panel_open", "Panel opened (tamper switch)")
+    elif e == "tamper_close":
+        incidents.close_incident(device.id, "tamper", ev.ts, event=ev, estimated=est)
+    elif e == "ac_lost":
+        incidents.open_incident(device.id, "power", ev.ts, event=ev, estimated=est)
+        notify.notify(device, "no_voltage", "No voltage (AC power lost)")
+    elif e == "ac_restored":
+        incidents.close_incident(device.id, "power", ev.ts, event=ev, estimated=est)
+    elif e == "quota":
+        notify.notify(device, "kwh_exceeded", f"Session kWh limit reached ({d.get('kwh', '?')} kWh)")
+    elif e == "session_start":
+        sid = d.get("sid")
+        if isinstance(sid, int):
+            s = _session(device, sid)
+            s.started_at = ev.ts
+            s.auto = bool(d.get("auto"))
+            s.kwh_max = _f(d.get("max")) or s.kwh_max
+        if sid != 1:  # the very first session after pairing is not a "renew"
+            notify.notify(device, "session_renew",
+                          "Session auto-renewed" if d.get("auto") else "Session renewed")
+    elif e == "session_end":
+        sid = d.get("sid")
+        if isinstance(sid, int):
+            s = _session(device, sid)
+            s.ended_at = ev.ts
+            s.end_reason = str(d.get("reason", ""))[:10] or None
+            if d.get("kwh") is not None:
+                s.kwh_used = _f(d.get("kwh")) or 0.0
+    elif e == "server_back":
+        last_off = (Incident.query
+                    .filter_by(device_fk=device.id, type="offline")
+                    .order_by(Incident.id.desc()).first())
+        if last_off is not None:
+            detail = dict(last_off.detail or {})
+            detail["device_back_at"] = ev.ts
+            if d.get("since"):
+                detail["device_lost_at"] = d.get("since")
+            last_off.detail = detail
+
+
+def mark_all_offline_on_startup():
+    """Server just started: devices marked online lost their connection while we were down."""
+    t = now()
+    for device in Device.query.filter(Device.online.is_(True)).all():
+        device.online = False
+        ev = server_event(device, "disconnected", {"reason": "server_down"}, ts=t)
+        incidents.open_incident(device.id, "offline", device.last_seen_at or t, event=ev,
+                                detail={"cause": "server_down"})
+    db.session.commit()

@@ -1,0 +1,4 @@
+{%- if t == 'power' -%}<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>
+{%- elif t == 'trip' -%}<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>
+{%- elif t == 'tamper' -%}<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>
+{%- endif -%}

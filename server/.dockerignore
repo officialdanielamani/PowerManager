@@ -1,0 +1,8 @@
+instance/
+app/static/vendor/
+__pycache__/
+*.pyc
+.venv/
+.env
+tests/
+.pytest_cache/

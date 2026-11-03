@@ -40,7 +40,8 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | online | bool (in-memory truth, persisted for display) |
 | cfg (JSON), cfg_ver_wanted, cfg_ver_applied | see protocol §3 |
 | last_state (JSON) | latest `state` message |
-| last_seq | highest stored seq |
+| last_seq | highest stored seq (current pairing generation) |
+| pair_gen | pairing generation, +1 on every re-pair. `measurement`, `event` and `session` rows carry `gen`, so a factory-reset meter whose `seq` restarts at 1 does not collide with kept history. |
 | removed_at | soft delete |
 
 ### `channel`
@@ -58,10 +59,13 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | v, a, w, pf, hz, e | REAL, nullable |
 | time_estimated | bool |
 
+### `rollup_dirty`
+`device_fk, ch, period, bucket_start` — buckets that got new raw data (including late, buffered data) and need their roll-up rebuilt. Processed every 5 min.
+
 ### `rollup` (hourly and daily)
 | Column | Notes |
 |--------|-------|
-| device_fk, ch, period (`h`/`d`), bucket_start | PK together |
+| device_fk, ch, period (`h`/`d`), bucket_start | PK together. Buckets are UTC hours / UTC days. |
 | n | sample count |
 | v_min/v_max/v_avg, a_min/…, w_min/…, pf_avg, hz_avg | |
 | kwh | energy used in the bucket (from the `e` difference, handling PZEM resets/rollovers) |

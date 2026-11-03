@@ -1,0 +1,10 @@
+{% macro status_badge(status) -%}
+  {%- set map = {
+    'active': ('success', 'Active'),
+    'quota': ('warning', 'kWh limit reached'),
+    'expired': ('warning', 'Session ended'),
+    'tripped': ('danger', 'Over-current trip'),
+    'unknown': ('secondary', 'No data yet')} -%}
+  {%- set s = map.get(status, ('secondary', status)) -%}
+  <span class="badge text-bg-{{ s[0] }}" data-field="status-badge">{{ s[1] }}</span>
+{%- endmacro %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
+{% block title %}Dashboard · PowerManager{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h1 class="h4 mb-0">Meters</h1>
+  <span class="ms-2 text-body-secondary small">{{ meters|length }} meter{{ '' if meters|length == 1 else 's' }} · times in {{ tz_label() }}</span>
+  {% if current_user.is_admin %}
+  <a href="{{ url_for('meters.add') }}" class="btn btn-primary btn-sm ms-auto"><i class="bi bi-plus-lg me-1"></i>Add New Meter</a>
+  {% endif %}
+</div>
+
+{% if not meters %}
+<div class="card border-dashed text-center py-5">
+  <div class="card-body">
+    <i class="bi bi-plug display-5 text-body-tertiary"></i>
+    <p class="mt-3 mb-3">No meters yet.</p>
+    {% if current_user.is_admin %}<a href="{{ url_for('meters.add') }}" class="btn btn-primary">Add your first meter</a>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-3" id="meterGrid">
+  {% for m in meters %}
+  <div class="col-12 col-sm-6 col-xl-4 col-xxl-3">
+    <a href="{{ url_for('meters.info', pk=m.id) }}" class="card meter-card h-100 text-decoration-none" data-meter="{{ m.id }}">
+      <div class="card-body">
+        <div class="d-flex align-items-start mb-2">
+          <div class="me-auto">
+            <div class="fw-semibold text-body">{{ m.name }}</div>
+            <div class="small text-body-secondary">{{ m.info or m.device_id }}</div>
+          </div>
+          <span class="pm-dot {{ 'on' if m.online else 'off' }}" data-field="online" title="{{ 'Online' if m.online else 'Offline' }}"></span>
+        </div>
+        <div class="d-flex align-items-baseline gap-2 mb-2">
+          <span class="display-6 fw-semibold text-body" data-field="w">{{ m.w if m.w is not none else '–' }}</span><span class="text-body-secondary">W</span>
+          <span class="ms-auto badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span>
+        </div>
+        <div class="small text-body-secondary d-flex justify-content-between">
+          <span>Session</span>
+          <span data-field="kwh">{{ '%.3f'|format(m.kwh) if m.kwh is not none else '–' }} / {{ m.kwh_max if m.kwh_max else '∞' }} kWh</span>
+        </div>
+        <div class="progress mb-2" style="height:6px">
+          {% set pct = ((m.kwh or 0) / m.kwh_max * 100) if m.kwh_max else 0 %}
+          <div class="progress-bar {{ 'bg-warning' if pct >= 100 else '' }}" data-field="kwh-bar" style="width: {{ [pct, 100]|min }}%"></div>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          <span data-field="status">{{ status_badge(m.status) }}</span>
+          <span data-field="ongoing">
+          {% for t in m.ongoing %}{% include "_incident_badge.html" %}{% endfor %}
+          </span>
+          {% if not m.synced %}<span class="badge text-bg-info" data-field="sync">Pending sync</span>{% endif %}
+        </div>
+      </div>
+      <div class="card-footer small text-body-secondary">Last seen <span data-field="last_seen">{{ m.last_seen }}</span></div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+{% if removed %}
+<details class="mt-4">
+  <summary class="text-body-secondary small">Removed meters with kept history ({{ removed|length }})</summary>
+  <ul class="list-group mt-2">
+    {% for d in removed %}
+    <a class="list-group-item list-group-item-action small" href="{{ url_for('meters.info', pk=d.id) }}">
+      {{ d.name }} <span class="text-body-secondary">({{ d.device_id }}) · removed {{ d.removed_at|dt }}</span></a>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+PM.poll("{{ url_for('main.meters_json') }}", 5000, function (data) {
+  data.meters.forEach(function (m) {
+    var card = document.querySelector('[data-meter="' + m.id + '"]');
+    if (card) PM.updateMeterCard(card, m);
+  });
+});
+</script>
+{% endblock %}
