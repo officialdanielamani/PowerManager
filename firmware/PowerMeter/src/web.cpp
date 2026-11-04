@@ -484,8 +484,11 @@ void task(void *) {
       dns.stop();
       dnsRunning = false;
     }
+    sys::crumb(sys::CR_WEB, "dns");
     if (dnsRunning) dns.processNextRequest();
+    sys::crumb(sys::CR_WEB, "http");
     server.handleClient();
+    sys::crumb(sys::CR_WEB, "idle");
     vTaskDelay(pdMS_TO_TICKS(5));
   }
 }

@@ -1,5 +1,9 @@
 #include "system.h"
 
+#include <esp_attr.h>
+#include <esp_idf_version.h>
+#include <esp_system.h>
+
 #include "app_state.h"
 #include "outbox.h"
 #include "storage.h"
@@ -61,6 +65,87 @@ void checkHeartbeats() {
       ESP.restart();
     }
   }
+}
+
+// ------------------------------------------------------------------ crash breadcrumbs
+
+static const uint32_t CRASH_MAGIC = 0x504D4352;  // "PMCR"
+struct CrashInfo {
+  uint32_t magic;
+  uint32_t upS;      // uptime of the run, updated every second
+  uint32_t minHeap;  // lowest free heap of the run
+  uint8_t streak;    // crashes in a row soon after boot
+  char where[CR_COUNT][28];
+};
+RTC_NOINIT_ATTR static CrashInfo crash;
+bool safeMode = false;
+static esp_reset_reason_t reason = ESP_RST_UNKNOWN;
+static const char *SLOT_NAMES[CR_COUNT] = {"boot step", "loop", "net", "web", "control", "led"};
+
+void crumb(uint8_t slot, const char *where) {
+  if (slot >= CR_COUNT) return;
+  strncpy(crash.where[slot], where, sizeof(crash.where[slot]) - 1);
+  crash.where[slot][sizeof(crash.where[slot]) - 1] = 0;
+}
+
+const char *resetReason() {
+  switch (reason) {
+    case ESP_RST_POWERON: return "power on";
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_SW: return "restart";
+    case ESP_RST_PANIC: return "CRASH (panic)";
+    case ESP_RST_INT_WDT: return "CRASH (interrupt watchdog)";
+    case ESP_RST_TASK_WDT: return "CRASH (task watchdog)";
+    case ESP_RST_WDT: return "CRASH (watchdog)";
+    case ESP_RST_BROWNOUT: return "brownout (supply voltage dropped)";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+#if ESP_IDF_VERSION_MAJOR >= 5
+    case ESP_RST_USB: return "USB reset";
+#endif
+    default: return "unknown";
+  }
+}
+
+void bootCheck() {
+  reason = esp_reset_reason();
+  bool crashed = reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT || reason == ESP_RST_TASK_WDT ||
+                 reason == ESP_RST_WDT || reason == ESP_RST_BROWNOUT;
+  bool valid = crash.magic == CRASH_MAGIC && reason != ESP_RST_POWERON;
+  Serial.printf("[boot] reset reason: %s\n", resetReason());
+  if (valid && crashed) {
+    Serial.println("[crash] ===== the previous run crashed =====");
+    Serial.printf("[crash] after %lu s of uptime, lowest free heap %lu B\n", (unsigned long)crash.upS,
+                  (unsigned long)crash.minHeap);
+    for (int i = 0; i < CR_COUNT; i++) {
+      crash.where[i][sizeof(crash.where[i]) - 1] = 0;
+      Serial.printf("[crash]   %-9s : %s\n", SLOT_NAMES[i], crash.where[i][0] ? crash.where[i] : "-");
+    }
+    Serial.println("[crash] (send these lines with the crash log)");
+    crash.streak = crash.upS < 120 ? crash.streak + 1 : 1;
+  } else {
+    crash.streak = valid ? crash.streak : 0;
+    if (reason == ESP_RST_POWERON || reason == ESP_RST_EXT) crash.streak = 0;
+  }
+  safeMode = crash.streak >= 3;
+  if (safeMode)
+    Serial.printf("[boot] SAFE MODE: %u crashes in a row, starting without mesh and DS3231\n",
+                  (unsigned)crash.streak);
+  crash.magic = CRASH_MAGIC;
+  crash.upS = 0;
+  crash.minHeap = ESP.getFreeHeap();
+  memset(crash.where, 0, sizeof(crash.where));
+}
+
+void bootDone() { crumb(CR_BOOT, "done"); }
+
+void tick() {
+  static uint32_t last = 0;
+  uint32_t now = millis();
+  if (now - last < 1000) return;
+  last = now;
+  crash.upS = now / 1000;
+  crash.minHeap = ESP.getMinFreeHeap();
+  if (crash.upS >= 120 && crash.streak) crash.streak = 0;  // stable run: next boot is normal
 }
 
 }  // namespace sys

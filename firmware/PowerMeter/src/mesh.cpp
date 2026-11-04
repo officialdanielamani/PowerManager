@@ -10,6 +10,7 @@
 #include "../config.h"
 #include "net.h"
 #include "storage.h"
+#include "system.h"
 
 namespace mesh {
 
@@ -360,6 +361,10 @@ void begin() {
   return;
 #endif
   if (ready) return;
+  if (sys::safeMode) {
+    Serial.println("[mesh] SAFE MODE: mesh not started");
+    return;
+  }
   rxq = xQueueCreate(32, sizeof(RxFrame));
   if (esp_now_init() != ESP_OK) {
     Serial.println("[mesh] ESP-NOW init failed, mesh disabled");
@@ -434,7 +439,9 @@ bool leafSendPair(const String &body) {
 
 void loop() {
   if (!ready) return;
+  sys::crumb(sys::CR_NET, "mesh: rx");
   processQueue();
+  sys::crumb(sys::CR_NET, "mesh");
   uint32_t now = millis();
   if (gateway && now - lastBeaconMs > MESH_BEACON_MS) {
     lastBeaconMs = now;
@@ -446,14 +453,19 @@ void loop() {
     buf[2] = buf[3] = buf[4] = 0;
     buf[5] = 1;
     memcpy(buf + HDR, b, n);
+    sys::crumb(sys::CR_NET, "mesh: beacon");
     esp_now_send(BCAST, buf, HDR + n);
+    sys::crumb(sys::CR_NET, "mesh");
   }
   if (leaf) {
     if (linked && (now - gwSeenMs > MESH_GATEWAY_LOST_MS || sendFailsInRow > 8)) {
       Serial.printf("[mesh] leaf: lost gateway %s\n", gwId.c_str());
       linked = false;
     }
-    if (!linked && (!lastScanMs || now - lastScanMs > 5000)) scanForGateway();
+    if (!linked && (!lastScanMs || now - lastScanMs > 5000)) {
+      sys::crumb(sys::CR_NET, "mesh: scan");
+      scanForGateway();
+    }
   }
 }
 

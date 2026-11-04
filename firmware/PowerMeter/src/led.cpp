@@ -2,6 +2,7 @@
 
 #include "../config.h"
 #include "app_state.h"
+#include "system.h"
 
 namespace led {
 
@@ -72,6 +73,7 @@ void task(void *) {
   Flash current = FLASH_ACK;
   uint32_t shotStart = 0;
   bool inShot = false;
+  sys::crumb(sys::CR_LED, "running");
   for (;;) {
     uint32_t t = millis();
     if (hasPending) {

@@ -51,6 +51,7 @@ static void printBanner() {
   String ip = net::ipAddress();
   if (ip.length()) Serial.printf(" On your network: http://%s/\n", ip.c_str());
   static const char *NET[] = {"setup", "Wi-Fi connecting", "not paired", "server offline", "online"};
+  Serial.printf(" Last reset: %s%s\n", sys::resetReason(), sys::safeMode ? "   ** SAFE MODE: mesh + DS3231 off **" : "");
   Serial.printf(" Status: %s   Boot #%u   %u item(s) waiting to send\n", NET[st],
                 (unsigned)store::bootCount(), outbox::count());
   Serial.printf(" Free heap %u B, lowest %u B. %s\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), sys::stackReport().c_str());
@@ -66,7 +67,9 @@ void setup() {
   while (!Serial && millis() - t0 < 3000) delay(10);
   delay(200);
   // Boot steps are printed so a crash during start-up shows how far it got.
+  sys::bootCheck();
   auto step = [](const char *what) {
+    sys::crumb(sys::CR_BOOT, what);
     Serial.printf("[boot] %s\n", what);
     Serial.flush();
   };
@@ -90,6 +93,7 @@ void setup() {
   step("start tasks");
 
   printBanner();
+  sys::bootDone();
 
   xTaskCreatePinnedToCore(control::task, "control", STACK_CONTROL, nullptr, 3, &sys::taskHandles[0], 1);
   xTaskCreatePinnedToCore(led::task, "led", STACK_LED, nullptr, 1, &sys::taskHandles[1], 1);
@@ -110,6 +114,8 @@ void loop() {
     if (pressedMs) led::resetHold(false);
     pressedMs = 0;
   }
+  sys::crumb(sys::CR_MAIN, "loop");
+  sys::tick();
   sys::checkHeartbeats();
   sys::checkStacks();
 

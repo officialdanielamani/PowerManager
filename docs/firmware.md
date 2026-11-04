@@ -115,6 +115,14 @@ The DS3231 is only written from the net task (never inside the SNTP sync callbac
 
 At boot the serial monitor prints a `[boot] <step>` line before each init step (storage, offline buffer, clock, LED, sensor + relay, Wi-Fi + mesh, web server, tasks), so a crash shows which step it happened in.
 
+### Crash report and safe mode
+
+Each task writes a short "breadcrumb" (what it is doing now) into RTC memory, which survives a crash reboot. On the next boot the serial monitor prints the reset reason and, after a crash, a `[crash]` block: uptime at the crash, lowest free heap, the last boot step, and the last breadcrumb of `loop`, `net`, `web`, `control` and `led`. This works even when the ESP-IDF panic handler itself fails ("Re-entered core dump").
+
+**Safe mode:** after 3 crashes in a row, each within 2 minutes of boot, the meter starts without the ESP-NOW mesh and without the DS3231, so it keeps measuring, enforcing limits and reporting. The banner shows `SAFE MODE`. A run that stays up for 2 minutes clears the count, so the next reboot is normal again.
+
+"Get meter info" on the server shows **Last reset** (power on / restart / CRASH … / brownout, plus SAFE MODE).
+
 ## 8. Offline buffer
 
 - Stored on LittleFS as **append-only segment files** (`/ob/<n>.log`, 50 items each, one JSON line per item) plus the highest acknowledged `seq` in NVS. LittleFS is append-friendly, so writing an item is cheap; a segment is deleted once all its items are acknowledged.

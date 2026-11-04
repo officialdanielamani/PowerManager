@@ -4,6 +4,7 @@
 #include <time.h>
 #include "esp_sntp.h"
 #include "../config.h"
+#include "system.h"
 #if HAS_DS3231
 #include <Wire.h>
 #endif
@@ -15,6 +16,7 @@ static volatile TimeSource src_ = TS_NONE;
 static bool ntpStarted = false;
 
 #if HAS_DS3231
+static bool rtcOk = false;  // false in safe mode: the DS3231 is not used at all
 static uint8_t bcd2dec(uint8_t v) { return (v >> 4) * 10 + (v & 0x0F); }
 static uint8_t dec2bcd(uint8_t v) { return ((v / 10) << 4) | (v % 10); }
 
@@ -56,6 +58,8 @@ void begin() {
   setenv("TZ", "UTC0", 1);
   tzset();
 #if HAS_DS3231
+  rtcOk = !sys::safeMode;
+  if (!rtcOk) return;
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   uint32_t e = rtcRead();
   if (e > MIN_VALID) set(e, TS_RTC);
@@ -73,7 +77,7 @@ void set(uint32_t epoch, TimeSource src) {
   }
   src_ = src;
 #if HAS_DS3231
-  if (big && src >= TS_NTP) rtcWrite(epoch);
+  if (rtcOk && big && src >= TS_NTP) rtcWrite(epoch);
 #endif
 }
 
@@ -81,8 +85,8 @@ void set(uint32_t epoch, TimeSource src) {
 static volatile bool rtcWritePending = false;
 #endif
 
-// Runs in the lwIP task, which has a very small stack: never do I2C here (that overflowed the
-// stack and crashed on boot in 0.4.0/0.4.1). Only note it; loop() (net task) writes the RTC.
+// Runs in the lwIP task, which has a very small stack: never do I2C here (it can overflow that
+// stack). Only note it; loop() (net task) writes the RTC.
 static void onNtpSync(struct timeval *) {
   // SNTP already set the system clock. Server time stays the stronger source.
   if (src_ != TS_SERVER) src_ = TS_NTP;
@@ -100,7 +104,7 @@ void loop() {
 #if HAS_DS3231
   if (rtcWritePending) {
     rtcWritePending = false;
-    rtcWrite((uint32_t)time(nullptr));
+    if (rtcOk) rtcWrite((uint32_t)time(nullptr));
   }
 #endif
 }

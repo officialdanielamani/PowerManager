@@ -5,6 +5,7 @@
 #include "../config.h"
 #include "outbox.h"
 #include "storage.h"
+#include "system.h"
 #include "timekeep.h"
 
 namespace control {
@@ -537,7 +538,9 @@ void task(void *) {
   }
   TickType_t last = xTaskGetTickCount();
   for (;;) {
+    sys::crumb(sys::CR_CONTROL, "sensor");
     if (tick % (1000 / CONTROL_TICK_MS) == 0) readSensor();
+    sys::crumb(sys::CR_CONTROL, "rules");
     checkTamper();
     checkRules(first);
     first = false;
@@ -550,6 +553,7 @@ void task(void *) {
     if (reportNow_ || millis() - lastReportMs_ >= reportMs) {
       reportNow_ = false;
       lastReportMs_ = millis();
+      sys::crumb(sys::CR_CONTROL, "telemetry");
       pushTelemetry();
     }
     tick++;

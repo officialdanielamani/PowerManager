@@ -169,9 +169,11 @@ static void wifiLoop() {
   if (!mdnsStarted) {
     String host = "power-" + store::deviceId();
     host.toLowerCase();
+    sys::crumb(sys::CR_NET, "wifi: mDNS");
     mdnsStarted = MDNS.begin(host.c_str());
     if (mdnsStarted) MDNS.addService("http", "tcp", 80);
   }
+  sys::crumb(sys::CR_NET, "wifi: time");
   timekeep::loop();
 }
 
@@ -495,6 +497,7 @@ static void sendInfo() {
   doc["outbox"] = outbox::count();
   doc["time_src"] = timekeep::sourceName();
   doc["stack"] = sys::stackReport();
+  doc["reset"] = String(sys::resetReason()) + (sys::safeMode ? " - SAFE MODE (mesh + DS3231 off)" : "");
   if (battery::enabled()) {
     float v = battery::volts();
     doc["bat_v"] = serialized(String(v, 2));
@@ -654,6 +657,7 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
       ws.setReconnectInterval(reconnectMs + (esp_random() % 1000));
       break;
     case WStype_TEXT: {
+      sys::crumb(sys::CR_NET, "ws: message");
       // Messages for our mesh leaves are forwarded as they are (they are signed by the server).
       JsonDocument filter, head;
       filter["t"] = true;
@@ -707,7 +711,9 @@ static void onlineWork() {
     }
     return;
   }
+  sys::crumb(sys::CR_NET, "online: outbox");
   flushOutbox();
+  sys::crumb(sys::CR_NET, "online");
   if (control::stateVersion() != lastStateVer && now - lastStateSentMs > 500) sendState();
 }
 
@@ -724,10 +730,13 @@ static void serverLoop() {
     return;
   }
   if (!wsStarted) {
+    sys::crumb(sys::CR_NET, "server: ws start");
     store::loadServer(srv);
     startWs();
   }
+  sys::crumb(sys::CR_NET, "server: ws.loop");
   ws.loop();
+  sys::crumb(sys::CR_NET, "server");
 
   if (!helloDone) {
     setNet(NET_CONNECTING);
@@ -845,7 +854,9 @@ void begin() {
 void task(void *) {
   for (;;) {
     sys::heartbeat(sys::HB_NET);
+    sys::crumb(sys::CR_NET, "mode");
     modeLoop();
+    sys::crumb(sys::CR_NET, "wifi");
     if (!leafMode) wifiLoop();
     bool pending;
     PairRequest r;
@@ -856,17 +867,23 @@ void task(void *) {
       pairPending = false;
     }
     xSemaphoreGive(pairLock);
-    if (pending) doPair(r);
+    if (pending) {
+      sys::crumb(sys::CR_NET, "pair");
+      doPair(r);
+    }
     if (meshPairPending && (int32_t)(millis() - meshPairDeadline) > 0) {
       meshPairPending = false;
       setPairStatus("The gateway meter did not answer. Try again.");
     }
 
+    sys::crumb(sys::CR_NET, "mesh");
     mesh::loop();
     sys::heartbeat(sys::HB_NET);  // a gateway search can take a few seconds
     if (leafMode) {
+      sys::crumb(sys::CR_NET, "leaf");
       leafLoop();
     } else if (WiFi.status() == WL_CONNECTED) {
+      sys::crumb(sys::CR_NET, "server");
       serverLoop();
     } else {
       if (wsStarted) stopWs();
@@ -875,6 +892,7 @@ void task(void *) {
     }
     // Auto role: an online meter also relays for nearby leaf meters.
     static uint8_t role = store::meshRole();  // changing the role restarts the meter
+    sys::crumb(sys::CR_NET, "gateway role");
     mesh::setGateway(!leafMode && helloDone && WiFi.status() == WL_CONNECTED && role == 0);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
