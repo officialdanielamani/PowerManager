@@ -37,7 +37,7 @@
 <div class="row g-3" id="meterGrid">
   {% for m in meters %}
   <div class="col-12 col-sm-6 col-xl-4 col-xxl-3">
-    <div class="card meter-card h-100 position-relative" data-meter="{{ m.id }}">
+    <div class="card meter-card h-100 position-relative {{ 'pm-disabled' if m.disabled }}" data-meter="{{ m.id }}">
       <div class="card-body">
         <div class="d-flex align-items-start gap-2 mb-2">
           {% if current_user.is_admin %}
@@ -78,7 +78,7 @@
           <span data-field="ongoing">
           {% for t in m.ongoing %}{% include "_incident_badge.html" %}{% endfor %}
           </span>
-          {% if not m.synced %}<span class="badge text-bg-info" data-field="sync">Pending sync</span>{% endif %}
+          {% if not m.synced and not m.disabled %}<span class="badge text-bg-info" data-field="sync">Pending sync</span>{% endif %}
         </div>
       </div>
       <div class="card-footer small text-body-secondary">Last seen <span data-field="last_seen">{{ m.last_seen }}</span></div>
@@ -89,11 +89,11 @@
 
 {% if removed %}
 <details class="mt-4">
-  <summary class="text-body-secondary small">Removed meters with kept history ({{ removed|length }})</summary>
+  <summary class="text-body-secondary small">Unsynced meters with kept history ({{ removed|length }})</summary>
   <ul class="list-group mt-2">
     {% for d in removed %}
     <a class="list-group-item list-group-item-action small" href="{{ url_for('meters.info', pk=d.id) }}">
-      {{ d.name }} <span class="text-body-secondary">({{ d.device_id }}) · removed {{ d.removed_at|dt }}</span></a>
+      {{ d.name }} <span class="text-body-secondary">({{ d.device_id }}) · unsynced {{ d.removed_at|dt }}</span></a>
     {% endfor %}
   </ul>
 </details>

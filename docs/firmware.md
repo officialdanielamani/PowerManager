@@ -12,6 +12,7 @@ Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. The folder is
 | Tamper switch | Normally-closed to GND. Open circuit = panel open (a cut wire also shows as open). |
 | WS2812 RGB LED | Onboard (GPIO48) or external |
 | DS3231 RTC (optional) | Keeps time with no network after a reboot |
+| Battery sense (optional) | Resistor divider from the UPS/backup battery to an ADC pin (`BATTERY_ENABLE`), reported by *Get meter info* and on the local page |
 
 ### Proposed pin map (check against your board's silkscreen)
 
@@ -23,6 +24,7 @@ Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. The folder is
 | Tamper input | 4 | `INPUT_PULLUP` |
 | I2C SDA (DS3231) | 8 | optional |
 | I2C SCL (DS3231) | 9 | optional |
+| Battery ADC | 1 | optional, ADC1 (works with Wi-Fi on); via divider, keep below ~3.1 V |
 | RGB LED | 48 | onboard WS2812 |
 | BOOT button | 0 | Long press 10 s = factory reset |
 
@@ -94,6 +96,7 @@ relay_on = want_on
 - **Over-current**: A > `amp_max` for 2 reads in a row → `tripped = true` (stored in NVS, survives reboot), relay OFF, event `overcurrent`.
 - **Quota**: `session_kwh = e_now − e_at_session_start ≥ kwh_max` → per `kwh_action`: **warn** (*Session run as usual*): `quota` once + `sess.over`, power stays on; **hold** (*Off relay, but session continue*, default): relay OFF, session ends at its time limit or on Renew; **end** (*End session*): `quota` + `session_end` (reason `quota`) now. `session_end` is sent exactly once per session (`sess.ended`).
 - **Operating voltage**: outside `volt.min`–`volt.max` for 3 readings → `voltage_out`; back inside for 10 readings → `voltage_ok`. Action **run** = event only, **hold** = relay OFF while out of range, **end** = session ends (status `ended`, reason `voltage`). Below 50 V counts as "No AC", not as out of range.
+- **Disabled** (server `disable`): session ends (reason `disabled`), relay OFF, Relay ON refused, no new sessions until `enable`. Persisted in NVS.
 - **Tamper protection** (if enabled): panel opens → **run** = event only, **hold** = relay OFF while open, **end** = session ends (reason `tamper`). Without protection, tamper is only reported.
 - **Session expiry**: `now ≥ next_reset` (needs valid time) → end session `expired` (unless a kWh limit already ended it); if `auto` → start a new one at once; else relay OFF until `renew`.
 - Every telemetry item carries the session progress `s: {sid, kwh}`, so the server's "session used" stays current between `state` messages.
@@ -123,6 +126,7 @@ Only the highest-priority active state is shown. One-shot patterns (marked ⚡) 
 | Priority | State | Pattern |
 |----------|-------|---------|
 | 1 | Factory reset (BOOT held 10 s / removed by server) | White fast flash (10 Hz) |
+| – | Disabled by the server | Very dim red, steady |
 | 2 | Boot / self-test | Short R → G → B sweep (once at power-on) |
 | 3 | Over-current tripped (latched) | **Red solid** (relay OFF) |
 | 4 | Quota exceeded / session expired | **Yellow blink** 1 Hz until renewed |

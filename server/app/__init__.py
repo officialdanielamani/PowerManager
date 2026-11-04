@@ -10,7 +10,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .config import Config
 from .extensions import csrf, db, limiter, login_manager, sock
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 log = logging.getLogger("powermanager")
 
 

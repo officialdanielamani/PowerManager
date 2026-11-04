@@ -1,8 +1,9 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.2.0"
 #define HW_NAME "esp32s3-supermini"
+#define HW_INFO "PZEM-004T 1Chn"   // free text shown in "Get meter info" on the server
 #define PROTO_VERSION 1
 
 // ---------------------------------------------------------------- pins (check your board)
@@ -20,6 +21,17 @@
 
 // Set to 1 if a DS3231 RTC module is fitted.
 #define HAS_DS3231 0
+
+// ---------------------------------------------------------------- battery (optional)
+// Measures the DC UPS / backup battery through a resistor divider into an ADC pin:
+//   battery + ── R1 ──┬── R2 ── GND        BATTERY_DIVIDER = (R1 + R2) / R2
+//                     └── PIN_BATTERY_ADC   (keep the pin below ~3.1 V)
+// Example: 1S Li-ion (4.2 V max) with R1 = R2 = 100 k  ->  divider 2.0.
+#define BATTERY_ENABLE 0
+#define PIN_BATTERY_ADC 1          // GPIO1 = ADC1 channel 0 (ADC1 works while Wi-Fi is on)
+#define BATTERY_DIVIDER 2.0f
+#define BATTERY_V_EMPTY 3.30f      // 0 %   (1S Li-ion; e.g. 11.0 / 12.6 for a 3S pack)
+#define BATTERY_V_FULL 4.20f       // 100 %
 
 // ---------------------------------------------------------------- setup Wi-Fi (access point)
 // SSID is always "Power_<DeviceID>".

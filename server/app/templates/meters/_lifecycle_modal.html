@@ -1,0 +1,70 @@
+{# Disable / Unsync / Remove (admin). Each option says exactly what will happen. #}
+<div class="modal fade" id="lifecycleModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">Disable, unsync or remove {{ d.name }} <code class="fs-6">{{ d.device_id }}</code></h5>
+    <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="list-group">
+      {% if not d.disabled_at %}
+      <label class="list-group-item d-flex gap-3">
+        <input class="form-check-input flex-shrink-0 mt-1" type="radio" name="lcAction" value="disable">
+        <span><strong>Disable device</strong>
+          <ul class="small mb-0 mt-1">
+            <li>The current session <strong>ends</strong> and the relay turns <strong>OFF</strong>; Relay ON is refused (also on the meter's own page).</li>
+            <li>The meter stays paired but is <strong>read-only</strong>: no configuration changes, no new readings or events are recorded.</li>
+            <li>Ongoing events such as <em>Offline</em> or <em>No power</em> are ended.</li>
+            <li>All data stays. You can <strong>Enable</strong> it again later.</li>
+          </ul></span>
+      </label>
+      {% endif %}
+      <label class="list-group-item d-flex gap-3">
+        <input class="form-check-input flex-shrink-0 mt-1" type="radio" name="lcAction" value="unsync">
+        <span><strong>Unsync device</strong>
+          <ul class="small mb-0 mt-1">
+            <li>The current session <strong>ends</strong> and the meter <strong>factory resets</strong> (back to "create admin account"; if it is offline, when it next connects).</li>
+            <li>Ongoing events such as <em>Offline</em> or <em>No power</em> are ended.</li>
+            <li>All data stays, listed under <em>Unsynced meters</em>.</li>
+            <li>If this hardware is paired again, you choose: <strong>continue</strong> as this meter, or start as a <strong>new</strong> meter.</li>
+          </ul></span>
+      </label>
+      <label class="list-group-item d-flex gap-3 list-group-item-danger">
+        <input class="form-check-input flex-shrink-0 mt-1" type="radio" name="lcAction" value="remove">
+        <span><strong>Remove device</strong>
+          <ul class="small mb-0 mt-1">
+            <li>The current session <strong>ends</strong> and the meter <strong>factory resets</strong>.</li>
+            <li><strong>All data of this meter is deleted</strong>: power readings, sessions, historical events, notifications, user links. This cannot be undone.</li>
+          </ul></span>
+      </label>
+    </div>
+    <div class="mt-3 d-none" id="lcConfirmRemove">
+      <label class="form-label small">Type the Device ID <code>{{ d.device_id }}</code> to confirm</label>
+      <input class="form-control font-monospace" id="lcConfirmText" autocomplete="off" style="max-width:240px">
+    </div>
+    <div class="form-check mt-3" id="lcAckWrap"><input class="form-check-input" type="checkbox" id="lcAck">
+      <label class="form-check-label" for="lcAck">I understand what will happen</label></div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button class="btn btn-danger" id="lcGo" disabled>Choose an option</button></div>
+</div></div></div>
+<script>
+(function () {
+  var url = "{{ url_for('meters.action', pk=d.id) }}", id = "{{ d.device_id }}";
+  var go = document.getElementById('lcGo'), ack = document.getElementById('lcAck'), txt = document.getElementById('lcConfirmText');
+  var labels = {disable: 'Disable device', unsync: 'Unsync device', remove: 'Delete everything & remove'};
+  function sel() { var r = document.querySelector('[name=lcAction]:checked'); return r ? r.value : null; }
+  function sync() {
+    var a = sel();
+    document.getElementById('lcConfirmRemove').classList.toggle('d-none', a !== 'remove');
+    go.textContent = a ? labels[a] : 'Choose an option';
+    go.className = 'btn ' + (a === 'disable' ? 'btn-warning' : 'btn-danger');
+    go.disabled = !a || !ack.checked || (a === 'remove' && txt.value.trim().toUpperCase() !== id);
+  }
+  document.querySelectorAll('[name=lcAction]').forEach(function (r) { r.addEventListener('change', sync); });
+  ack.addEventListener('change', sync); txt.addEventListener('input', sync);
+  go.addEventListener('click', function () {
+    go.disabled = true;
+    PM.post(url, {action: sel(), confirm: txt.value}).then(function (r) {
+      if (r.ok) location.href = r.redirect; else { PM.toast(r.message || r.error, 'danger'); sync(); }
+    });
+  });
+})();
+</script>

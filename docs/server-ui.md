@@ -45,7 +45,8 @@ Shows a **Synced / Pending sync** badge.
 | Section | Fields |
 |---------|--------|
 | General | Device ID (read-only), Nick Name, Info, Send data every [10 s – 1 h] |
-| Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · [Remove Device] (confirm dialog with [ ] Also delete history; warns that the meter will **factory reset**) |
+| Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · **[Disable / Unsync / Remove]** (dialog explaining each option, "I understand" tick, Device ID typed for Remove) |
+| Data clean-up | [ ] Automatically delete data if session more than [120] days ago · [ ] Automatically delete Historical Events more than [120] days ago |
 | Set Limit | In this order: **Max kWh per session** + *When the kWh limit is reached*: ( ) Session run as usual · (•) Off relay, but session continue (default) · ( ) End session — **Session time limit** (none / duration D-H-M / daily HH:MM), Auto renew, Relay off when offline — **Max Amp** (0 = off; latched until Reset Trip) — **Operating Voltage Range** Min–Max V + *If out of range* (same 3 choices) — **Tamper Protection** [ ] enable + *If tamper detected* (same 3 choices) |
 | Link this meter to users | Checkbox per view-only user (server-only, never sent to the meter) |
 
@@ -58,11 +59,22 @@ Notification options are **not** here any more: see *Notification Options* below
 
 Each meter has three tabs: **Info** (everyone with access), **Notification Options** (everyone with access, per account), **Configuration** (admin).
 
+### Re-paired unsynced meter
+The Configuration page shows: *This hardware was used before as "Dryer A" and was unsynced* → **[Continue as "Dryer A"]** / **[Make it a new meter]**.
+
+### Disabled meter
+Info page banner: *Disabled since … relay off, no session, read-only* with **[Enable]** and **[Unsync / Remove]** (admin). Configuration is blocked; dashboard card is greyed with a *Disabled* badge.
+
+### Notifications page
+Own notifications only: select (checkbox, select all) → **Delete selected**, or **Delete all**; *Mark all read*. Settings → Account → *My notifications*: [ ] Automatically delete notifications more than [30] days ago.
+
 ### Notification Options (admin and linked viewers, per account)
 Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · Panel open · No voltage · Disconnected for [X] min · Reconnected. They apply only to the logged-in account.
 
 ### Meter Info (view-only; admin and viewers)
 - Device ID, Nick Name, Info, kWh per session, next session reset (display TZ), **session cost** (if a price is set), **session started, time elapsed, time left** (live, ticks every second; "Session ended" once a limit ended it), auto renew yes/no, last online, firmware.
+- **[Get meter info]** (admin) in the *Meter* card: asks the meter for IP, Wi-Fi, MAC, battery voltage + % (if enabled), free heap, PSRAM, firmware, hardware name, `HW_INFO`, chip, uptime; shown in a dialog.
+- Historical Events (admin): checkboxes + **Delete selected**.
 - **[Get Data Now]** in *Latest data* (admin and viewers): asks the meter for a reading now and waits up to 15 s for it (rate limited to once per 5 s per meter).
 - Latest data: V, A, W, PF, Hz, session kWh used / remaining.
 - Admin-only buttons: Relay ON/OFF, [Renew Now], [Reset Trip], [Send Data Now], [Configure].

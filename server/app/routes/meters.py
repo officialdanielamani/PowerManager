@@ -14,7 +14,7 @@ from ..extensions import db
 from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, User,
                       PairingCode, Rollup, RollupDirty, Session, now)
-from ..services import access, commands, devconfig, history, hub, incidents, ingest, settings, validation
+from ..services import access, commands, devconfig, history, hub, incidents, ingest, lifecycle, settings, validation
 from .decorators import admin_required
 from .device_api import ensure_device_defaults
 from .main import meter_summary
@@ -109,6 +109,9 @@ def _set_viewers(device, user_ids):
 @admin_required
 def configure(pk):
     device = _device(pk)
+    if device.disabled_at:
+        flash("This meter is disabled (read-only). Enable it to change its configuration.", "warning")
+        return redirect(url_for("meters.info", pk=pk))
     errors = []
     waiting = False
     if request.method == "POST":
@@ -119,7 +122,16 @@ def configure(pk):
         errors += [err] if err else []
         cfg, cfg_errors = devconfig.parse_form(form, device)
         errors += cfg_errors
+        retention = {}
+        for key, label in (("data", "Data"), ("events", "Historical events")):
+            raw = (form.get(f"{key}_autodel_days") or "120").strip()
+            if not raw.isdigit() or not 1 <= int(raw) <= 3650:
+                errors.append(f"{label} auto-delete: days must be 1–3650")
+            else:
+                retention[key] = (form.get(f"{key}_autodel") == "on", int(raw))
         if not errors:
+            device.data_autodel, device.data_autodel_days = retention["data"]
+            device.events_autodel, device.events_autodel_days = retention["events"]
             device.name, device.info = name, info
             config_changed = cfg != device.cfg
             device.cfg = cfg
@@ -181,6 +193,43 @@ def sync_status(pk):
                    wanted=d.cfg_ver_wanted, applied=d.cfg_ver_applied)
 
 
+@bp.post("/<int:pk>/resync")
+@admin_required
+def resync(pk):
+    """Re-paired hardware that was unsynced before: continue its history, or start as a new meter."""
+    device = _device(pk)
+    if not device.resync_pending:
+        return redirect(url_for("meters.configure", pk=pk))
+    if request.form.get("choice") == "new":
+        archived = lifecycle.resync_as_new(device)
+        flash(f"Started as a new meter. The old history is kept as '{archived.name}' under unsynced meters.", "success")
+    else:
+        device.resync_pending = False
+        db.session.commit()
+        flash(f"Continuing as '{device.name}' with its history.", "success")
+    return redirect(url_for("meters.configure", pk=pk, new=1))
+
+
+@bp.get("/<int:pk>/device-info")
+@admin_required
+def device_info(pk):
+    d = _device(pk)
+    return jsonify(at=d.last_info_at, at_local=settings.fmt_ts(d.last_info_at), info=d.last_info or {},
+                   online=hub.is_online(d.id))
+
+
+@bp.post("/<int:pk>/incidents/delete")
+@admin_required
+def incidents_delete(pk):
+    device = _device(pk, allow_removed=True)
+    body = request.get_json(silent=True) or {}
+    ids = [int(i) for i in body.get("ids", []) if str(i).isdigit()]
+    n = (Incident.query.filter(Incident.device_fk == device.id, Incident.id.in_(ids or [-1]))
+         .delete(synchronize_session=False))
+    db.session.commit()
+    return jsonify(ok=True, deleted=n, message=f"Deleted {n} event(s)")
+
+
 # ------------------------------------------------------------------ actions
 
 def _delete_history(device):
@@ -202,6 +251,8 @@ def action(pk):
     elif act in ("renew", "reset_trip", "send_now"):
         params = {"by": current_user.username} if act == "reset_trip" else {}
         cmd, err = commands.issue(device, act, params, current_user)
+    elif device.disabled_at and act not in ("send_now", "enable", "disable", "unsync", "remove", "get_info"):
+        return jsonify(ok=False, error="disabled", message="This meter is disabled (read-only). Enable it first."), 409
     elif act == "set_default":
         device.cfg = devconfig.default_cfg(devconfig.channel_count(device))
         ensure_device_defaults(device, reset=True)
@@ -212,23 +263,32 @@ def action(pk):
         _push_config(device)
         return jsonify(ok=True, message="Config reset to defaults" +
                        ("" if hub.is_online(device.id) else " (will apply when the device reconnects)"))
-    elif act == "remove":
-        delete = str(body.get("delete_history", "")).lower() in ("1", "true", "on")
-        hub.send(device.id, {"t": "cmd", "c": "remove", "ref": 0})
-        device.removed_at = now()
-        device.secret_hash = None
-        device.online = False
-        incidents.close_incident(device.id, "offline", now(), detail={"closed_by": "removed"})
-        if delete:
-            _delete_history(device)
-        else:
-            ingest.server_event(device, "removed", {"by": current_user.username})
-        db.session.commit()
-        return jsonify(ok=True, redirect=url_for("main.dashboard"))
+    elif act in ("disable", "enable", "unsync", "remove"):
+        if act == "remove" and str(body.get("confirm", "")).strip().upper() != device.device_id:
+            return jsonify(ok=False, error="confirm", message=f"Type the Device ID ({device.device_id}) to confirm."), 400
+        if act == "enable" and not device.disabled_at:
+            return jsonify(ok=False, error="not_disabled", message="This meter is not disabled."), 409
+        getattr(lifecycle, act)(device, current_user)
+        msgs = {"disable": "Meter disabled: session ended, relay off, history is read-only.",
+                "enable": "Meter enabled: a new session starts.",
+                "unsync": "Meter unsynced: it will factory reset. History is kept.",
+                "remove": "Meter removed: it will factory reset and all its data was deleted."}
+        flash(msgs[act], "success")
+        dest = url_for("meters.info", pk=device.id) if act in ("disable", "enable") else url_for("main.dashboard")
+        return jsonify(ok=True, redirect=dest)
+    elif act == "get_info":
+        cmd, err = commands.issue(device, "get_info", {}, current_user)
+        if err or (cmd is not None and not cmd.sent_at):
+            if cmd is not None:
+                cmd.cancelled = True
+                db.session.commit()
+            return jsonify(ok=False, error="offline", message="The meter is offline."), 409
+        return jsonify(ok=True, message="Asked the meter for its info")
     else:
         return jsonify(ok=False, error="unknown_action"), 400
     if err:
         messages = {
+            "disabled": "This meter is disabled (read-only). Enable it first.",
             "quota_exceeded": "Relay ON blocked: kWh quota for this session is used up. Renew the session first.",
             "session_expired": "Relay ON blocked: session ended. Renew the session first.",
             "tripped": "Relay ON blocked: over-current trip. Reset the trip first.",

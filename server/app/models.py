@@ -32,6 +32,9 @@ class User(UserMixin, db.Model):
     # Viewer permissions (admin always has both). Default off.
     can_csv = db.Column(db.Boolean, nullable=False, default=False)
     show_price = db.Column(db.Boolean, nullable=False, default=False)
+    # Own notifications older than N days are deleted automatically (if enabled).
+    notif_autodel = db.Column(db.Boolean, nullable=False, default=False)
+    notif_autodel_days = db.Column(db.Integer, nullable=False, default=30)
 
     meters = db.relationship("Device", secondary="meter_viewer", lazy="dynamic",
                              backref=db.backref("viewers", lazy="dynamic"))
@@ -92,7 +95,19 @@ class Device(db.Model):
     # Incremented on every (re)pairing. The device's seq counter restarts after a factory
     # reset, so uniqueness of seq is per pairing generation.
     pair_gen = db.Column(db.Integer, nullable=False, default=1)
-    removed_at = db.Column(db.Integer)
+    removed_at = db.Column(db.Integer)      # unsynced or removed (meter factory-reset)
+    purged = db.Column(db.Boolean, nullable=False, default=False)  # removed + all data deleted (tombstone)
+    disabled_at = db.Column(db.Integer)     # disabled: paired but read-only, relay forced off
+    # An unsynced meter paired again: the admin chooses "continue" or "new meter".
+    resync_pending = db.Column(db.Boolean, nullable=False, default=False)
+    # Per-meter automatic clean-up (server-only settings, not sent to the meter).
+    data_autodel = db.Column(db.Boolean, nullable=False, default=False)
+    data_autodel_days = db.Column(db.Integer, nullable=False, default=120)
+    events_autodel = db.Column(db.Boolean, nullable=False, default=False)
+    events_autodel_days = db.Column(db.Integer, nullable=False, default=120)
+    # Last answer to "Get meter info".
+    last_info = db.Column(db.JSON, nullable=False, default=dict)
+    last_info_at = db.Column(db.Integer)
 
     channels = db.relationship("Channel", backref="device", cascade="all, delete-orphan",
                                order_by="Channel.idx")

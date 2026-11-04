@@ -104,6 +104,7 @@ Other close codes: `1001` = server is shutting down (reconnect with backoff), `4
 | `state` | After any relay/session change, and in response to `get_state` | see 2.6 |
 | `cfg_ack` | After applying a config | `ver`, `ok`, `err?` |
 | `cmd_ack` | After a command | `ref` (copied from the `cmd`), `ok`, `err?` (`quota_exceeded`, `session_expired`, `tripped`, `unknown_cmd`) |
+| `info` | Reply to `get_info` | `ip`, `ssid`, `rssi`, `mac`, `heap`, `heap_min`, `psram`, `psram_free`, `fw`, `hw`, `hw_info` (config.h `HW_INFO`), `chip`, `flash`, `core`, `uptime`, `boot`, `outbox`, `time_src`, and `bat_v` + `bat_pct` when `BATTERY_ENABLE` is on |
 | `ping` | Every 30 s | – (server replies `pong`) |
 
 ### 2.3 Server → Device
@@ -127,6 +128,9 @@ Commands (`cmd.c`):
 | `reset_trip` | – | Clear the over-current latch |
 | `get_state` | – | Reply with `state` |
 | `remove` | – | Reply `cmd_ack`, close, then **factory reset**: wipe local admin, Wi-Fi, pairing, config, session, trip latch and buffer (AP password kept) → reboot into first-boot AP mode |
+| `disable` | – | Server disabled the meter: end the session (reason `disabled`), relay OFF, refuse Relay ON (also locally), no new sessions. Persisted across reboots |
+| `enable` | – | Undo `disable`: start a new session |
+| `get_info` | – | Reply with an `info` message (below) |
 | `set_default` | – | Not a device command: the server makes a new default config and sends it as `cfg` |
 
 Commands for an offline device are **queued** on the server and sent on reconnect (except `send_now`, which is dropped, and `relay`, which is replaced by the latest one).
@@ -196,7 +200,7 @@ Disconnect / reconnect notifications are produced **by the server** (from the WS
 }
 ```
 
-`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_action: warn` (power still on). `sess.ended: true` = `session_end` already sent for this session. `status: ended` + `sess.end_reason` (`voltage`/`tamper`) = ended early by a protection (relay OFF until renewed). `block` can also be `ended`, `voltage`, `tamper`. `volt_out: true` = voltage currently out of range.
+`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_action: warn` (power still on). `sess.ended: true` = `session_end` already sent for this session. `status: ended` + `sess.end_reason` (`voltage`/`tamper`) = ended early by a protection (relay OFF until renewed). `block` can also be `ended`, `voltage`, `tamper`, `disabled`. `disabled: true` = disabled by the server. `volt_out: true` = voltage currently out of range.
 
 ## 3. Config document
 

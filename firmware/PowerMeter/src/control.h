@@ -16,6 +16,7 @@ bool setRelay(bool on, const char *src, const char *&err);
 void renew(const char *reason, bool autoRenew);  // reason: "manual" / "expired"
 bool resetTrip(const char *src, const char *by);
 void applyConfig(const MeterConfig &c);
+void setDisabled(bool disabled);  // server "disable" / "enable"
 void reportNow();
 
 // Event into the outbox. `fill` adds extra fields.

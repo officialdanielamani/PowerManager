@@ -3,7 +3,17 @@
 {% block title %}{{ d.name }} · PowerManager{% endblock %}
 {% block content %}
 {% if d.removed_at %}
-<div class="alert alert-secondary"><i class="bi bi-archive me-1"></i>This meter was removed on {{ d.removed_at|dt }}. History is kept for viewing.</div>
+<div class="alert alert-secondary"><i class="bi bi-archive me-1"></i>This meter was unsynced on {{ d.removed_at|dt }}. History is kept for viewing.</div>
+{% elif d.disabled_at %}
+<div class="alert alert-warning d-flex flex-wrap align-items-center gap-2">
+  <span><i class="bi bi-slash-circle me-1"></i><strong>Disabled</strong> since {{ d.disabled_at|dt }}: relay off, no session, read-only. Data is kept.</span>
+  {% if current_user.is_admin %}
+  <span class="ms-auto d-flex gap-2">
+    <button class="btn btn-sm btn-success" data-action="enable" data-confirm="Enable {{ d.name }}? A new session starts and the relay follows its normal rules again."><i class="bi bi-play-circle me-1"></i>Enable</button>
+    <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#lifecycleModal">Unsync / Remove</button>
+  </span>
+  {% endif %}
+</div>
 {% endif %}
 <div class="d-flex align-items-start flex-wrap gap-2 mb-3" data-meter="{{ d.id }}" id="meterHead">
   <div>
@@ -11,7 +21,7 @@
     <div class="text-body-secondary small">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
   </div>
   <div class="ms-auto d-flex flex-wrap gap-2">
-    {% if current_user.is_admin and not d.removed_at %}
+    {% if current_user.is_admin and not d.removed_at and not d.disabled_at %}
     <button class="btn btn-sm btn-success" data-action="relay_on" id="btnRelayOn"><i class="bi bi-toggle-on me-1"></i>Relay ON</button>
     <button class="btn btn-sm btn-outline-secondary" data-action="relay_off"><i class="bi bi-toggle-off me-1"></i>Relay OFF</button>
     <button class="btn btn-sm btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
@@ -23,7 +33,9 @@
 {% set active = 'info' %}{% include "meters/_tabs.html" %}
 <div class="row g-3 mb-3">
   <div class="col-12 col-lg-5">
-    <div class="card h-100"><div class="card-header fw-semibold">Meter</div><div class="card-body">
+    <div class="card h-100"><div class="card-header fw-semibold d-flex align-items-center">Meter
+      {% if current_user.is_admin and not d.removed_at %}<button class="btn btn-sm btn-outline-secondary ms-auto fw-normal" id="btnMeterInfo" title="Ask the meter for its IP, memory, firmware, battery…"><i class="bi bi-cpu me-1"></i>Get meter info</button>{% endif %}
+    </div><div class="card-body">
       <dl class="row mb-0 small">
         <dt class="col-6">Status</dt><dd class="col-6" data-field="status">{{ status_badge(m.status) }}</dd>
         <dt class="col-6">Relay</dt><dd class="col-6"><span class="badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span></dd>
@@ -106,13 +118,17 @@
         <button class="btn btn-sm btn-outline-primary">Filter</button>
         {% if can_csv %}<a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('meters.incidents_csv', pk=d.id) }}?{{ request.query_string.decode() }}"><i class="bi bi-download me-1"></i>Export CSV</a>{% endif %}
       </form>
+      {% if current_user.is_admin %}
+      <div class="d-none mb-2" id="incBar"><button class="btn btn-sm btn-outline-danger" id="incDelete"><i class="bi bi-trash me-1"></i>Delete selected (<span id="incCount">0</span>)</button></div>
+      {% endif %}
       <div class="table-responsive">
       <table class="table table-sm align-middle">
-        <thead><tr><th>Type</th><th>Started</th><th>Ended</th><th>Duration</th><th>Details</th></tr></thead>
+        <thead><tr>{% if current_user.is_admin %}<th style="width:1%"><input class="form-check-input" type="checkbox" id="incAll" title="Select all on this page"></th>{% endif %}<th>Type</th><th>Started</th><th>Ended</th><th>Duration</th><th>Details</th></tr></thead>
         <tbody>
         {% for inc in pagination.items %}
           {% set est = '~' if inc.time_estimated else '' %}
           <tr class="{{ 'table-warning' if not inc.ended_at }}">
+            {% if current_user.is_admin %}<td><input class="form-check-input pm-inc" type="checkbox" value="{{ inc.id }}"></td>{% endif %}
             <td>{% set t = inc.type %}{% if t == 'offline' %}<span class="badge text-bg-secondary"><i class="bi bi-wifi-off"></i> Offline</span>{% else %}{% include "_incident_badge.html" %}{% endif %}</td>
             <td class="text-nowrap">{{ est }}{{ inc.started_at|dt }}</td>
             <td class="text-nowrap">{% if inc.ended_at %}{{ est }}{{ inc.ended_at|dt }}{% else %}<strong>Ongoing</strong>{% endif %}</td>
@@ -120,7 +136,7 @@
             <td class="small text-body-secondary">{{ detail_text(inc) }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="text-body-secondary">No events.</td></tr>
+          <tr><td colspan="6" class="text-body-secondary">No events.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -161,6 +177,13 @@
     </div>
   </div>
 </div>
+{% if current_user.is_admin and not d.removed_at %}
+{% include "meters/_lifecycle_modal.html" %}
+<div class="modal fade" id="infoModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-cpu me-1"></i>Meter info · {{ d.device_id }}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body" id="infoBody"></div>
+</div></div></div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
@@ -171,6 +194,8 @@ PM.meterInfo({
   csv: "{{ url_for('meters.export_csv', pk=d.id) }}",
   action: {{ (url_for('meters.action', pk=d.id) if current_user.is_admin else none)|tojson }},
   refresh: "{{ url_for('meters.refresh', pk=d.id) }}",
+  deviceInfo: {{ (url_for('meters.device_info', pk=d.id) if current_user.is_admin else none)|tojson }},
+  incDelete: {{ (url_for('meters.incidents_delete', pk=d.id) if current_user.is_admin else none)|tojson }},
   initial: {{ m|tojson }}
 });
 </script>

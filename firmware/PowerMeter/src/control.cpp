@@ -155,6 +155,7 @@ static void endSession(const char *reason) {
 
 void renew(const char *reason, bool autoRenew) {
   StateLock l;
+  if (g.disabled) return;  // a disabled meter has no sessions
   if (g.sess.sid) endSession(reason);  // no-op if a limit already ended it
   startSession(autoRenew);
 }
@@ -163,7 +164,7 @@ void renew(const char *reason, bool autoRenew) {
 static void stopSession(StopReason why) {
   // caller holds StateLock
   if (!g.sess.sid || g.sess.status == SESS_ENDED || g.sess.status == SESS_EXPIRED) return;
-  endSession(why == STOP_VOLTAGE ? "voltage" : "tamper");
+  endSession(why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : "disabled");
   g.sess.status = SESS_ENDED;
   g.sess.stopReason = why;
   store::saveSession(g.sess);
@@ -172,12 +173,26 @@ static void stopSession(StopReason why) {
 
 static const char *ACTION_NAME[] = {"run", "hold", "end"};
 
+void setDisabled(bool disabled) {
+  StateLock l;
+  if (g.disabled == disabled) return;
+  g.disabled = disabled;
+  store::saveDisabled(disabled);
+  if (disabled) {
+    stopSession(STOP_DISABLED);  // session ends, relay off below ("disabled" block)
+  } else if (g.sess.sid == 0 || g.sess.status != SESS_ACTIVE) {
+    startSession(false);         // enabled again: start fresh
+  }
+  bump();
+}
+
 // ------------------------------------------------------------------ commands
 
 bool setRelay(bool on, const char *src, const char *&err) {
   StateLock l;
   if (on) {
-    if (g.tripped) err = "tripped";
+    if (g.disabled) err = "disabled";
+    else if (g.tripped) err = "tripped";
     else if (g.sess.status == SESS_QUOTA) err = "quota_exceeded";
     else if (g.sess.status == SESS_EXPIRED || g.sess.status == SESS_ENDED) err = "session_expired";
     else err = nullptr;
@@ -253,7 +268,9 @@ void stateJson(JsonObject o) {
   s["status"] = sessStatusName(g.sess.status);
   if (g.sess.over) s["over"] = true;
   s["ended"] = g.sess.ended;
-  if (g.sess.status == SESS_ENDED) s["end_reason"] = g.sess.stopReason == STOP_VOLTAGE ? "voltage" : "tamper";
+  if (g.sess.status == SESS_ENDED)
+    s["end_reason"] = g.sess.stopReason == STOP_VOLTAGE ? "voltage" : g.sess.stopReason == STOP_TAMPER ? "tamper" : "disabled";
+  if (g.disabled) o["disabled"] = true;
   if (g.voltOut) o["volt_out"] = true;
   if (nr) s["next_reset"] = nr;
 }
@@ -349,7 +366,7 @@ static void readSensor() {
 static void checkRules(bool firstPass) {
   StateLock l;
   // First session after pairing / factory reset starts with the first reading.
-  if (g.sess.sid == 0 && (g.sensorEverOk || millis() > 15000)) startSession(false);
+  if (g.sess.sid == 0 && !g.disabled && (g.sensorEverOk || millis() > 15000)) startSession(false);
 
   // Over-current (latched until reset).
   if (!g.tripped && g.cfg.amp_max > 0 && g.reading.ok && g.reading.a > g.cfg.amp_max) {
@@ -402,8 +419,10 @@ static void checkRules(bool firstPass) {
     }
   }
 
-  // Session time limit.
-  if (g.sess.sid && g.sess.status != SESS_EXPIRED) {
+  // Session time limit (a disabled meter never renews).
+  if (g.disabled) {
+    // nothing: no sessions while disabled
+  } else if (g.sess.sid && g.sess.status != SESS_EXPIRED) {
     uint32_t nr = nextReset();
     bool due = (nr && timekeep::valid() && timekeep::now() >= nr) || durationElapsedNoClock();
     if (due) {
@@ -428,7 +447,8 @@ static void checkRules(bool firstPass) {
 
   // Relay decision.
   const char *block = nullptr;
-  if (g.tripped) block = "tripped";
+  if (g.disabled) block = "disabled";
+  else if (g.tripped) block = "tripped";
   else if (g.sess.status == SESS_QUOTA) block = "quota";
   else if (g.sess.status == SESS_EXPIRED) block = "expired";
   else if (g.sess.status == SESS_ENDED) block = "ended";

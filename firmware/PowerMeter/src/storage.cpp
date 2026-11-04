@@ -168,6 +168,11 @@ void saveFlags(bool wantOn, bool tripped) {
   if (pm.getBool("tripped", false) != tripped) pm.putBool("tripped", tripped);
 }
 
+bool loadDisabled() { return pm.getBool("disabled", false); }
+void saveDisabled(bool d) {
+  if (pm.getBool("disabled", false) != d) pm.putBool("disabled", d);
+}
+
 uint32_t nextSeq() {
   xSemaphoreTake(sSeqLock, portMAX_DELAY);
   sSeq++;

@@ -32,6 +32,15 @@
   </div>
   {% endfor %}
   <div class="col-12 col-lg-6">
+    <form class="card mb-3" method="post" action="{{ url_for('settings.account_notifications') }}">{{ csrf() }}
+      <div class="card-header fw-semibold">My notifications</div>
+      <div class="card-body d-flex align-items-center gap-2 flex-wrap">
+        <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="notif_autodel" id="notif_autodel" {{ 'checked' if current_user.notif_autodel }}>
+          <label class="form-check-label" for="notif_autodel">Automatically delete notifications more than</label></div>
+        <div class="input-group input-group-sm" style="width:150px"><input class="form-control" type="number" min="1" max="3650" name="notif_autodel_days" value="{{ current_user.notif_autodel_days }}"><span class="input-group-text">days ago</span></div>
+      </div>
+      <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Save</button></div>
+    </form>
     <form class="card" method="post" action="{{ url_for('settings.account_telegram') }}">{{ csrf() }}
       <div class="card-header fw-semibold">My Telegram</div>
       <div class="card-body">

@@ -38,12 +38,12 @@ def test_repair_after_remove_bumps_generation(app, admin):
     assert _pair(admin, _code(admin)).status_code == 200
     with app.app_context():
         pk = Device.query.first().id
-    r = admin.post(f"/meters/{pk}/action", json={"action": "remove", "delete_history": False})
+    r = admin.post(f"/meters/{pk}/action", json={"action": "unsync"})
     assert r.get_json()["ok"]
     assert _pair(admin, _code(admin)).status_code == 200
     with app.app_context():
         d = db.session.get(Device, pk)
-        assert d.removed_at is None and d.pair_gen == 2
+        assert d.removed_at is None and d.pair_gen == 2 and d.resync_pending
 
 
 def test_bad_requests(admin):

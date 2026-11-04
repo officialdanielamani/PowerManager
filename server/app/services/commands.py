@@ -3,12 +3,14 @@ from ..extensions import db
 from ..models import Command, now
 from . import hub
 
-KNOWN = {"relay", "renew", "send_now", "reset_trip", "get_state", "remove"}
+KNOWN = {"relay", "renew", "send_now", "reset_trip", "get_state", "remove", "disable", "enable", "get_info"}
 QUEUE_MAX_AGE_S = 7 * 86400
 
 
 def relay_block_reason(device):
     """Why relay ON is not allowed right now (server-side check), or None."""
+    if device.disabled_at:
+        return "disabled"
     st = device.last_state or {}
     if st.get("tripped"):
         return "tripped"
@@ -33,6 +35,9 @@ def issue(device, c, params=None, user=None):
     if c not in KNOWN:
         return None, "unknown_cmd"
     params = params or {}
+    if device.disabled_at and c in ("renew", "relay", "reset_trip"):
+        if c != "relay" or params.get("on"):
+            return None, "disabled"
     if c == "relay" and params.get("on"):
         reason = relay_block_reason(device)
         if reason:

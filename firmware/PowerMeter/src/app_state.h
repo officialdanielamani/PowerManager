@@ -10,7 +10,7 @@ enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
 enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, SESS_ENDED = 3 };
 // Voltage / tamper protection: run as usual, relay off while the problem lasts, or end the session.
 enum ProtectAction : uint8_t { ACT_RUN = 0, ACT_HOLD = 1, ACT_END = 2 };
-enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2 };
+enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3 };
 enum NetStatus : uint8_t {
   NET_SETUP_AP = 0,      // no Wi-Fi configured
   NET_WIFI_CONNECTING,   // Wi-Fi configured, not connected
@@ -68,6 +68,7 @@ struct AppState {
   bool relayOn = false;        // actual output
   const char *block = nullptr; // why relay is off: tripped/quota/expired/offline or null
   bool tripped = false;
+  bool disabled = false;       // disabled by the server: relay off, no session (persisted)
   bool tamper = false;
   bool ac = true;
   bool sensorEverOk = false;

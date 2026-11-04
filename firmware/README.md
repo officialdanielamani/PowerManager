@@ -37,6 +37,11 @@ If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** 
 | Tamper switch (NC, other side to GND) | 4 |
 | WS2812 data | 48 (onboard LED on most Super Mini boards) |
 | DS3231 SDA / SCL (optional, set `HAS_DS3231 1`) | 8 / 9 |
+| Battery sense (optional, set `BATTERY_ENABLE 1`) | 1, through a divider (see `config.h`) |
+
+`HW_INFO` in `config.h` is free text (default `"PZEM-004T 1Chn"`) shown by **Get meter info** on the server.
+
+Battery: wire `battery+ — R1 — ADC pin — R2 — GND` and set `BATTERY_DIVIDER = (R1+R2)/R2` plus the empty/full voltages (defaults: 1S Li-ion 3.30–4.20 V, 100 k + 100 k → 2.0). The percentage is a linear estimate.
 
 Power the PZEM's TTL side from **3.3 V** (ESP32 pins are not 5 V tolerant). The SSR is not a safety device: keep a proper breaker.
 
@@ -73,5 +78,6 @@ Open the Serial Monitor (115200). It shows the device ID and the **setup Wi-Fi n
 | Blue breathing / blinking | Setup mode / connecting to Wi-Fi |
 | Cyan breathing | Wi-Fi OK, not paired yet |
 | Dim green / off | Normal, relay on / off |
+| Very dim red | Disabled by the server |
 
 The full table is in `docs/firmware.md` §9.

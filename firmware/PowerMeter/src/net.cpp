@@ -9,6 +9,7 @@
 
 #include "../config.h"
 #include "app_state.h"
+#include "battery.h"
 #include "certs.h"
 #include "control.h"
 #include "led.h"
@@ -400,6 +401,36 @@ static void markOffline() {
   }
 }
 
+// Answer to the server's "Get meter info".
+static void sendInfo() {
+  JsonDocument doc;
+  doc["t"] = "info";
+  doc["ip"] = WiFi.localIP().toString();
+  doc["ssid"] = WiFi.SSID();
+  doc["rssi"] = WiFi.RSSI();
+  doc["mac"] = WiFi.macAddress();
+  doc["heap"] = ESP.getFreeHeap();
+  doc["heap_min"] = ESP.getMinFreeHeap();
+  doc["psram"] = ESP.getPsramSize();
+  doc["psram_free"] = ESP.getFreePsram();
+  doc["fw"] = FW_VERSION;
+  doc["hw"] = HW_NAME;
+  doc["hw_info"] = HW_INFO;
+  doc["chip"] = ESP.getChipModel();
+  doc["flash"] = ESP.getFlashChipSize();
+  doc["core"] = ESP.getSdkVersion();
+  doc["uptime"] = millis() / 1000;
+  doc["boot"] = store::bootCount();
+  doc["outbox"] = outbox::count();
+  doc["time_src"] = timekeep::sourceName();
+  if (battery::enabled()) {
+    float v = battery::volts();
+    doc["bat_v"] = serialized(String(v, 2));
+    doc["bat_pct"] = battery::percent(v);
+  }
+  sendJson(doc);
+}
+
 static void cmdAck(uint32_t ref, bool ok, const char *err) {
   JsonDocument doc;
   doc["t"] = "cmd_ack";
@@ -443,6 +474,10 @@ static void handleCommand(JsonObject m) {
     control::resetTrip("server", m["by"] | "");
   } else if (!strcmp(c, "get_state")) {
     sendState();
+  } else if (!strcmp(c, "disable") || !strcmp(c, "enable")) {
+    control::setDisabled(!strcmp(c, "disable"));
+  } else if (!strcmp(c, "get_info")) {
+    sendInfo();
   } else if (!strcmp(c, "remove")) {
     cmdAck(ref, true, nullptr);
     ws.loop();

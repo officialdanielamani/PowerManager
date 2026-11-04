@@ -30,6 +30,28 @@ def check_disconnected():
     db.session.commit()
 
 
+def cleanup():
+    """Per-user notification and per-meter data/event auto-delete (each only if enabled)."""
+    from ..models import Event, Measurement, Notification, Rollup, Session, User
+    t = now()
+    for u in User.query.filter_by(notif_autodel=True).all():
+        Notification.query.filter(Notification.user_fk == u.id,
+                                  Notification.ts < t - u.notif_autodel_days * 86400).delete(synchronize_session=False)
+    for d in Device.query.filter((Device.data_autodel.is_(True)) | (Device.events_autodel.is_(True))).all():
+        if d.data_autodel:
+            cut = t - d.data_autodel_days * 86400
+            Session.query.filter(Session.device_fk == d.id, Session.ended_at.isnot(None),
+                                 Session.ended_at < cut).delete(synchronize_session=False)
+            Measurement.query.filter(Measurement.device_fk == d.id, Measurement.ts < cut).delete(synchronize_session=False)
+            Rollup.query.filter(Rollup.device_fk == d.id, Rollup.bucket_start < cut).delete(synchronize_session=False)
+        if d.events_autodel:
+            cut = t - d.events_autodel_days * 86400
+            Incident.query.filter(Incident.device_fk == d.id, Incident.ended_at.isnot(None),
+                                  Incident.ended_at < cut).delete(synchronize_session=False)
+            Event.query.filter(Event.device_fk == d.id, Event.ts < cut).delete(synchronize_session=False)
+    db.session.commit()
+
+
 def run_rollups():
     for _ in range(20):
         if rollup.process_dirty() == 0:
@@ -58,6 +80,7 @@ def start(app):
     sch.add_job(wrap(check_disconnected), "interval", seconds=60, id="disconnected")
     sch.add_job(wrap(run_rollups), "interval", minutes=5, id="rollups")
     sch.add_job(wrap(rollup.retention), "cron", hour=3, minute=17, id="retention")
+    sch.add_job(wrap(cleanup), "cron", hour=3, minute=41, id="cleanup")
     sch.start()
     _scheduler = sch
     return sch

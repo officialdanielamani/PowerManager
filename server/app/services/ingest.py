@@ -74,6 +74,10 @@ def _bump_seq(device, seq):
 
 def on_connect(device, conn):
     t = now()
+    if device.disabled_at:  # read-only meter: no incidents
+        device.online, device.last_seen_at = True, t
+        db.session.commit()
+        return
     was_offline = incidents.find_open(device.id, "offline") is not None
     device.online = True
     device.last_seen_at = t
@@ -88,14 +92,30 @@ def on_connect(device, conn):
 def on_disconnect(device, reason="connection_lost"):
     t = now()
     device.online = False
-    if device.removed_at:
+    if device.removed_at or device.disabled_at:
         db.session.commit()
         return
     ev = server_event(device, "disconnected", {"reason": reason}, ts=t)
     # A timeout means the device went silent after its last message; a closed socket is "now".
     start = (device.last_seen_at or t) if reason == "ping_timeout" else t
     incidents.open_incident(device.id, "offline", start, event=ev, detail={"cause": reason})
+    merge_power_into_offline(device)
     db.session.commit()
+
+
+MERGE_WINDOW_S = 60
+
+
+def merge_power_into_offline(device):
+    """No Power and Offline starting within a minute of each other = the whole meter lost power
+    (its UPS ran out). Close the No Power incident; the Offline incident covers it."""
+    off = incidents.find_open(device.id, "offline")
+    pwr = incidents.find_open(device.id, "power")
+    if off is None or pwr is None or abs(pwr.started_at - off.started_at) > MERGE_WINDOW_S:
+        return
+    incidents.close_incident(device.id, "power", max(off.started_at, pwr.started_at),
+                             detail={"closed_by": "offline", "note": "meter lost power (offline at the same time)"})
+    off.detail = {**(off.detail or {}), "power_lost": True}
 
 
 # ---------------------------------------------------------------- dispatcher
@@ -104,6 +124,14 @@ def handle(conn, device, msg):
     """Process one message. Returns nothing; replies go through conn.send()."""
     t = msg.get("t")
     device.last_seen_at = now()
+    if device.disabled_at and t in ("tel", "evt"):
+        # Disabled = read-only: acknowledge so the meter empties its buffer, but store nothing.
+        seqs = [i.get("seq") for i in (msg.get("items") or []) if isinstance(i, dict)] if t == "tel" else [msg.get("seq")]
+        for sq in seqs:
+            _bump_seq(device, sq)
+        conn.send({"t": "ack", "last_seq": device.last_seq, "time": now()})
+        db.session.commit()
+        return
     handler = HANDLERS.get(t)
     if handler is None:
         return  # unknown types are ignored (forward compatibility)
@@ -248,6 +276,14 @@ def h_cfg_ack(conn, device, msg):
         server_event(device, "config_rejected", {"ver": ver, "err": device.cfg_error})
 
 
+def h_info(conn, device, msg):
+    """Answer to "Get meter info"."""
+    keep = ("ip", "ssid", "rssi", "mac", "heap", "heap_min", "psram", "psram_free", "fw", "hw", "hw_info",
+            "bat_v", "bat_pct", "uptime", "boot", "core", "chip", "flash", "outbox", "time_src")
+    device.last_info = {k: msg[k] for k in keep if k in msg}
+    device.last_info_at = now()
+
+
 def h_cmd_ack(conn, device, msg):
     commands.ack(device, msg.get("ref"), msg.get("ok"), msg.get("err"))
 
@@ -260,6 +296,7 @@ HANDLERS = {
     "state": h_state,
     "cfg_ack": h_cfg_ack,
     "cmd_ack": h_cmd_ack,
+    "info": h_info,
 }
 
 
@@ -340,6 +377,7 @@ def process_event(device, ev):
         incidents.close_incident(device.id, "voltage", ev.ts, event=ev, estimated=est, detail={"v_back": d.get("v")})
     elif e == "ac_lost":
         incidents.open_incident(device.id, "power", ev.ts, event=ev, estimated=est)
+        merge_power_into_offline(device)
         notify.notify(device, "no_voltage", "No voltage (AC power lost)")
     elif e == "ac_restored":
         incidents.close_incident(device.id, "power", ev.ts, event=ev, estimated=est)

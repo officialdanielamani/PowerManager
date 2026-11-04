@@ -41,6 +41,8 @@ void saveSession(const SessionState &s);
 
 void loadFlags(bool &wantOn, bool &tripped);
 void saveFlags(bool wantOn, bool tripped);
+bool loadDisabled();
+void saveDisabled(bool disabled);
 
 uint32_t nextSeq();  // strictly increasing, survives reboot
 

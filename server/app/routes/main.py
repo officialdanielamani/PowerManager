@@ -22,7 +22,9 @@ def meter_summary(d, show_price=None):
     w_total = sum((c.get("w") or 0) for c in chans) if chans else None
     relays = st.get("relay") or []
     ongoing = [i.type for i in Incident.query.filter_by(device_fk=d.id, ended_at=None).all()]
-    if st.get("tripped"):
+    if d.disabled_at:
+        status = "disabled"
+    elif st.get("tripped"):
         status = "tripped"
     else:
         status = sess.get("status") or "unknown"
@@ -68,6 +70,7 @@ def meter_summary(d, show_price=None):
         "reading_ts": reading.get("ts"),
         "sess_ended": bool(sess_end) or sess.get("status") in ("expired", "ended") or bool(sess.get("ended")),
         "block": relays[0].get("block") if relays else None,
+        "disabled": bool(d.disabled_at),
         "cost": settings.money(cost, currency) if cost is not None else None,
         "synced": d.synced,
         "ongoing": [i for i in ongoing if i != "offline"],
@@ -100,6 +103,20 @@ def notifications():
     pagination = q.paginate(page=page, per_page=50, error_out=False)
     names = {d.id: d.name for d in Device.query.all()}
     return render_template("notifications.html", pagination=pagination, names=names)
+
+
+@bp.post("/notifications/delete")
+@login_required
+def notifications_delete():
+    """Delete selected (ids) or all of the current user's notifications."""
+    body = request.get_json(silent=True) or {}
+    q = Notification.query.filter_by(user_fk=current_user.id)
+    if not body.get("all"):
+        ids = [int(i) for i in body.get("ids", []) if str(i).isdigit()]
+        q = q.filter(Notification.id.in_(ids or [-1]))
+    n = q.delete(synchronize_session=False)
+    db.session.commit()
+    return jsonify(ok=True, deleted=n, message=f"Deleted {n} notification(s)")
 
 
 @bp.post("/notifications/read-all")

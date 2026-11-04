@@ -1,22 +1,57 @@
 {% extends "base.html" %}
 {% block title %}Notifications · PowerManager{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var url = "{{ url_for('main.notifications_delete') }}";
+  function boxes() { return Array.prototype.slice.call(document.querySelectorAll('.pm-n')); }
+  function refresh() {
+    var n = boxes().filter(function (c) { return c.checked; }).length, del = document.getElementById('nDel');
+    if (del) { del.classList.toggle('d-none', !n); document.getElementById('nCount').textContent = n; }
+  }
+  boxes().forEach(function (c) { c.addEventListener('change', refresh); });
+  var all = document.getElementById('nAll');
+  if (all) all.addEventListener('change', function () { boxes().forEach(function (c) { c.checked = all.checked; }); refresh(); });
+  function done(r) { PM.toast(r.message || r.error, r.ok ? 'success' : 'danger'); if (r.ok) setTimeout(function () { location.reload(); }, 500); }
+  var del = document.getElementById('nDel');
+  if (del) del.addEventListener('click', function () {
+    var ids = boxes().filter(function (c) { return c.checked; }).map(function (c) { return +c.value; });
+    if (ids.length && confirm('Delete ' + ids.length + ' notification(s)?')) PM.post(url, {ids: ids}).then(done);
+  });
+  var da = document.getElementById('nDelAll');
+  if (da) da.addEventListener('click', function () {
+    if (confirm('Delete ALL your notifications ({{ pagination.total }})? This cannot be undone.')) PM.post(url, {all: true}).then(done);
+  });
+})();
+</script>
+{% endblock %}
 {% block content %}
-<div class="d-flex align-items-center mb-3">
+<div class="d-flex align-items-center flex-wrap gap-2 mb-3">
   <h1 class="h4 mb-0">Notifications</h1>
-  {% if unread_notifications %}
-  <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="PM.post('{{ url_for('main.notifications_read_all') }}', {}).then(function(){ location.reload(); })">Mark all read</button>
-  {% endif %}
+  <span class="small text-body-secondary">{% if current_user.notif_autodel %}auto-deleted after {{ current_user.notif_autodel_days }} days{% else %}kept until deleted{% endif %} · <a href="{{ url_for('settings.index', tab='account') }}">change</a></span>
+  <span class="ms-auto d-flex gap-2">
+    {% if unread_notifications %}<button class="btn btn-sm btn-outline-secondary" onclick="PM.post('{{ url_for('main.notifications_read_all') }}', {}).then(function(){ location.reload(); })">Mark all read</button>{% endif %}
+    {% if pagination.total %}<button class="btn btn-sm btn-outline-danger" id="nDelAll">Delete all</button>{% endif %}
+  </span>
 </div>
 <div class="card">
+  {% if pagination.items %}
+  <div class="card-header d-flex align-items-center gap-2 py-2">
+    <input class="form-check-input" type="checkbox" id="nAll" title="Select all on this page">
+    <label for="nAll" class="small mb-0">Select all</label>
+    <button class="btn btn-sm btn-outline-danger ms-auto d-none" id="nDel"><i class="bi bi-trash me-1"></i>Delete selected (<span id="nCount">0</span>)</button>
+  </div>
+  {% endif %}
   <ul class="list-group list-group-flush">
     {% for n in pagination.items %}
-    <li class="list-group-item d-flex gap-3 {{ '' if n.read else 'fw-semibold' }}">
+    <li class="list-group-item d-flex gap-3 align-items-center {{ '' if n.read else 'fw-semibold' }}">
+      <input class="form-check-input pm-n flex-shrink-0" type="checkbox" value="{{ n.id }}">
       <span class="text-body-secondary small text-nowrap">{{ n.ts|dt }}</span>
       <span>{{ n.message }}</span>
-      {% if n.device_fk %}<a class="ms-auto small" href="{{ url_for('meters.info', pk=n.device_fk) }}">{{ names.get(n.device_fk, '') }}</a>{% endif %}
+      {% if n.device_fk %}<a class="ms-auto small text-nowrap" href="{{ url_for('meters.info', pk=n.device_fk) }}">{{ names.get(n.device_fk, '') }}</a>{% endif %}
     </li>
     {% else %}
-    <li class="list-group-item text-body-secondary">No notifications. Enable them per meter in <em>Configure → Set Notification</em>.</li>
+    <li class="list-group-item text-body-secondary">No notifications. Choose them per meter in <em>Notification Options</em>.</li>
     {% endfor %}
   </ul>
 </div>

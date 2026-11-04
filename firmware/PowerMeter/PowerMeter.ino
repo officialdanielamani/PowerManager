@@ -32,6 +32,7 @@ static void loadState() {
   }
   store::loadSession(g.sess);
   store::loadFlags(g.wantOn, g.tripped);
+  g.disabled = store::loadDisabled();
 }
 
 static void printBanner() {

@@ -31,3 +31,4 @@ body { min-height: 100vh; background: var(--bs-tertiary-bg); }
 .pm-selbar { position: sticky; top: .5rem; z-index: 1010; }
 .meter-card.pm-selected { outline: 2px solid var(--bs-primary); }
 .pm-bg-orange { background: #fd7e14; color: #fff; }
+.meter-card.pm-disabled { opacity: .65; }

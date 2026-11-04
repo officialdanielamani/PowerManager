@@ -122,10 +122,10 @@ Example: meter "Dryer A" — admin ticks *Panel open* + *No voltage*; the tenant
 - **B1 "Set to Default"** resets the meter's config (limits, interval, session) to defaults and pushes it. It does **not** unpair, rename, change linked users, change anyone's notification options or clear history.
 - **B2** After an *offline relay-off*, when the device comes back online the relay goes back to the user's wanted state (if no other rule blocks it).
 - **B3** Viewers may export CSV. The CSV contains **exactly the range shown** in the history view (e.g. view = 1 week → CSV = that week only).
-- **B4 "Remove Device"**:
-  - Server: the device is marked removed and its secret is revoked. History is **kept** unless the admin ticks "also delete history".
-  - Device: **full factory reset** — wipes local admin, Wi-Fi, pairing, config, session and buffer, then reboots into first-boot AP mode (create admin account). The AP password is kept, so the label stays valid.
-  - If the device is offline at removal time, the reset happens on its next connect (protocol §2: close code `4403`).
+- **B4 Disable / Unsync / Remove** (admin, with a confirmation dialog that explains each):
+  - **Disable**: session ends, relay OFF, Relay ON refused (server and meter). The meter stays paired but read-only: no configuration changes, new readings/events are acknowledged but not stored, no Offline/No power incidents. Ongoing incidents are ended. Data stays. **Enable** undoes it (new session).
+  - **Unsync**: session ends, the meter factory-resets (now, or with close code `4403` when it next connects). Ongoing incidents are ended. Data stays (listed under *Unsynced meters*). If the same hardware pairs again, the admin chooses **continue** (same meter, history continues) or **new meter** (the old history moves to an archived entry `<ID>~1`).
+  - **Remove**: session ends, the meter factory-resets, and **all data is deleted** (the admin types the Device ID to confirm). A small tombstone row stays so an offline meter still gets `4403`; pairing that hardware again creates a fresh meter.
 - **B5** Over-current trip is **latched**: relay OFF + red solid until [Reset Trip] on the server or on the device dashboard.
 
 ## 8. Capacity and security

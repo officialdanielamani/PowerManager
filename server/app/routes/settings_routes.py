@@ -56,6 +56,18 @@ def account_telegram():
     return _back("account", "Telegram chat ID saved.")
 
 
+@bp.post("/account/notifications")
+@login_required
+def account_notifications():
+    days = (request.form.get("notif_autodel_days") or "30").strip()
+    if not days.isdigit() or not 1 <= int(days) <= 3650:
+        return _errors("account", ["Days must be 1–3650"])
+    current_user.notif_autodel = request.form.get("notif_autodel") == "on"
+    current_user.notif_autodel_days = int(days)
+    db.session.commit()
+    return _back("account", "Notification clean-up saved.")
+
+
 @bp.post("/account")
 @login_required
 def account():

@@ -60,8 +60,16 @@ def pair():
                         cfg_ver_wanted=1)
         db.session.add(device)
         db.session.flush()
-    else:  # re-pairing hardware that was removed earlier
+    else:  # re-pairing hardware that was unsynced or removed earlier
+        if device.purged:  # removed with all data: a brand-new meter
+            device.name, device.info, device.cfg = device_id, "", {}
+            device.purged = False
+            device.data_autodel = device.events_autodel = False
+            device.resync_pending = False
+        else:  # unsynced, history kept: the admin chooses "continue" or "new meter"
+            device.resync_pending = True
         device.removed_at = None
+        device.disabled_at = None
         device.pair_gen = (device.pair_gen or 1) + 1
         device.caps = caps
         device.cfg_ver_wanted = (device.cfg_ver_wanted or 0) + 1

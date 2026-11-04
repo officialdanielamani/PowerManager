@@ -19,6 +19,7 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | failed_logins, locked_until | int | viewer login lockout; `locked_until = -1` = until admin unlocks |
 | telegram_chat_id | str | this user's Telegram chat (bot token is global) |
 | can_csv, show_price | bool | viewer permissions (default off; admin always has both) |
+| notif_autodel, notif_autodel_days | bool, int | delete own notifications older than N days (default off, 30) |
 
 ### `meter_viewer`
 `device_fk, user_fk` (PK together). Which view-only users may see which meter. Server-only; never sent to meters.
@@ -49,7 +50,12 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | last_state (JSON) | latest `state` message |
 | last_seq | highest stored seq (current pairing generation) |
 | pair_gen | pairing generation, +1 on every re-pair. `measurement`, `event` and `session` rows carry `gen`, so a factory-reset meter whose `seq` restarts at 1 does not collide with kept history. |
-| removed_at | soft delete |
+| removed_at | unsynced or removed (meter factory-reset) |
+| purged | removed with all data (tombstone, hidden everywhere) |
+| disabled_at | disabled: paired, read-only, relay forced off |
+| resync_pending | an unsynced meter paired again: admin chooses continue / new |
+| data_autodel(_days), events_autodel(_days) | per-meter clean-up (default off, 120 days) |
+| last_info, last_info_at | last answer to Get meter info |
 
 ### `channel`
 | Column | Notes |
@@ -159,3 +165,13 @@ CSV export covers **exactly the range selected** in the history view (1 week sho
 - Raw data is kept `raw_retention_days` (default 90); hourly roll-ups 2 years; daily roll-ups forever.
 - Roll-ups are built by a job every 5 min (hourly) and hourly (daily), so they are already there before raw data is deleted.
 - Rough size: 1 device at 10 s ≈ 8,640 rows/day ≈ 0.8 M rows per 90 days ≈ 80 MB. Fine for SQLite.
+
+## Clean-up job (daily, 03:41 UTC)
+
+- Per user (if enabled): notifications older than `notif_autodel_days`.
+- Per meter (if enabled): `data_autodel_days` → finished sessions, raw measurements and roll-ups older than that; `events_autodel_days` → finished incidents and events older than that.
+- Admins can also select and delete historical events (incidents) by hand; every user can select/delete their own notifications.
+
+## No power + Offline
+
+When an *Offline* and a *No power* incident are both ongoing and started within 60 s of each other, the meter itself lost power (its UPS ran out): the *No power* incident is closed (`closed_by: offline`) and the *Offline* incident gets `power_lost: true`.

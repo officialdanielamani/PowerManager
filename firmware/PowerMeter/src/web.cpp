@@ -8,6 +8,7 @@
 
 #include "../config.h"
 #include "app_state.h"
+#include "battery.h"
 #include "control.h"
 #include "net.h"
 #include "storage.h"
@@ -275,6 +276,13 @@ static void hState() {
   d["outbox"] = net::outboxCount();
   d["next_reset"] = control::nextReset();
   d["kwh"] = serialized(String(control::sessionKwh(), 4));
+  d["hw_info"] = HW_INFO;
+  d["heap"] = ESP.getFreeHeap();
+  if (battery::enabled()) {
+    float v = battery::volts();
+    d["bat_v"] = serialized(String(v, 2));
+    d["bat_pct"] = battery::percent(v);
+  }
   control::stateJson(d["state"].to<JsonObject>());
   StateLock l;
   static const char *NET[] = {"setup", "wifi_connecting", "not_paired", "connecting", "online"};
@@ -316,7 +324,8 @@ static void hRelay() {
   if (!body(b)) return;
   const char *err = nullptr;
   if (!control::setRelay(b["on"] | false, "local", err)) {
-    String msg = !strcmp(err, "tripped") ? "Blocked: over-current trip. Reset the trip first."
+    String msg = !strcmp(err, "disabled") ? "Blocked: this meter is disabled by the server."
+               : !strcmp(err, "tripped") ? "Blocked: over-current trip. Reset the trip first."
                : !strcmp(err, "quota_exceeded") ? "Blocked: kWh quota for this session is used up."
                : "Blocked: session ended. Renew it on the server.";
     return sendErr(409, msg);

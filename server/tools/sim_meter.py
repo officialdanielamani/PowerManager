@@ -147,6 +147,8 @@ class Meter:
         return self.st.get("e_total", 0.0) - self.sess.get("e0", 0.0)
 
     def blocked(self):
+        if self.st.get("disabled"):
+            return "disabled"
         if self.tripped:
             return "tripped"
         if self.session_status() == "quota":
@@ -341,9 +343,9 @@ class Meter:
         c, ref = msg.get("c"), msg.get("ref")
         ok, err = True, None
         if c == "relay":
-            if msg.get("on") and self.blocked() in ("tripped", "quota", "expired", "ended"):
+            if msg.get("on") and self.blocked() in ("tripped", "quota", "expired", "ended", "disabled"):
                 ok, err = False, {"tripped": "tripped", "quota": "quota_exceeded", "expired": "session_expired",
-                                  "ended": "session_expired"}[self.blocked()]
+                                  "ended": "session_expired", "disabled": "disabled"}[self.blocked()]
             else:
                 self.want_on = bool(msg.get("on"))
                 self.event("relay", on=self.want_on, src="server")
@@ -358,6 +360,18 @@ class Meter:
             self.report()
         elif c == "get_state":
             self.send({"t": "state", **self.state_msg()})
+        elif c in ("disable", "enable"):
+            self.st["disabled"] = c == "disable"
+            if c == "disable":
+                self.stop_session("disabled")
+            elif self.session_status() != "active":
+                self.new_session(auto=False, reason=None)
+        elif c == "get_info":
+            self.send({"t": "info", "ip": "192.168.1.57", "ssid": "HomeNet", "rssi": -55, "mac": "AA:BB:CC:DD:EE:FF",
+                       "heap": 182000, "heap_min": 150000, "psram": 0, "fw": "sim-0.5", "hw": "simulator",
+                       "hw_info": "PZEM-004T 1Chn (simulated)", "bat_v": "4.05", "bat_pct": 83, "uptime": int(time.time() - self.boot_t),
+                       "boot": self.st["boot"], "chip": "ESP32-S3", "flash": 4194304, "core": "v5.5", "outbox": len(self.buffer),
+                       "time_src": "server"})
         elif c == "remove":
             self.send({"t": "cmd_ack", "ref": ref, "ok": True})
             self.factory_reset()

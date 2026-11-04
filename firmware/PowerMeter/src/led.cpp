@@ -89,7 +89,7 @@ void task(void *) {
       // one-shot pattern running
     } else {
       inShot = false;
-      bool tripped, tamper, ac, relay, paired, apOnly, voltOut;
+      bool tripped, tamper, ac, relay, paired, apOnly, voltOut, disabled;
       SessStatus st;
       NetStatus net;
       {
@@ -103,8 +103,10 @@ void task(void *) {
         paired = g.paired;
         apOnly = g.apActive;
         voltOut = g.voltOut;
+        disabled = g.disabled;
       }
-      if (tripped) show(RED);                                    // 3. over-current trip
+      if (disabled) show(RED, 20);                               // disabled by the server: very dim red
+      else if (tripped) show(RED);                               // 3. over-current trip
       else if (st != SESS_ACTIVE) show(blink(t, 1000) ? YELLOW : OFF);  // 4. quota / ended
       else if (tamper) show(blink(t, 1000) ? PURPLE : OFF);      // 5. panel open
       else if (!ac || voltOut) show((t % 3000) < 300 ? ORANGE : OFF);  // 6. AC lost / voltage out of range

@@ -34,6 +34,16 @@ def run():
     _add_column("user", "telegram_chat_id VARCHAR(32) NOT NULL DEFAULT ''")
     _add_column("notification", "user_fk INTEGER REFERENCES user(id)")
 
+    # v0.4 -> v0.5: removal options, retention, meter info
+    _add_column("user", "notif_autodel BOOLEAN NOT NULL DEFAULT 0")
+    _add_column("user", "notif_autodel_days INTEGER NOT NULL DEFAULT 30")
+    for ddl in ("purged BOOLEAN NOT NULL DEFAULT 0", "disabled_at INTEGER",
+                "data_autodel BOOLEAN NOT NULL DEFAULT 0", "data_autodel_days INTEGER NOT NULL DEFAULT 120",
+                "events_autodel BOOLEAN NOT NULL DEFAULT 0", "events_autodel_days INTEGER NOT NULL DEFAULT 120",
+                "last_info JSON NOT NULL DEFAULT '{}'", "last_info_at INTEGER",
+                "resync_pending BOOLEAN NOT NULL DEFAULT 0"):
+        _add_column("device", ddl)
+
     # v0.3 -> v0.4: per-viewer CSV / price permissions
     _add_column("user", "can_csv BOOLEAN NOT NULL DEFAULT 0")
     _add_column("user", "show_price BOOLEAN NOT NULL DEFAULT 0")

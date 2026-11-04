@@ -15,7 +15,8 @@ def can_view(user, device):
 
 
 def visible_devices(user, removed=False):
-    q = Device.query.filter(Device.removed_at.isnot(None) if removed else Device.removed_at.is_(None))
+    q = Device.query.filter(Device.removed_at.isnot(None) if removed else Device.removed_at.is_(None),
+                            Device.purged.is_(False))
     if not (user.is_admin or user.view_all):
         q = q.join(MeterViewer, MeterViewer.device_fk == Device.id).filter(MeterViewer.user_fk == user.id)
     return q.order_by(Device.name)
@@ -23,7 +24,7 @@ def visible_devices(user, removed=False):
 
 def device_for_current_user(pk, allow_removed=False):
     d = db.session.get(Device, pk)
-    if d is None or (d.removed_at and not allow_removed) or not can_view(current_user, d):
+    if d is None or d.purged or (d.removed_at and not allow_removed) or not can_view(current_user, d):
         abort(404)  # 404, not 403: do not reveal that the meter exists
     return d
 

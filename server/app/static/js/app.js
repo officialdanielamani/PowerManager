@@ -45,6 +45,7 @@ var PM = (function () {
         if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
         btn.disabled = true;
         post(url, {action: btn.dataset.action}).then(function (r) {
+          if (r.ok && r.redirect) { location.href = r.redirect; return; }
           toast(r.message || (r.ok ? 'Done' : r.error), r.ok ? (r.queued ? 'info' : 'success') : 'danger');
         }).finally(function () { btn.disabled = false; });
       });
@@ -54,7 +55,8 @@ var PM = (function () {
   var STATUS = {active: ['success', 'Active'], quota: ['warning', 'kWh limit reached'], expired: ['warning', 'Session ended'],
                 tripped: ['danger', 'Over-current trip'], unknown: ['secondary', 'No data yet'],
                 over: ['warning', 'Over kWh limit (power on)'], ended_voltage: ['danger', 'Session ended (voltage)'],
-                ended_tamper: ['danger', 'Session ended (tamper)'], ended_: ['warning', 'Session ended']};
+                ended_tamper: ['danger', 'Session ended (tamper)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
+                disabled: ['dark', 'Disabled']};
   var INCIDENT = {power: '<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>',
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
@@ -67,7 +69,7 @@ var PM = (function () {
   function updateMeterCard(root, m) {
     set(root, 'online', function (el) { el.className = 'pm-dot ' + (m.online ? 'on' : 'off'); el.title = m.online ? 'Online' : 'Offline'; });
     set(root, 'w', function (el) { el.textContent = m.w == null ? '–' : m.w; });
-    var WHY = {tripped: 'trip', quota: 'kWh limit', expired: 'session ended', ended: 'session ended', offline: 'offline',
+    var WHY = {disabled: 'disabled', tripped: 'trip', quota: 'kWh limit', expired: 'session ended', ended: 'session ended', offline: 'offline',
                voltage: 'voltage', tamper: 'tamper'};
     set(root, 'relay', function (el) {
       el.className = 'badge rounded-pill ' + (m.relay_on ? 'text-bg-success' : 'text-bg-secondary');
@@ -230,6 +232,59 @@ var PM = (function () {
     onLive(opt.initial);
     poll(opt.live, 5000, onLive);
     if (opt.action) bindActions(opt.action);
+
+    // ---- Get meter info (admin): ask the meter, wait for its "info" message, show it
+    var mi = document.getElementById('btnMeterInfo');
+    function infoTable(d) {
+      var i = d.info || {}, rows = [
+        ['IP address', i.ip], ['Wi-Fi', i.ssid ? i.ssid + (i.rssi ? ' (' + i.rssi + ' dBm)' : '') : null], ['MAC', i.mac],
+        ['Battery', i.bat_v != null ? Number(i.bat_v).toFixed(2) + ' V' + (i.bat_pct != null ? ' · ~' + i.bat_pct + ' %' : '') : 'not enabled (config.h)'],
+        ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
+        ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],
+        ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
+        ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Clock from', i.time_src], ['Waiting to send', i.outbox != null ? i.outbox + ' item(s)' : null]];
+      return '<table class="table table-sm mb-2">' + rows.filter(function (r) { return r[1] != null && r[1] !== ''; })
+        .map(function (r) { return '<tr><th class="text-body-secondary fw-normal">' + r[0] + '</th><td>' + esc(r[1]) + '</td></tr>'; }).join('') +
+        '</table><div class="small text-body-secondary">Received ' + esc(d.at_local) + '</div>';
+    }
+    if (mi) mi.addEventListener('click', function () {
+      var body = document.getElementById('infoBody'), modal = bootstrap.Modal.getOrCreateInstance('#infoModal');
+      body.innerHTML = '<div class="text-center py-4"><span class="spinner-border"></span><div class="mt-2">Asking the meter…</div></div>';
+      modal.show();
+      fetch(opt.deviceInfo, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (prev) {
+        post(opt.action, {action: 'get_info'}).then(function (r) {
+          if (!r.ok) {
+            body.innerHTML = '<div class="alert alert-warning">' + esc(r.message || r.error) + '</div>' + (prev.at ? '<div class="small mb-2">Last known info:</div>' + infoTable(prev) : '');
+            return;
+          }
+          var tries = 0;
+          (function check() {
+            fetch(opt.deviceInfo, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (d) {
+              if (d.at && d.at !== prev.at) return (body.innerHTML = infoTable(d));
+              if (++tries >= 15) return (body.innerHTML = '<div class="alert alert-warning">The meter did not answer (firmware older than 0.5?).</div>' + (prev.at ? infoTable(prev) : ''));
+              setTimeout(check, 1000);
+            });
+          })();
+        });
+      });
+    });
+
+    // ---- select + delete historical events (admin)
+    var incBar = document.getElementById('incBar');
+    if (incBar) {
+      var boxes = function () { return Array.prototype.slice.call(document.querySelectorAll('.pm-inc')); };
+      var refreshInc = function () {
+        var n = boxes().filter(function (c) { return c.checked; }).length;
+        incBar.classList.toggle('d-none', !n); document.getElementById('incCount').textContent = n;
+      };
+      boxes().forEach(function (c) { c.addEventListener('change', refreshInc); });
+      document.getElementById('incAll').addEventListener('change', function (e) { boxes().forEach(function (c) { c.checked = e.target.checked; }); refreshInc(); });
+      document.getElementById('incDelete').addEventListener('click', function () {
+        var ids = boxes().filter(function (c) { return c.checked; }).map(function (c) { return +c.value; });
+        if (!ids.length || !confirm('Delete ' + ids.length + ' historical event(s)? This cannot be undone.')) return;
+        post(opt.incDelete, {ids: ids}).then(function (r) { toast(r.message || r.error, r.ok ? 'success' : 'danger'); if (r.ok) setTimeout(function () { location.reload(); }, 600); });
+      });
+    }
 
     // ---- Get Data Now: ask the meter for a reading and wait for it to arrive
     var gd = document.getElementById('btnGetData');
