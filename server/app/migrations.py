@@ -34,6 +34,10 @@ def run():
     _add_column("user", "telegram_chat_id VARCHAR(32) NOT NULL DEFAULT ''")
     _add_column("notification", "user_fk INTEGER REFERENCES user(id)")
 
+    # v0.3 -> v0.4: per-viewer CSV / price permissions
+    _add_column("user", "can_csv BOOLEAN NOT NULL DEFAULT 0")
+    _add_column("user", "show_price BOOLEAN NOT NULL DEFAULT 0")
+
     # v0.2 -> v0.3: price per session
     _add_column("meter_session", "price_per_kwh FLOAT")
     _add_column("meter_session", "currency VARCHAR(8)")

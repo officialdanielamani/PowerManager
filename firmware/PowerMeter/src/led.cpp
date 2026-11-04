@@ -89,7 +89,7 @@ void task(void *) {
       // one-shot pattern running
     } else {
       inShot = false;
-      bool tripped, tamper, ac, relay, paired, apOnly;
+      bool tripped, tamper, ac, relay, paired, apOnly, voltOut;
       SessStatus st;
       NetStatus net;
       {
@@ -102,11 +102,12 @@ void task(void *) {
         relay = g.relayOn;
         paired = g.paired;
         apOnly = g.apActive;
+        voltOut = g.voltOut;
       }
       if (tripped) show(RED);                                    // 3. over-current trip
       else if (st != SESS_ACTIVE) show(blink(t, 1000) ? YELLOW : OFF);  // 4. quota / ended
       else if (tamper) show(blink(t, 1000) ? PURPLE : OFF);      // 5. panel open
-      else if (!ac) show((t % 3000) < 300 ? ORANGE : OFF);       // 6. AC lost / no sensor
+      else if (!ac || voltOut) show((t % 3000) < 300 ? ORANGE : OFF);  // 6. AC lost / voltage out of range
       else if (net == NET_SETUP_AP || (apOnly && net == NET_WIFI_CONNECTING)) show(BLUE, breathe(t, 3000));  // 7
       else if (net == NET_WIFI_CONNECTING) show(blink(t, 500) ? BLUE : OFF);  // 8. Wi-Fi connecting
       else if (net == NET_NOT_PAIRED || !paired) show(CYAN, breathe(t, 3000));  // 9. not paired

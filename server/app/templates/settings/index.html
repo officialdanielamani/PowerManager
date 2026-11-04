@@ -121,7 +121,7 @@
             <td>{{ u.username }}<div class="small text-body-secondary">{{ u.email or '' }}</div></td>
             <td>{% if not u.is_enabled %}<span class="badge text-bg-dark">disabled</span>{% elif locked %}<span class="badge text-bg-danger">locked</span>{% else %}<span class="badge text-bg-success">active</span>{% endif %}
               {% if u.failed_logins and not locked %}<span class="small text-body-secondary">{{ u.failed_logins }} failed</span>{% endif %}</td>
-            <td class="small">{% if u.view_all %}<span class="badge text-bg-info">all meters</span>{% else %}{{ user_meters.get(u.id, [])|join(', ') or '–' }}{% endif %}</td>
+            <td class="small">{% if u.can_csv %}<span class="badge text-bg-light border me-1" title="Can download CSV">CSV</span>{% endif %}{% if u.show_price %}<span class="badge text-bg-light border me-1" title="Sees prices">Price</span>{% endif %}{% if u.view_all %}<span class="badge text-bg-info">all meters</span>{% else %}{{ user_meters.get(u.id, [])|join(', ') or '–' }}{% endif %}</td>
             <td class="small">{{ u.last_login_at|dt }}</td>
             <td class="text-end text-nowrap"><button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#u{{ u.id }}">Manage</button></td>
           </tr>
@@ -135,6 +135,11 @@
                 <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="meters" value="{{ m.id }}" id="m{{ u.id }}_{{ m.id }}" {{ 'checked' if (u.id, m.id) in links }}>
                   <label class="form-check-label small" for="m{{ u.id }}_{{ m.id }}">{{ m.name }}</label></div>
                 {% else %}<div class="small text-body-secondary">No meters yet.</div>{% endfor %}
+                <div class="fw-semibold small mt-3 mb-1">Permissions</div>
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="can_csv" id="csv{{ u.id }}" {{ 'checked' if u.can_csv }}>
+                  <label class="form-check-label small" for="csv{{ u.id }}">Enable download .csv</label></div>
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="show_price" id="pr{{ u.id }}" {{ 'checked' if u.show_price }}>
+                  <label class="form-check-label small" for="pr{{ u.id }}">Show price</label></div>
                 <div class="mt-2"><button class="btn btn-sm btn-primary" form="acc{{ u.id }}">Save access</button></div>
               </div>
               <div class="col-lg-6">
@@ -179,7 +184,10 @@
           <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="view_all" id="newVa"><label class="form-check-label" for="newVa">View all meters</label></div>
           {% for m in meters %}<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" name="meters" value="{{ m.id }}" id="nm{{ m.id }}"><label class="form-check-label small" for="nm{{ m.id }}">{{ m.name }}</label></div>{% endfor %}
         </div>
-        <div class="col-12 form-text">View-only users see only their meters (info, history, events, CSV) and choose their own notifications. They cannot change anything.</div>
+        <div class="col-12"><label class="form-label">Permissions</label>
+          <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="can_csv" id="newCsv"><label class="form-check-label" for="newCsv">Enable download .csv</label></div>
+          <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="show_price" id="newPrice"><label class="form-check-label" for="newPrice">Show price</label></div></div>
+        <div class="col-12 form-text">View-only users see only their meters (info, history, events) and choose their own notifications. They cannot change anything. CSV download and prices are off unless enabled here.</div>
       </div>
       <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Add account</button></div>
     </form>

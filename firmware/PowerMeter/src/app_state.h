@@ -6,7 +6,11 @@
 
 enum KwhAction : uint8_t { KWH_END = 0, KWH_HOLD = 1, KWH_WARN = 2 };
 enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
-enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2 };
+// ENDED = ended early by the voltage or tamper protection (relay off until renewed).
+enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, SESS_ENDED = 3 };
+// Voltage / tamper protection: run as usual, relay off while the problem lasts, or end the session.
+enum ProtectAction : uint8_t { ACT_RUN = 0, ACT_HOLD = 1, ACT_END = 2 };
+enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2 };
 enum NetStatus : uint8_t {
   NET_SETUP_AP = 0,      // no Wi-Fi configured
   NET_WIFI_CONNECTING,   // Wi-Fi configured, not connected
@@ -30,6 +34,11 @@ struct MeterConfig {
   //   KWH_WARN warning only, relay stays on
   uint8_t kwh_action = 0;
   float amp_max = 0;  // channel 0; 0 = disabled
+  float volt_min = 0;  // operating voltage range; 0 = no limit on that side
+  float volt_max = 0;
+  uint8_t volt_action = ACT_HOLD;
+  bool tamper_protect = false;
+  uint8_t tamper_action = ACT_HOLD;
 };
 
 struct Reading {
@@ -47,6 +56,7 @@ struct SessionState {
   SessStatus status = SESS_ACTIVE;
   bool over = false;      // kWh limit passed with KWH_WARN (warned once, power stays on)
   bool ended = false;     // session_end already sent (kWh limit with KWH_END, or time limit)
+  uint8_t stopReason = STOP_NONE;  // why status is SESS_ENDED
 };
 
 struct AppState {
@@ -61,6 +71,7 @@ struct AppState {
   bool tamper = false;
   bool ac = true;
   bool sensorEverOk = false;
+  bool voltOut = false;        // voltage outside the operating range (debounced)
   NetStatus net = NET_SETUP_AP;
   bool paired = false;
   bool unauthorized = false;   // server rejected our credentials

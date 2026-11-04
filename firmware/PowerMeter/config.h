@@ -41,6 +41,8 @@
 // ---------------------------------------------------------------- timing
 #define CONTROL_TICK_MS 250       // tamper/relay loop; sensor read every 4th tick (1 s)
 #define TRIP_CONFIRM_READS 2      // over-current must be seen this many reads in a row
+#define VOLT_OUT_READS 3          // operating voltage: out of range for 3 reads (~3 s) to trigger
+#define VOLT_OK_READS 10          // ...and back in range for 10 reads (~10 s) to clear
 #define WS_PING_INTERVAL_MS 30000
 #define WS_PONG_TIMEOUT_MS 10000
 #define ACK_TIMEOUT_MS 5000       // resend unacked outbox items after this

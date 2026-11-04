@@ -150,3 +150,26 @@ def test_out_of_range_readings_are_dropped(app):
         from app.models import Measurement
         m = Measurement.query.one()
         assert m.v is None and m.pf is None and m.a == 5
+
+
+def test_csv_and_price_permissions(app, admin):
+    with app.app_context():
+        a = _meter("Dryer A", "AAAA1111")
+        settings.set_many({"currency": "MYR", "price_per_kwh": "0.21"})
+        d = db.session.get(Device, a)
+        d.last_state = {"sess": {"sid": 1, "kwh": 10.0, "status": "active"}}
+        db.session.commit()
+    _viewer(admin, "tenant1", [a])
+    t = _login(app, "tenant1")
+    assert t.get(f"/meters/{a}/export.csv").status_code == 403
+    assert t.get(f"/meters/{a}/incidents.csv").status_code == 403
+    assert t.get(f"/meters/{a}/live").get_json()["cost"] is None
+    page = t.get(f"/meters/{a}").data
+    assert b"Export CSV" not in page and b"Session cost" not in page
+    assert admin.get(f"/meters/{a}/live").get_json()["cost"] == "MYR 2.10"  # admin always
+    with app.app_context():
+        uid = User.query.filter_by(username="tenant1").one().id
+    admin.post("/settings/users", data={"what": "access", "user_id": uid, "meters": [str(a)],
+                                        "can_csv": "on", "show_price": "on"})
+    assert t.get(f"/meters/{a}/export.csv").status_code == 200
+    assert t.get(f"/meters/{a}/live").get_json()["cost"] == "MYR 2.10"

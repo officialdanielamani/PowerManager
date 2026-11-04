@@ -15,7 +15,7 @@ def relay_block_reason(device):
     status = (st.get("sess") or {}).get("status")
     if status == "quota":
         return "quota_exceeded"
-    if status == "expired":
+    if status in ("expired", "ended"):
         return "session_expired"
     return None
 

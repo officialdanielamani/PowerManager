@@ -82,6 +82,9 @@ class Meter:
         self.last_report = 0
         self.running = True
         self.reading = None
+        self.volt_override = None
+        self.volt_out = False
+        self.volt_bad = self.volt_good = 0
         if not self.sess:
             self.new_session(auto=False, reason=None)
         save_state(args.state, self.st)
@@ -150,6 +153,13 @@ class Meter:
             return "quota"
         if self.session_status() == "expired":
             return "expired"
+        if self.session_status() == "ended":
+            return "ended"
+        tc = self.cfg().get("tamper") or {}
+        if tc.get("protect") and tc.get("action", "hold") == "hold" and self.tamper:
+            return "tamper"
+        if (self.cfg().get("volt") or {}).get("action", "hold") == "hold" and self.volt_out:
+            return "voltage"
         off_min = self.cfg().get("offline_off_min", 0)
         if off_min and self.offline_since and time.time() - self.offline_since >= off_min * 60:
             return "offline"
@@ -164,10 +174,12 @@ class Meter:
         nr = self.next_reset()
         return {"relay": [{"i": 0, "on": self.relay_on(), "want": self.want_on, "block": self.blocked()}],
                 "tripped": self.tripped, "tamper": self.tamper, "ac": self.ac,
+                **({"volt_out": True} if self.volt_out else {}),
                 "sess": {"sid": self.sess["sid"], "start": self.sess["start"], "kwh": round(self.session_kwh(), 4),
                          "max": self.ch_cfg().get("kwh_max", 0), "status": self.session_status(),
                          **({"over": True} if self.sess.get("over") else {}),
                          "ended": bool(self.sess.get("ended")),
+                         **({"end_reason": self.sess["end_reason"]} if self.sess.get("status") == "ended" else {}),
                          **({"next_reset": nr} if nr else {})}}
 
     # ------------------------------------------------------------ control loop (1 s)
@@ -177,7 +189,7 @@ class Meter:
             time.sleep(1 * self.args.speed)
             if self.ac:
                 w = self.load_w * random.uniform(0.95, 1.05) if self.relay_on() else 0.0
-                v = random.uniform(228, 234)
+                v = self.volt_override or random.uniform(228, 234)
                 a = w / v if v else 0
                 # energy: speed factor makes simulated time pass faster for testing quotas
                 self.st["e_total"] = self.st.get("e_total", 0.0) + w / 1000 / 3600 * self.args.energy_x
@@ -190,6 +202,7 @@ class Meter:
                     self.event("overcurrent", ch=0, val=round(a, 2), limit=amp_max)
             else:
                 self.reading = None
+            self.check_voltage()
             kmax = self.ch_cfg().get("kwh_max", 0)
             if kmax and self.session_status() == "active" and self.session_kwh() >= kmax:
                 ch = self.ch_cfg()
@@ -220,6 +233,34 @@ class Meter:
                 prev_state = cur
                 self.send({"t": "state", **self.state_msg()})
             save_state(self.args.state, self.st)
+
+    def stop_session(self, why):
+        if self.sess.get("status") in ("ended", "expired"):
+            return
+        self.end_session(why)
+        self.sess["status"], self.sess["end_reason"] = "ended", why
+
+    def check_voltage(self):
+        vc = self.cfg().get("volt") or {}
+        lo, hi, action = vc.get("min", 0), vc.get("max", 0), vc.get("action", "hold")
+        if not (lo or hi) or not self.reading:
+            return
+        v = self.reading["v"]
+        out = (lo and v < lo) or (hi and v > hi)
+        if out:
+            self.volt_good = 0
+            self.volt_bad += 1
+            if not self.volt_out and self.volt_bad >= 3:
+                self.volt_out = True
+                self.event("voltage_out", v=v, min=lo, max=hi, dir="low" if lo and v < lo else "high", action=action)
+                if action == "end":
+                    self.stop_session("voltage")
+        else:
+            self.volt_bad = 0
+            self.volt_good += 1
+            if self.volt_out and self.volt_good >= 10:
+                self.volt_out = False
+                self.event("voltage_ok", v=v)
 
     def report(self):
         self.last_report = time.time()
@@ -300,8 +341,9 @@ class Meter:
         c, ref = msg.get("c"), msg.get("ref")
         ok, err = True, None
         if c == "relay":
-            if msg.get("on") and self.blocked() in ("tripped", "quota", "expired"):
-                ok, err = False, {"tripped": "tripped", "quota": "quota_exceeded", "expired": "session_expired"}[self.blocked()]
+            if msg.get("on") and self.blocked() in ("tripped", "quota", "expired", "ended"):
+                ok, err = False, {"tripped": "tripped", "quota": "quota_exceeded", "expired": "session_expired",
+                                  "ended": "session_expired"}[self.blocked()]
             else:
                 self.want_on = bool(msg.get("on"))
                 self.event("relay", on=self.want_on, src="server")
@@ -400,7 +442,13 @@ class Meter:
             self.log("Load spike ->", self.load_w, "W")
         elif c == "tamper_open" and not self.tamper:
             self.tamper = True
-            self.event("tamper_open")
+            tc = self.cfg().get("tamper") or {}
+            if tc.get("protect"):
+                self.event("tamper_open", action=tc.get("action", "hold"))
+                if tc.get("action") == "end":
+                    self.stop_session("tamper")
+            else:
+                self.event("tamper_open")
         elif c == "tamper_close" and self.tamper:
             self.tamper = False
             self.event("tamper_close")
@@ -410,6 +458,9 @@ class Meter:
         elif c == "ac_restored" and not self.ac:
             self.ac = True
             self.event("ac_restored")
+        elif c == "volt" and len(parts) > 1:
+            self.volt_override = float(parts[1]) or None
+            self.log("Voltage ->", self.volt_override or "normal")
         elif c == "send":
             self.report()
         elif c == "quit":

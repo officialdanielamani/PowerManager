@@ -301,6 +301,12 @@ static void hState() {
   c["auto"] = g.cfg.auto_renew;
   c["mode"] = g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
   c["offline_off_min"] = g.cfg.offline_off_min;
+  static const char *PA[] = {"run", "hold", "end"};
+  c["volt_min"] = g.cfg.volt_min;
+  c["volt_max"] = g.cfg.volt_max;
+  c["volt_action"] = PA[g.cfg.volt_action % 3];
+  c["tamper_protect"] = g.cfg.tamper_protect;
+  c["tamper_action"] = PA[g.cfg.tamper_action % 3];
   sendJson(200, d);
 }
 

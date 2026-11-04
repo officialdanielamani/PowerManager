@@ -171,7 +171,8 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `quota` | Session kWh ≥ `kwh_max`. `action`: `end` → followed by `session_end` reason `quota` (the **server also closes the session record on this event**, in case `session_end` is late); `hold` → relay OFF, session stays open; `warn` → power stays on (sent once per session). `end` (bool) is kept for older servers |
 | `session_end` | Session ended (`reason`: quota/expired/manual). Sent **once** per session: renewing a session that a limit already ended does not send another |
 | `session_start` | New session (`sid`, `auto`: bool) |
-| `tamper_open` / `tamper_close` | Panel switch |
+| `tamper_open` / `tamper_close` | Panel switch. With Tamper Protection on, `tamper_open` carries `action` |
+| `voltage_out` / `voltage_ok` | Voltage left / returned to the operating range: `v`, `min`, `max`, `dir` (`low`/`high`), `action` |
 | `ac_lost` / `ac_restored` | V < 50 V or PZEM not responding for 3 reads / back to normal |
 | `trip_reset` | Over-current latch cleared (`src`: server/local, `by`: username) |
 | `offline_relay_off` | Relay switched off because the server was unreachable longer than the limit |
@@ -195,7 +196,7 @@ Disconnect / reconnect notifications are produced **by the server** (from the WS
 }
 ```
 
-`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_action: warn` (power still on). `sess.ended: true` = `session_end` already sent for this session (by the kWh or time limit).
+`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_action: warn` (power still on). `sess.ended: true` = `session_end` already sent for this session. `status: ended` + `sess.end_reason` (`voltage`/`tamper`) = ended early by a protection (relay OFF until renewed). `block` can also be `ended`, `voltage`, `tamper`. `volt_out: true` = voltage currently out of range.
 
 ## 3. Config document
 
@@ -213,6 +214,8 @@ The server sends the whole config every time (no partial updates).
       "dur_min": 1440,
       "auto": true
     },
+    "volt": {"min":200, "max":250, "action":"hold"},
+    "tamper": {"protect":true, "action":"end"},
     "ch": [ {"i":0, "kwh_max":2.0, "kwh_action":"end", "kwh_end":true, "amp_max":10.2} ]
   }
 }
@@ -227,8 +230,12 @@ The server sends the whole config every time (no partial updates).
 | `sess.dur_min` | 1–525600 | – | Duration mode; UI enters days/hours/minutes |
 | `sess.auto` | bool | false | |
 | `ch[].kwh_max` | 0–100000 | 0 | 0 = unlimited |
-| `ch[].kwh_action` | `end` / `hold` / `warn` | `end` | What happens at `kwh_max`. **end**: relay OFF and the session ends now, even with time left. **hold**: relay OFF, the session ends at its time limit (or on Renew; with no time limit, only on Renew). **warn**: `quota` event once + `sess.over`, power stays on. |
+| `ch[].kwh_action` | `warn` / `hold` / `end` | `hold` | What happens at `kwh_max`. **warn** = *Session run as usual* (`quota` event once + `sess.over`, power stays on). **hold** = *Off relay, but session continue* (relay OFF until the session ends at its time limit or is renewed). **end** = *End session* now (relay OFF until renewed). |
 | `ch[].kwh_end` | bool | true | Only for firmware 0.1.x, which predates `kwh_action`: `false` = warn, otherwise end. New firmware uses `kwh_action` when present. |
+| `volt.min`, `volt.max` | 0–400 V | 0 | Operating voltage range; 0 = no limit on that side; min < max |
+| `volt.action` | `run` / `hold` / `end` | `hold` | Out of range (3 readings in a row): **run** = event only; **hold** = relay OFF until back in range (10 readings in a row); **end** = end the session (`session_end` reason `voltage`) |
+| `tamper.protect` | bool | false | Off: panel open/close is only reported |
+| `tamper.action` | `run` / `hold` / `end` | `hold` | With protection on, when the panel opens: **run** = event only; **hold** = relay OFF while open; **end** = end the session (reason `tamper`) |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |
 
 The device checks every value. If anything is out of range it rejects the **whole** config (`cfg_ack ok:false err:"<field>"`) and keeps the old one.

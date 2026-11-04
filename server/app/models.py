@@ -29,6 +29,9 @@ class User(UserMixin, db.Model):
     failed_logins = db.Column(db.Integer, nullable=False, default=0)
     locked_until = db.Column(db.Integer)  # epoch; -1 = locked until an admin unlocks
     telegram_chat_id = db.Column(db.String(32), nullable=False, default="")
+    # Viewer permissions (admin always has both). Default off.
+    can_csv = db.Column(db.Boolean, nullable=False, default=False)
+    show_price = db.Column(db.Boolean, nullable=False, default=False)
 
     meters = db.relationship("Device", secondary="meter_viewer", lazy="dynamic",
                              backref=db.backref("viewers", lazy="dynamic"))

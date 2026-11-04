@@ -18,6 +18,7 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | view_all | bool | viewer sees every meter |
 | failed_logins, locked_until | int | viewer login lockout; `locked_until = -1` = until admin unlocks |
 | telegram_chat_id | str | this user's Telegram chat (bot token is global) |
+| can_csv, show_price | bool | viewer permissions (default off; admin always has both) |
 
 ### `meter_viewer`
 `device_fk, user_fk` (PK together). Which view-only users may see which meter. Server-only; never sent to meters.
@@ -110,6 +111,7 @@ Pairs a **start** event with its **end** event so the UI can show "from → to, 
 | `offline` | server: WS closed / ping timeout | server: device reconnects (`hello`) | Offline → connected again |
 | `trip` | `overcurrent` (detail: A measured, A limit) | `trip_reset` (detail: by user, server/local) | Power trip → reset |
 | `tamper` | `tamper_open` | `tamper_close` | Tamper triggered → resolved |
+| `voltage` | `voltage_out` | `voltage_ok` | Voltage out of the operating range → back in range |
 
 Rules:
 - At most **one open incident per (device, ch, type)**. A repeated start event while one is open is ignored; an end event with no open incident is stored as an event only.
@@ -125,7 +127,7 @@ Rules:
 | enabled | bool |
 | param | e.g. minutes for `disconnected` |
 
-Types: `kwh_exceeded`, `session_renew`, `max_amp`, `panel_open`, `no_voltage`, `disconnected` (param = minutes), `reconnected`. Rules of a user who loses access to a meter are deleted.
+Types: `kwh_exceeded`, `voltage_range`, `session_renew`, `max_amp`, `panel_open`, `no_voltage`, `disconnected` (param = minutes), `reconnected`. Rules of a user who loses access to a meter are deleted.
 
 ### `notification`
 `id, device_fk, user_fk, type, ts, message, read`. One row per receiving user, so each user has their own list and unread count. A **cooldown** per (device, user, type) — 10 min, only for `max_amp`, `panel_open`, `no_voltage` — stops repeated spam.

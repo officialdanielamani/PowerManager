@@ -26,3 +26,13 @@ def device_for_current_user(pk, allow_removed=False):
     if d is None or (d.removed_at and not allow_removed) or not can_view(current_user, d):
         abort(404)  # 404, not 403: do not reveal that the meter exists
     return d
+
+
+def can_csv(user):
+    """CSV downloads: admin always, viewers only when the admin allowed it."""
+    return bool(user and user.is_authenticated and (user.is_admin or user.can_csv))
+
+
+def can_price(user):
+    """Prices / costs: admin always, viewers only when the admin allowed it."""
+    return bool(user and user.is_authenticated and (user.is_admin or user.show_price))

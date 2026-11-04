@@ -3,7 +3,7 @@ import pytest
 from app.extensions import db
 from app.models import Device, Incident, Measurement, now
 from app.routes.device_api import ensure_device_defaults
-from app.services import devconfig, history, incidents, ingest, rollup, settings
+from app.services import commands, devconfig, history, incidents, ingest, rollup, settings
 
 from .conftest import FakeConn
 
@@ -135,12 +135,12 @@ def test_kwh_action_option_reaches_device(app, device):
     with app.app_context():
         form = {"report_s": "60", "sess_mode": "duration", "dur_m": "5", "kwh_max_0": "2", "amp_max_0": "0",
                 "daily_at": "00:00"}
-        for action, legacy_end in (("end", True), ("hold", True), ("warn", False)):
+        for action, legacy_end in (("end", True), ("hold", True), ("warn", False)):  # warn = "run as usual"
             cfg, errors = devconfig.parse_form({**form, "kwh_action_0": action}, device)
             ch = devconfig.to_device(cfg, 1)["cfg"]["ch"][0]
             assert not errors and ch["kwh_action"] == action and ch["kwh_end"] is legacy_end
-        cfg, _ = devconfig.parse_form(form, device)  # nothing chosen -> default "end"
-        assert devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_action"] == "end"
+        cfg, _ = devconfig.parse_form(form, device)  # nothing chosen -> default "hold"
+        assert devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_action"] == "hold"
         # config saved by v0.2 (kwh_end only)
         assert devconfig.to_device({"ch": [{"kwh_max": 1, "kwh_end": False}]}, 1)["cfg"]["ch"][0]["kwh_action"] == "warn"
 
@@ -185,3 +185,49 @@ def test_session_price_locked_at_start(app, device):
     settings.set_many({"price_per_kwh": "0.50"})  # price change does not touch a running session
     s = Session.query.filter_by(sid=3).one()
     assert s.price_per_kwh == 0.21 and s.currency == "MYR" and s.cost() == 2.1
+
+
+def test_voltage_and_tamper_config(app, device):
+    with app.app_context():
+        base = {"report_s": "60", "sess_mode": "none", "daily_at": "00:00"}
+        cfg, errors = devconfig.parse_form({**base, "volt_min": "200", "volt_max": "250", "volt_action": "end",
+                                            "tamper_protect": "on", "tamper_action": "run"}, device)
+        doc = devconfig.to_device(cfg, 1)["cfg"]
+        assert not errors and doc["volt"] == {"min": 200.0, "max": 250.0, "action": "end"}
+        assert doc["tamper"] == {"protect": True, "action": "run"}
+        cfg, errors = devconfig.parse_form({**base, "volt_min": "250", "volt_max": "200"}, device)
+        assert "Operating voltage: Min must be lower than Max" in errors
+        cfg, _ = devconfig.parse_form(base, device)  # defaults
+        doc = devconfig.to_device(cfg, 1)["cfg"]
+        assert doc["volt"]["action"] == "hold" and doc["tamper"] == {"protect": False, "action": "hold"}
+
+
+def test_voltage_incident_and_notification(app, device):
+    from app.models import Incident, Notification, NotificationRule, User
+    u = User(username="adm", role="admin")
+    u.set_password("Str0ng!Passw0rd")
+    db.session.add(u)
+    db.session.flush()
+    db.session.add(NotificationRule(device_fk=device.id, user_fk=u.id, type="voltage_range", enabled=True))
+    db.session.commit()
+    conn = FakeConn()
+    t = now() - 100
+    ingest.handle(conn, device, {"t": "evt", "seq": 1, "ts": t, "tv": 1, "e": "voltage_out", "v": 262.1,
+                                 "min": 200, "max": 250, "dir": "high", "action": "hold"})
+    ingest.handle(conn, device, {"t": "evt", "seq": 2, "ts": t + 40, "tv": 1, "e": "voltage_ok", "v": 231.0})
+    inc = Incident.query.filter_by(type="voltage").one()
+    assert inc.duration_s == 40 and inc.detail["dir"] == "high"
+    n = Notification.query.filter_by(type="voltage_range").one()
+    assert "too high" in n.message and "relay off" in n.message
+
+
+def test_session_ended_by_protection(app, device):
+    from app.routes.main import meter_summary
+    conn = FakeConn()
+    ingest.handle(conn, device, {"t": "state", "sess": {"sid": 5, "kwh": 0.2, "max": 0, "status": "ended",
+                                                        "end_reason": "tamper", "ended": True},
+                                 "relay": [{"i": 0, "on": False, "block": "ended"}]})
+    with app.test_request_context():
+        m = meter_summary(device, show_price=False)
+    assert m["status"] == "ended_tamper" and m["sess_ended"] and m["relay_block"] == "ended"
+    assert commands.relay_block_reason(device) == "session_expired"

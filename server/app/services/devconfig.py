@@ -7,6 +7,7 @@ from . import settings
 
 NOTIFY_TYPES = [
     ("kwh_exceeded", "Device exceeded kWh"),
+    ("voltage_range", "Voltage out of range"),
     ("session_renew", "Session renewed"),
     ("max_amp", "Max amp (trip)"),
     ("panel_open", "Panel open"),
@@ -19,19 +20,35 @@ DISCONNECTED_DEFAULT_MIN = 5
 
 REPORT_MIN, REPORT_MAX = 10, 3600
 
-# When the kWh limit is reached (per channel):
+# What a meter does when a limit / protection triggers. Same three choices everywhere.
+#   run  - session runs as usual (only an event + notification)
+#   hold - relay off, the session continues (kWh: until the session ends or is renewed;
+#          voltage / tamper: until the condition clears)
+#   end  - end the session now (relay off until renewed / auto renew at the next scheduled time)
 KWH_ACTIONS = {
-    "end": "Turn power off and end the session now, even if time is left",
-    "hold": "Turn power off, but end the session only when the time limit is reached",
-    "warn": "Only warn, keep the power on",
+    "warn": "Session run as usual",
+    "hold": "Off relay, but session continue",
+    "end": "End session",
 }
+PROTECT_ACTIONS = {
+    "run": "Session run as usual",
+    "hold": "Off relay, but session continue",
+    "end": "End session",
+}
+DEFAULT_KWH_ACTION = "hold"
+DEFAULT_PROTECT_ACTION = "hold"
+VOLT_MIN, VOLT_MAX = 0, 400
 
 
 def kwh_action(ch_cfg):
     a = ch_cfg.get("kwh_action")
     if a in KWH_ACTIONS:
         return a
-    return "end" if ch_cfg.get("kwh_end", True) else "warn"  # config saved by v0.2
+    if "kwh_end" in ch_cfg:  # config saved by v0.2
+        return "end" if ch_cfg["kwh_end"] else "warn"
+    return DEFAULT_KWH_ACTION
+
+
 SESSION_MODES = ("none", "duration", "daily")
 
 
@@ -58,7 +75,12 @@ def default_cfg(n_channels=1):
         "dur_min": 1440,
         "daily_at": "00:00",
         "auto": False,
-        "ch": [{"kwh_max": 0.0, "kwh_action": "end", "amp_max": 0.0} for _ in range(n_channels)],
+        "ch": [{"kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION, "amp_max": 0.0} for _ in range(n_channels)],
+        "volt_min": 0.0,           # 0 = no lower limit
+        "volt_max": 0.0,           # 0 = no upper limit
+        "volt_action": DEFAULT_PROTECT_ACTION,
+        "tamper_protect": False,
+        "tamper_action": DEFAULT_PROTECT_ACTION,
     }
 
 
@@ -106,9 +128,19 @@ def parse_form(form, device):
     rating = amp_rating(device)
     for i, ch in enumerate(cfg["ch"]):
         ch["kwh_max"] = _num(form, f"kwh_max_{i}", float, 0, 100000, f"CH{i+1} max kWh", errors, 0.0)
-        action = form.get(f"kwh_action_{i}", "end")
-        ch["kwh_action"] = action if action in KWH_ACTIONS else "end"
+        action = form.get(f"kwh_action_{i}", DEFAULT_KWH_ACTION)
+        ch["kwh_action"] = action if action in KWH_ACTIONS else DEFAULT_KWH_ACTION
         ch["amp_max"] = _num(form, f"amp_max_{i}", float, 0, rating, f"CH{i+1} max A", errors, 0.0)
+
+    cfg["volt_min"] = _num(form, "volt_min", float, VOLT_MIN, VOLT_MAX, "Min voltage", errors, 0.0)
+    cfg["volt_max"] = _num(form, "volt_max", float, VOLT_MIN, VOLT_MAX, "Max voltage", errors, 0.0)
+    if cfg["volt_min"] and cfg["volt_max"] and cfg["volt_min"] >= cfg["volt_max"]:
+        errors.append("Operating voltage: Min must be lower than Max")
+    a = form.get("volt_action", DEFAULT_PROTECT_ACTION)
+    cfg["volt_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
+    cfg["tamper_protect"] = form.get("tamper_protect") == "on"
+    a = form.get("tamper_action", DEFAULT_PROTECT_ACTION)
+    cfg["tamper_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
     return cfg, errors
 
 
@@ -125,6 +157,10 @@ def to_device(cfg, ver):
             "report_s": int(cfg.get("report_s", 60)),
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "sess": sess,
+            "volt": {"min": float(cfg.get("volt_min", 0) or 0), "max": float(cfg.get("volt_max", 0) or 0),
+                     "action": cfg.get("volt_action", DEFAULT_PROTECT_ACTION)},
+            "tamper": {"protect": bool(cfg.get("tamper_protect")),
+                       "action": cfg.get("tamper_action", DEFAULT_PROTECT_ACTION)},
             "ch": [
                 {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_action": kwh_action(c),
                  # for meters on firmware 0.1.x that only know kwh_end ("hold" acts like "end" there)

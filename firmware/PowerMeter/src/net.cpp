@@ -193,6 +193,21 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (kwh < 0 || kwh > 100000) { err = "ch[0].kwh_max"; return false; }
   if (amp < 0 || amp > SENSOR_AMP_RATING) { err = "ch[0].amp_max"; return false; }
   m.kwh_max = kwh;
+  auto action = [](const char *a) -> uint8_t {
+    return !strcmp(a, "run") ? ACT_RUN : !strcmp(a, "end") ? ACT_END : ACT_HOLD;
+  };
+  JsonObject v = c["volt"];
+  float vmin = v["min"] | 0.0f, vmax = v["max"] | 0.0f;
+  if (vmin < 0 || vmin > 400 || vmax < 0 || vmax > 400 || (vmin > 0 && vmax > 0 && vmin >= vmax)) {
+    err = "volt";
+    return false;
+  }
+  m.volt_min = vmin;
+  m.volt_max = vmax;
+  m.volt_action = action(v["action"] | "hold");
+  JsonObject t = c["tamper"];
+  m.tamper_protect = t["protect"] | false;
+  m.tamper_action = action(t["action"] | "hold");
   const char *act = ch["kwh_action"] | "";
   if (!strcmp(act, "hold")) m.kwh_action = KWH_HOLD;
   else if (!strcmp(act, "warn")) m.kwh_action = KWH_WARN;

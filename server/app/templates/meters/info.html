@@ -53,7 +53,7 @@
   </div>
 </div>
 
-<div class="card mb-3">
+<div class="card mb-3" id="historyCard">
   <div class="card-header d-flex flex-wrap align-items-center gap-2">
     <span class="fw-semibold me-2">Historical data</span>
     <div class="btn-group btn-group-sm" role="group" id="rangeBtns">
@@ -70,7 +70,7 @@
       <input type="datetime-local" class="form-control form-control-sm" id="toIn">
       <button class="btn btn-sm btn-primary" id="applyCustom">Apply</button>
     </div>
-    <a class="btn btn-sm btn-outline-primary ms-auto" id="csvBtn" href="#"><i class="bi bi-download me-1"></i>Export CSV</a>
+    {% if can_csv %}<a class="btn btn-sm btn-outline-primary ms-auto" id="csvBtn" href="#"><i class="bi bi-download me-1"></i>Export CSV</a>{% endif %}
   </div>
   <div class="card-body">
     <div class="d-flex flex-wrap gap-2 mb-2 small" id="seriesBtns">
@@ -104,7 +104,7 @@
         <input type="datetime-local" class="form-control form-control-sm w-auto" name="from" value="{{ f_from }}">
         <input type="datetime-local" class="form-control form-control-sm w-auto" name="to" value="{{ f_to }}">
         <button class="btn btn-sm btn-outline-primary">Filter</button>
-        <a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('meters.incidents_csv', pk=d.id) }}?{{ request.query_string.decode() }}"><i class="bi bi-download me-1"></i>Export CSV</a>
+        {% if can_csv %}<a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('meters.incidents_csv', pk=d.id) }}?{{ request.query_string.decode() }}"><i class="bi bi-download me-1"></i>Export CSV</a>{% endif %}
       </form>
       <div class="table-responsive">
       <table class="table table-sm align-middle">
@@ -145,8 +145,13 @@
             <td class="text-nowrap">{{ ((s.ended_at or now) - s.started_at)|duration if s.started_at else '–' }}</td>
             <td>{{ '%.3f'|format(s.kwh_used) }}</td>
             {% if price[1] is not none %}<td>{{ money(s.cost(price[1]), s.currency if s.price_per_kwh is not none else price[0]) }}{% if s.price_per_kwh is not none %} <span class="small text-body-secondary">@ {{ '%g'|format(s.price_per_kwh) }}</span>{% endif %}</td>{% endif %}<td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
-            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
-            <td class="text-end">{% if s.started_at %}<a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('meters.export_csv', pk=d.id, session=s.id) }}" title="Power data of this session"><i class="bi bi-download"></i> CSV</a>{% endif %}</td></tr>
+            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now', 'voltage': 'Voltage out of range', 'tamper': 'Tamper'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
+            <td class="text-end text-nowrap">{% if s.started_at %}
+              {% set s_end = s.ended_at or now %}
+              <button type="button" class="btn btn-sm btn-outline-primary py-0" data-hist-from="{{ s.started_at }}" data-hist-to="{{ s_end }}"
+                data-hist-label="Session {{ s.sid }}" title="Show this session in the Historical data chart"><i class="bi bi-graph-up"></i> Historical</button>
+              {% if can_csv %}<a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('meters.export_csv', pk=d.id, session=s.id) }}" title="Power data of this session"><i class="bi bi-download"></i> CSV</a>{% endif %}
+            {% endif %}</td></tr>
         {% else %}
           <tr><td colspan="9" class="text-body-secondary">No sessions yet.</td></tr>
         {% endfor %}

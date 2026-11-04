@@ -266,7 +266,7 @@ HANDLERS = {
 # ---------------------------------------------------------------- state / events
 
 def _apply_state(device, state):
-    clean = {k: state[k] for k in ("relay", "tripped", "tamper", "ac", "sess") if k in state}
+    clean = {k: state[k] for k in ("relay", "tripped", "tamper", "ac", "sess", "volt_out") if k in state}
     merged = dict(device.last_state or {})
     merged.update(clean)
     merged["at"] = now()
@@ -319,10 +319,25 @@ def process_event(device, ev):
         incidents.close_incident(device.id, "trip", ev.ts, event=ev, estimated=est,
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
     elif e == "tamper_open":
-        incidents.open_incident(device.id, "tamper", ev.ts, event=ev, estimated=est)
-        notify.notify(device, "panel_open", "Panel opened (tamper switch)")
+        act = d.get("action")  # only when Tamper Protection is enabled on the meter
+        incidents.open_incident(device.id, "tamper", ev.ts, event=ev, estimated=est,
+                                detail={"action": act} if act else None)
+        what = {"end": ": session ended", "hold": ": relay off until closed"}.get(act, "")
+        notify.notify(device, "panel_open", f"Panel opened (tamper switch){what}")
     elif e == "tamper_close":
         incidents.close_incident(device.id, "tamper", ev.ts, event=ev, estimated=est)
+    elif e == "voltage_out":
+        def num(x):
+            return f"{float(x):g}" if x not in (None, "", 0, 0.0) else "–"
+        lim = f"{num(d.get('min'))}–{num(d.get('max'))} V"
+        incidents.open_incident(device.id, "voltage", ev.ts, event=ev, estimated=est,
+                                detail={"v": d.get("v"), "dir": d.get("dir"), "range": lim, "action": d.get("action")})
+        what = {"end": "session ended", "hold": "relay off until back in range"}.get(d.get("action"), "power kept on")
+        notify.notify(device, "voltage_range",
+                      f"Voltage {'too low' if d.get('dir') == 'low' else 'too high'}: {d.get('v')} V "
+                      f"(range {lim}): {what}")
+    elif e == "voltage_ok":
+        incidents.close_incident(device.id, "voltage", ev.ts, event=ev, estimated=est, detail={"v_back": d.get("v")})
     elif e == "ac_lost":
         incidents.open_incident(device.id, "power", ev.ts, event=ev, estimated=est)
         notify.notify(device, "no_voltage", "No voltage (AC power lost)")

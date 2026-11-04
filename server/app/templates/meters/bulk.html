@@ -3,6 +3,13 @@
 {% set f = form %}
 {% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
 {% macro chk(name, default) -%}{{ 'checked' if (f.get(name) == 'on' if f else default) }}{%- endmacro %}
+{% macro action_radios(name, current, choices, default, title) -%}
+  <div class="mt-2 small fw-semibold">{{ title }}</div>
+  {% for key, label in choices.items() %}
+  <div class="form-check"><input class="form-check-input" type="radio" name="{{ name }}" id="{{ name }}_{{ key }}" value="{{ key }}" {{ 'checked' if current == key }}>
+    <label class="form-check-label small" for="{{ name }}_{{ key }}">{{ label }}{% if key == default %} <span class="text-body-secondary">(default)</span>{% endif %}</label></div>
+  {% endfor %}
+{%- endmacro %}
 {% macro section(key, title) -%}
 <div class="card mb-3 pm-bulk" data-group="{{ key }}">
   <div class="card-header d-flex align-items-center gap-2">
@@ -66,12 +73,7 @@
       <label class="form-label">Max kWh per session</label>
       <div class="input-group" style="max-width:260px"><input class="form-control" type="number" step="0.001" min="0" max="100000" name="kwh_max_0" value="{{ val('kwh_max_0', ch0.kwh_max) }}"><span class="input-group-text">kWh</span></div>
       <div class="form-text mb-2">0 = unlimited. Applied to every channel of each meter.</div>
-      {% set ka = val('kwh_action_0', ch0.get('kwh_action') or ('end' if ch0.get('kwh_end', true) else 'warn')) %}
-      <div class="small fw-semibold">When the kWh limit is reached</div>
-      {% for key, label in kwh_actions.items() %}
-      <div class="form-check"><input class="form-check-input" type="radio" name="kwh_action_0" id="ka{{ key }}" value="{{ key }}" {{ 'checked' if ka == key }}>
-        <label class="form-check-label small" for="ka{{ key }}">{{ label }}{% if key == 'end' %} <span class="text-body-secondary">(default)</span>{% endif %}</label></div>
-      {% endfor %}
+      {{ action_radios('kwh_action_0', val('kwh_action_0', kwh_action_of(ch0)), kwh_actions, 'hold', 'When the kWh limit is reached') }}
     {% endcall %}
 
     {% call section('amp', groups.amp) %}
@@ -105,6 +107,21 @@
           <label class="form-check-label" for="offline_off">Relay off if device offline for</label></div>
         <div class="input-group input-group-sm" style="width:150px"><input class="form-control" type="number" min="1" max="1440" name="offline_off_min" value="{{ val('offline_off_min', cfg.offline_off_min) }}"><span class="input-group-text">min</span></div>
       </div>
+    {% endcall %}
+
+    {% call section('voltage', groups.voltage) %}
+      <div class="input-group" style="max-width:340px">
+        <span class="input-group-text">Min</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_min" value="{{ val('volt_min', cfg.get('volt_min', 0)) }}">
+        <span class="input-group-text">Max</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_max" value="{{ val('volt_max', cfg.get('volt_max', 0)) }}">
+        <span class="input-group-text">V</span></div>
+      <div class="form-text">0 = no limit on that side.</div>
+      {{ action_radios('volt_action', val('volt_action', cfg.get('volt_action', 'hold')), protect_actions, 'hold', 'If out of range') }}
+    {% endcall %}
+
+    {% call section('tamper', groups.tamper) %}
+      <div class="form-check"><input class="form-check-input" type="checkbox" name="tamper_protect" id="tamper_protect" {{ chk('tamper_protect', cfg.get('tamper_protect')) }}>
+        <label class="form-check-label" for="tamper_protect">Enable Tamper Protection</label></div>
+      {{ action_radios('tamper_action', val('tamper_action', cfg.get('tamper_action', 'hold')), protect_actions, 'hold', 'If tamper detected') }}
     {% endcall %}
 
     {% call section('viewers', groups.viewers) %}

@@ -139,6 +139,7 @@ def configure(pk):
     dur = int(cfg.get("dur_min", 1440))
     return render_template("meters/configure.html", d=device, cfg=cfg, errors=errors,
                            waiting=waiting, online=hub.is_online(device.id), kwh_actions=devconfig.KWH_ACTIONS,
+                           protect_actions=devconfig.PROTECT_ACTIONS, kwh_action_of=devconfig.kwh_action,
                            viewers=_viewers(), linked={v.user_fk for v in MeterViewer.query.filter_by(device_fk=device.id)},
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
@@ -270,6 +271,13 @@ def incident_detail_text(inc):
             parts.append("server was down")
         elif d.get("cause") == "ping_timeout":
             parts.append("no reply (timeout)")
+    if inc.type == "voltage":
+        if d.get("v") is not None:
+            parts.append(f"{d.get('v')} V ({'low' if d.get('dir') == 'low' else 'high'}), range {d.get('range', '?')}")
+        if d.get("action"):
+            parts.append({"end": "session ended", "hold": "relay off", "run": "power kept on"}.get(d["action"], d["action"]))
+    if inc.type == "tamper" and d.get("action"):
+        parts.append({"end": "session ended", "hold": "relay off", "run": "power kept on"}.get(d["action"], d["action"]))
     if d.get("opened_by") == "state_sync" or d.get("closed_by") == "state_sync":
         parts.append("time from state sync")
     return " · ".join(parts) or "–"
@@ -289,7 +297,8 @@ def info(pk):
                            f_from=request.args.get("from", ""), f_to=request.args.get("to", ""),
                            detail_text=incident_detail_text, sessions=sessions, now=now(),
                            cfg=device.cfg or {}, channels=device.channels,
-                           price=settings.price(), money=settings.money)
+                           price=settings.price() if access.can_price(current_user) else (None, None),
+                           money=settings.money, can_csv=access.can_csv(current_user))
 
 
 _last_refresh = {}  # meter pk -> time of last "Get Data Now" (any user)
@@ -319,6 +328,10 @@ def live(pk):
 
 def _range_args(device):
     rng = request.args.get("range", "1d")
+    # Exact epoch range (e.g. "Historical" on a session row) wins over the minute-precision inputs.
+    start_ts, end_ts = request.args.get("start_ts", type=int), request.args.get("end_ts", type=int)
+    if rng == "custom" and start_ts and end_ts and start_ts < end_ts:
+        return start_ts, end_ts
     start = settings.local_to_epoch(request.args.get("from", ""))
     end = settings.local_to_epoch(request.args.get("to", ""))
     return history.resolve_range(device.id, rng, start, end)
@@ -336,7 +349,8 @@ def history_json(pk):
     data["tz_offset_s"] = _tz_offset_s()
     currency, price = settings.price()
     kwh = data["stats"].get("kwh")
-    data["cost"] = settings.money(kwh * price, currency) if price is not None and kwh is not None else None
+    data["cost"] = (settings.money(kwh * price, currency)
+                    if access.can_price(current_user) and price is not None and kwh is not None else None)
     return jsonify(data)
 
 
@@ -367,6 +381,8 @@ def _fname_ts(ts):
 @login_required
 def export_csv(pk):
     device = access.device_for_current_user(pk, allow_removed=True)
+    if not access.can_csv(current_user):
+        abort(403)
     ch = request.args.get("ch", 0, type=int)
     sess_id = request.args.get("session", type=int)
     if sess_id:  # one session: from its start to its end (or now, if still running)
@@ -390,6 +406,8 @@ def export_csv(pk):
 @login_required
 def incidents_csv(pk):
     device = access.device_for_current_user(pk, allow_removed=True)
+    if not access.can_csv(current_user):
+        abort(403)
     types, start, end = _incident_filters()
     rows = []
     for inc in _incident_query(device, types, start, end).all():
@@ -441,6 +459,8 @@ BULK_GROUPS = {
     "amp": "Max current",
     "session": "Session time limit & auto renew",
     "offline": "Relay off when offline",
+    "voltage": "Operating Voltage Range",
+    "tamper": "Tamper Protection",
     "viewers": "Linked users",
 }
 
@@ -456,6 +476,11 @@ def _bulk_apply(cfg, new, groups):
             out[k] = new[k]
     if "offline" in groups:
         out["offline_off"], out["offline_off_min"] = new["offline_off"], new["offline_off_min"]
+    if "voltage" in groups:
+        for k in ("volt_min", "volt_max", "volt_action"):
+            out[k] = new[k]
+    if "tamper" in groups:
+        out["tamper_protect"], out["tamper_action"] = new["tamper_protect"], new["tamper_action"]
     for c in out["ch"]:  # the same limits for every channel of every selected meter
         if "kwh" in groups:
             c["kwh_max"], c["kwh_action"] = new["ch"][0]["kwh_max"], new["ch"][0]["kwh_action"]
@@ -521,9 +546,12 @@ def bulk_configure():
         "amp": _differs(devices, lambda c: [x.get("amp_max") for x in c.get("ch", [])]),
         "session": _differs(devices, lambda c: (c.get("sess_mode"), c.get("dur_min"), c.get("daily_at"), c.get("auto"))),
         "offline": _differs(devices, lambda c: (c.get("offline_off"), c.get("offline_off_min"))),
+        "voltage": _differs(devices, lambda c: (c.get("volt_min", 0), c.get("volt_max", 0), c.get("volt_action", "hold"))),
+        "tamper": _differs(devices, lambda c: (bool(c.get("tamper_protect")), c.get("tamper_action", "hold"))),
     }
     return render_template("meters/bulk.html", devices=devices, ids=",".join(str(d.id) for d in devices),
                            cfg=cfg, ch0=ch0, dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            amp_rating=rating, kwh_actions=devconfig.KWH_ACTIONS, groups=BULK_GROUPS,
+                           protect_actions=devconfig.PROTECT_ACTIONS, kwh_action_of=devconfig.kwh_action,
                            differs=differs, errors=errors, results=results, viewers=_viewers(),
                            form=request.form if errors else None)

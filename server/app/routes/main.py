@@ -13,7 +13,7 @@ def healthz():
     return jsonify(ok=True)
 
 
-def meter_summary(d):
+def meter_summary(d, show_price=None):
     """Data for a dashboard card / live update (shared with meters.live)."""
     st = d.last_state or {}
     sess = st.get("sess") or {}
@@ -26,6 +26,8 @@ def meter_summary(d):
         status = "tripped"
     else:
         status = sess.get("status") or "unknown"
+        if status == "ended":  # session ended by the voltage or tamper protection
+            status = "ended_" + str(sess.get("end_reason") or "")
         if status == "active" and sess.get("over"):
             status = "over"  # kWh limit passed but "End session when kWh limit is reached" is off
     # Current session for the timer: start from the meter, end from our session record.
@@ -33,11 +35,13 @@ def meter_summary(d):
     if isinstance(sess.get("sid"), int):
         cur = Session.query.filter_by(device_fk=d.id, gen=d.pair_gen, sid=sess["sid"]).first()
     sess_start = sess.get("start") or (cur.started_at if cur else None)
+    if show_price is None:
+        show_price = access.can_price(current_user)
     currency, price = settings.price()
     kwh_now = sess.get("kwh")
     if cur is not None and cur.price_per_kwh is not None:
         currency, price = cur.currency or "", cur.price_per_kwh
-    cost = round(float(kwh_now) * price, 4) if price is not None and kwh_now is not None else None
+    cost = round(float(kwh_now) * price, 4) if show_price and price is not None and kwh_now is not None else None
     sess_end = cur.ended_at if cur and cur.ended_at else None
     return {
         "id": d.id,
@@ -62,7 +66,8 @@ def meter_summary(d):
         "sess_mode": (d.cfg or {}).get("sess_mode", "none"),
         "server_time": now(),
         "reading_ts": reading.get("ts"),
-        "sess_ended": bool(sess_end) or sess.get("status") == "expired" or bool(sess.get("ended")),
+        "sess_ended": bool(sess_end) or sess.get("status") in ("expired", "ended") or bool(sess.get("ended")),
+        "block": relays[0].get("block") if relays else None,
         "cost": settings.money(cost, currency) if cost is not None else None,
         "synced": d.synced,
         "ongoing": [i for i in ongoing if i != "offline"],

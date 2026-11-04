@@ -182,7 +182,8 @@ def users():
         errs += [err] if err else []
         if errs:
             return _errors("users", errs)
-        u = User(username=username, role="viewer", email=email, phone=phone)
+        u = User(username=username, role="viewer", email=email, phone=phone,
+                 can_csv=f.get("can_csv") == "on", show_price=f.get("show_price") == "on")
         u.set_password(f["password"])
         db.session.add(u)
         db.session.flush()
@@ -228,7 +229,9 @@ def users():
         msg = f"Viewer '{user.username}' unlocked."
     elif what == "access":
         _set_access(user, f.get("view_all") == "on", _ids("meters"))
-        msg = f"Meter access for '{user.username}' saved."
+        user.can_csv = f.get("can_csv") == "on"
+        user.show_price = f.get("show_price") == "on"
+        msg = f"Access for '{user.username}' saved."
     elif what == "reset_password":
         err = validation.password(f.get("password"), f.get("confirm"))
         if err:

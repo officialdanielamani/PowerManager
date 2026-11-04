@@ -124,6 +124,7 @@ static void startSession(bool autoRenew) {
   g.sess.status = SESS_ACTIVE;
   g.sess.over = false;
   g.sess.ended = false;
+  g.sess.stopReason = STOP_NONE;
   store::saveSession(g.sess);
   struct Ctx {
     uint32_t sid;
@@ -158,6 +159,19 @@ void renew(const char *reason, bool autoRenew) {
   startSession(autoRenew);
 }
 
+// Voltage / tamper protection with action "end": end the session now (relay off until renewed).
+static void stopSession(StopReason why) {
+  // caller holds StateLock
+  if (!g.sess.sid || g.sess.status == SESS_ENDED || g.sess.status == SESS_EXPIRED) return;
+  endSession(why == STOP_VOLTAGE ? "voltage" : "tamper");
+  g.sess.status = SESS_ENDED;
+  g.sess.stopReason = why;
+  store::saveSession(g.sess);
+  bump();
+}
+
+static const char *ACTION_NAME[] = {"run", "hold", "end"};
+
 // ------------------------------------------------------------------ commands
 
 bool setRelay(bool on, const char *src, const char *&err) {
@@ -165,7 +179,7 @@ bool setRelay(bool on, const char *src, const char *&err) {
   if (on) {
     if (g.tripped) err = "tripped";
     else if (g.sess.status == SESS_QUOTA) err = "quota_exceeded";
-    else if (g.sess.status == SESS_EXPIRED) err = "session_expired";
+    else if (g.sess.status == SESS_EXPIRED || g.sess.status == SESS_ENDED) err = "session_expired";
     else err = nullptr;
     if (err) return false;
   }
@@ -239,6 +253,8 @@ void stateJson(JsonObject o) {
   s["status"] = sessStatusName(g.sess.status);
   if (g.sess.over) s["over"] = true;
   s["ended"] = g.sess.ended;
+  if (g.sess.status == SESS_ENDED) s["end_reason"] = g.sess.stopReason == STOP_VOLTAGE ? "voltage" : "tamper";
+  if (g.voltOut) o["volt_out"] = true;
   if (nr) s["next_reset"] = nr;
 }
 
@@ -253,6 +269,53 @@ void begin(Sensor *sensor) {
   StateLock l;
   g.tamper = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
   g.lastE = g.sess.e0;  // until the first reading arrives
+}
+
+// Operating voltage range. Out = VOLT_OUT_READS bad readings in a row; back = VOLT_OK_READS good
+// ones. "No AC" (below AC_LOST_VOLTAGE / no reply) is not a range problem: it keeps the state.
+static void checkVoltage(bool ok, float v) {
+  // caller holds StateLock
+  static uint8_t bad = 0, good = 0;
+  bool enabled = g.cfg.volt_min > 0 || g.cfg.volt_max > 0;
+  if (!enabled) {
+    bad = good = 0;
+    if (g.voltOut) {
+      g.voltOut = false;
+      emitEvent("voltage_ok", [](JsonObject o, void *) { o["disabled"] = true; });
+      bump();
+    }
+    return;
+  }
+  if (!ok || v < AC_LOST_VOLTAGE) return;
+  bool out = (g.cfg.volt_min > 0 && v < g.cfg.volt_min) || (g.cfg.volt_max > 0 && v > g.cfg.volt_max);
+  struct Ctx {
+    float v, min, max;
+    const char *dir, *action;
+  } ctx = {v, g.cfg.volt_min, g.cfg.volt_max, (g.cfg.volt_min > 0 && v < g.cfg.volt_min) ? "low" : "high",
+           ACTION_NAME[g.cfg.volt_action % 3]};
+  if (out) {
+    good = 0;
+    if (!g.voltOut && ++bad >= VOLT_OUT_READS) {
+      g.voltOut = true;
+      emitEvent("voltage_out", [](JsonObject o, void *p) {
+        Ctx *c = (Ctx *)p;
+        o["v"] = serialized(String(c->v, 1));
+        o["min"] = c->min;
+        o["max"] = c->max;
+        o["dir"] = c->dir;
+        o["action"] = c->action;
+      }, &ctx);
+      if (g.cfg.volt_action == ACT_END) stopSession(STOP_VOLTAGE);
+      bump();
+    }
+  } else {
+    bad = 0;
+    if (g.voltOut && ++good >= VOLT_OK_READS) {
+      g.voltOut = false;
+      emitEvent("voltage_ok", [](JsonObject o, void *p) { o["v"] = serialized(String(((Ctx *)p)->v, 1)); }, &ctx);
+      bump();
+    }
+  }
 }
 
 static void readSensor() {
@@ -280,6 +343,7 @@ static void readSensor() {
     emitEvent(acNow ? "ac_restored" : "ac_lost");
     bump();
   }
+  checkVoltage(ok, r.v);
 }
 
 static void checkRules(bool firstPass) {
@@ -367,6 +431,9 @@ static void checkRules(bool firstPass) {
   if (g.tripped) block = "tripped";
   else if (g.sess.status == SESS_QUOTA) block = "quota";
   else if (g.sess.status == SESS_EXPIRED) block = "expired";
+  else if (g.sess.status == SESS_ENDED) block = "ended";
+  else if (g.cfg.tamper_protect && g.cfg.tamper_action == ACT_HOLD && g.tamper) block = "tamper";
+  else if (g.cfg.volt_action == ACT_HOLD && g.voltOut) block = "voltage";
   else if (g.paired && g.cfg.offline_off_min && g.offlineSinceMs &&
            millis() - g.offlineSinceMs >= g.cfg.offline_off_min * 60000UL)
     block = "offline";
@@ -396,7 +463,13 @@ static void checkTamper() {
   if (++same < 2) return;  // debounce: 2 ticks (~500 ms)
   same = 0;
   g.tamper = open;
-  emitEvent(open ? "tamper_open" : "tamper_close");
+  if (open && g.cfg.tamper_protect) {
+    const char *act = ACTION_NAME[g.cfg.tamper_action % 3];
+    emitEvent("tamper_open", [](JsonObject o, void *p) { o["action"] = (const char *)p; }, (void *)act);
+    if (g.cfg.tamper_action == ACT_END) stopSession(STOP_TAMPER);
+  } else {
+    emitEvent(open ? "tamper_open" : "tamper_close");
+  }
   bump();
 }
 

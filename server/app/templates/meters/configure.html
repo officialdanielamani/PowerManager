@@ -3,6 +3,13 @@
 {% set f = form %}
 {% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
 {% macro chk(name, default) -%}{{ 'checked' if (f.get(name) == 'on' if f else default) }}{%- endmacro %}
+{% macro action_radios(name, current, choices, default, title) -%}
+  <div class="mt-2 small fw-semibold">{{ title }}</div>
+  {% for key, label in choices.items() %}
+  <div class="form-check"><input class="form-check-input" type="radio" name="{{ name }}" id="{{ name }}_{{ key }}" value="{{ key }}" {{ 'checked' if current == key }}>
+    <label class="form-check-label small" for="{{ name }}_{{ key }}">{{ label }}{% if key == default %} <span class="text-body-secondary">(default)</span>{% endif %}</label></div>
+  {% endfor %}
+{%- endmacro %}
 {% block content %}
 <h1 class="h4 mb-1">{{ d.name }}</h1>
 <div class="text-body-secondary small mb-3">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
@@ -41,25 +48,18 @@
 
   <div class="col-12 col-xl-6">
     <div class="card h-100"><div class="card-header fw-semibold">Set Limit</div><div class="card-body">
+      {# 1. kWh #}
       {% for ch in cfg.ch %}{% set i = loop.index0 %}
       {% if cfg.ch|length > 1 %}<div class="fw-semibold small mb-1">Channel {{ i + 1 }}</div>{% endif %}
-      <div class="row g-2 mb-3">
-        <div class="col-sm-6"><label class="form-label">Max kWh per session</label>
-          <div class="input-group"><input class="form-control" type="number" step="0.001" min="0" max="100000" name="kwh_max_{{ i }}" value="{{ val('kwh_max_' ~ i, ch.kwh_max) }}"><span class="input-group-text">kWh</span></div>
-          <div class="form-text">0 = unlimited</div>
-          {% set ka = val('kwh_action_' ~ i, ch.get('kwh_action') or ('end' if ch.get('kwh_end', true) else 'warn')) %}
-          <div class="mt-2 small fw-semibold">When the kWh limit is reached</div>
-          {% for key, label in kwh_actions.items() %}
-          <div class="form-check"><input class="form-check-input" type="radio" name="kwh_action_{{ i }}" id="ka{{ i }}{{ key }}" value="{{ key }}" {{ 'checked' if ka == key }}>
-            <label class="form-check-label small" for="ka{{ i }}{{ key }}">{{ label }}{% if key == 'end' %} <span class="text-body-secondary">(default)</span>{% endif %}</label></div>
-          {% endfor %}
-        </div>
-        <div class="col-sm-6"><label class="form-label">Max current (relay off)</label>
-          <div class="input-group"><input class="form-control" type="number" step="0.1" min="0" max="{{ amp_rating }}" name="amp_max_{{ i }}" value="{{ val('amp_max_' ~ i, ch.amp_max) }}"><span class="input-group-text">A</span></div>
-          <div class="form-text">0 = off. Trip stays latched until [Reset Trip].</div></div>
-      </div>
+      <label class="form-label fw-semibold mb-1">Max kWh per session</label>
+      <div class="input-group" style="max-width:240px"><input class="form-control" type="number" step="0.001" min="0" max="100000" name="kwh_max_{{ i }}" value="{{ val('kwh_max_' ~ i, ch.kwh_max) }}"><span class="input-group-text">kWh</span></div>
+      <div class="form-text">0 = unlimited</div>
+      {{ action_radios('kwh_action_' ~ i, val('kwh_action_' ~ i, kwh_action_of(ch)), kwh_actions, 'hold', 'When the kWh limit is reached') }}
       {% endfor %}
-      <label class="form-label">Session time limit</label>
+      <hr>
+
+      {# 2. session time, renew, offline #}
+      <label class="form-label fw-semibold">Session time limit</label>
       {% set mode = val('sess_mode', cfg.sess_mode) %}
       <div class="mb-2">
         <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_none" value="none" {{ 'checked' if mode == 'none' }}><label class="form-check-label" for="m_none">None</label></div>
@@ -74,7 +74,7 @@
       <div class="mb-2" data-mode="daily">
         <div class="input-group input-group-sm" style="max-width:240px"><input class="form-control" type="time" name="daily_at" value="{{ val('daily_at', cfg.daily_at) }}"><span class="input-group-text">{{ tz_label() }}</span></div>
       </div>
-      <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="auto" id="auto" {{ chk('auto', cfg.auto) }}>
+      <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="auto" id="auto" {{ chk('auto', cfg.auto) }}>
         <label class="form-check-label" for="auto">Auto renew session</label>
         <div class="form-text">Off: when the session ends the relay stays OFF until [Renew Now].</div></div>
       <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -82,6 +82,32 @@
           <label class="form-check-label" for="offline_off">Relay off if device offline for</label></div>
         <div class="input-group input-group-sm" style="width:150px"><input class="form-control" type="number" min="1" max="1440" name="offline_off_min" value="{{ val('offline_off_min', cfg.offline_off_min) }}"><span class="input-group-text">min</span></div>
       </div>
+      <hr>
+
+      {# 3. max current #}
+      {% for ch in cfg.ch %}{% set i = loop.index0 %}
+      <label class="form-label fw-semibold mb-1">Max Amp{% if cfg.ch|length > 1 %} (channel {{ i + 1 }}){% endif %}</label>
+      <div class="input-group" style="max-width:240px"><input class="form-control" type="number" step="0.01" min="0" max="{{ amp_rating }}" name="amp_max_{{ i }}" value="{{ val('amp_max_' ~ i, ch.amp_max) }}"><span class="input-group-text">A</span></div>
+      <div class="form-text mb-2">0 = off. Trip stays latched until Reset Trip.</div>
+      {% endfor %}
+      <hr>
+
+      {# 4. voltage #}
+      <label class="form-label fw-semibold mb-1">Operating Voltage Range</label>
+      <div class="input-group" style="max-width:340px">
+        <span class="input-group-text">Min</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_min" value="{{ val('volt_min', cfg.get('volt_min', 0)) }}">
+        <span class="input-group-text">Max</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_max" value="{{ val('volt_max', cfg.get('volt_max', 0)) }}">
+        <span class="input-group-text">V</span></div>
+      <div class="form-text">0 = no limit on that side. Out of range = 3 s in a row; back in range = 10 s in a row. No AC at all is reported as "No voltage", not here.</div>
+      {{ action_radios('volt_action', val('volt_action', cfg.get('volt_action', 'hold')), protect_actions, 'hold', 'If out of range') }}
+      <hr>
+
+      {# 5. tamper #}
+      <label class="form-label fw-semibold mb-1">Tamper Protection</label>
+      <div class="form-check"><input class="form-check-input" type="checkbox" name="tamper_protect" id="tamper_protect" {{ chk('tamper_protect', cfg.get('tamper_protect')) }}>
+        <label class="form-check-label" for="tamper_protect">Enable Tamper Protection</label>
+        <div class="form-text">Off: panel open/close is only recorded and notified.</div></div>
+      <div id="tamperOpts">{{ action_radios('tamper_action', val('tamper_action', cfg.get('tamper_action', 'hold')), protect_actions, 'hold', 'If tamper detected') }}</div>
     </div></div>
   </div>
 
@@ -129,6 +155,9 @@
   document.querySelectorAll('input[name=sess_mode]').forEach(function (r) { r.addEventListener('change', syncMode); });
   syncMode();
   PM.bindActions(actionUrl);
+  var tp = document.getElementById('tamper_protect'), to = document.getElementById('tamperOpts');
+  function syncTamper() { to.querySelectorAll('input').forEach(function (r) { r.disabled = !tp.checked; }); to.style.opacity = tp.checked ? 1 : .5; }
+  tp.addEventListener('change', syncTamper); syncTamper();
   document.getElementById('removeBtn').addEventListener('click', function () {
     PM.post(actionUrl, {action: 'remove', delete_history: document.getElementById('delHistory').checked}).then(function (r) {
       if (r.ok) location.href = r.redirect; else PM.toast(r.message || r.error, 'danger');

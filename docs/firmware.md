@@ -92,7 +92,9 @@ relay_on = want_on
 ```
 
 - **Over-current**: A > `amp_max` for 2 reads in a row → `tripped = true` (stored in NVS, survives reboot), relay OFF, event `overcurrent`.
-- **Quota**: `session_kwh = e_now − e_at_session_start ≥ kwh_max` → per `kwh_action`: **end** (default): `quota` + `session_end` (reason `quota`) now, relay OFF until renewed (manually, or by auto renew at the next scheduled reset); **hold**: relay OFF, the session ends at its time limit; **warn**: `quota` once + `sess.over`, power stays on. `session_end` is sent exactly once per session (`sess.ended`).
+- **Quota**: `session_kwh = e_now − e_at_session_start ≥ kwh_max` → per `kwh_action`: **warn** (*Session run as usual*): `quota` once + `sess.over`, power stays on; **hold** (*Off relay, but session continue*, default): relay OFF, session ends at its time limit or on Renew; **end** (*End session*): `quota` + `session_end` (reason `quota`) now. `session_end` is sent exactly once per session (`sess.ended`).
+- **Operating voltage**: outside `volt.min`–`volt.max` for 3 readings → `voltage_out`; back inside for 10 readings → `voltage_ok`. Action **run** = event only, **hold** = relay OFF while out of range, **end** = session ends (status `ended`, reason `voltage`). Below 50 V counts as "No AC", not as out of range.
+- **Tamper protection** (if enabled): panel opens → **run** = event only, **hold** = relay OFF while open, **end** = session ends (reason `tamper`). Without protection, tamper is only reported.
 - **Session expiry**: `now ≥ next_reset` (needs valid time) → end session `expired` (unless a kWh limit already ended it); if `auto` → start a new one at once; else relay OFF until `renew`.
 - Every telemetry item carries the session progress `s: {sid, kwh}`, so the server's "session used" stays current between `state` messages.
 - The local dashboard shows **Time elapsed / Time left** for the session.
@@ -125,7 +127,7 @@ Only the highest-priority active state is shown. One-shot patterns (marked ⚡) 
 | 3 | Over-current tripped (latched) | **Red solid** (relay OFF) |
 | 4 | Quota exceeded / session expired | **Yellow blink** 1 Hz until renewed |
 | 5 | Panel open (tamper) | Purple blink 1 Hz |
-| 6 | AC lost (no voltage) **or PZEM not answering** (the two look the same: the PZEM is powered from AC) | Orange short flash every 3 s |
+| 6 | AC lost (no voltage), PZEM not answering, **or voltage out of the operating range** | Orange short flash every 3 s |
 | 7 | Setup / AP mode (first boot or Wi-Fi fallback) | Blue slow breathe |
 | 8 | Wi-Fi connecting | Blue blink 2 Hz |
 | 9 | Not paired (Wi-Fi OK, no server credentials / `4401`) | Cyan slow breathe |

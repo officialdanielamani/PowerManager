@@ -53,10 +53,12 @@ var PM = (function () {
 
   var STATUS = {active: ['success', 'Active'], quota: ['warning', 'kWh limit reached'], expired: ['warning', 'Session ended'],
                 tripped: ['danger', 'Over-current trip'], unknown: ['secondary', 'No data yet'],
-                over: ['warning', 'Over kWh limit (power on)']};
+                over: ['warning', 'Over kWh limit (power on)'], ended_voltage: ['danger', 'Session ended (voltage)'],
+                ended_tamper: ['danger', 'Session ended (tamper)'], ended_: ['warning', 'Session ended']};
   var INCIDENT = {power: '<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>',
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
-                  tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>'};
+                  tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
+                  voltage: '<span class="badge pm-bg-orange"><i class="bi bi-activity"></i> Voltage</span>'};
 
   function set(root, field, fn) {
     root.querySelectorAll('[data-field="' + field + '"]').forEach(fn);
@@ -65,7 +67,12 @@ var PM = (function () {
   function updateMeterCard(root, m) {
     set(root, 'online', function (el) { el.className = 'pm-dot ' + (m.online ? 'on' : 'off'); el.title = m.online ? 'Online' : 'Offline'; });
     set(root, 'w', function (el) { el.textContent = m.w == null ? '–' : m.w; });
-    set(root, 'relay', function (el) { el.className = 'badge rounded-pill ' + (m.relay_on ? 'text-bg-success' : 'text-bg-secondary'); el.textContent = 'Relay ' + (m.relay_on ? 'ON' : 'OFF'); });
+    var WHY = {tripped: 'trip', quota: 'kWh limit', expired: 'session ended', ended: 'session ended', offline: 'offline',
+               voltage: 'voltage', tamper: 'tamper'};
+    set(root, 'relay', function (el) {
+      el.className = 'badge rounded-pill ' + (m.relay_on ? 'text-bg-success' : 'text-bg-secondary');
+      el.textContent = 'Relay ' + (m.relay_on ? 'ON' : 'OFF' + (m.relay_block && WHY[m.relay_block] ? ' · ' + WHY[m.relay_block] : ''));
+    });
     set(root, 'kwh', function (el) { el.textContent = (m.kwh == null ? '–' : Number(m.kwh).toFixed(3)) + ' / ' + (m.kwh_max ? m.kwh_max : '∞') + ' kWh'; });
     set(root, 'kwh-bar', function (el) {
       var pct = m.kwh_max ? Math.min(100, (m.kwh || 0) / m.kwh_max * 100) : 0;
@@ -185,7 +192,7 @@ var PM = (function () {
       renderLatest(m);
       var on = document.getElementById('btnRelayOn');
       if (on) {
-        var blocked = m.status === 'quota' || m.status === 'expired' || m.status === 'tripped';
+        var blocked = m.status === 'quota' || m.status === 'expired' || m.status === 'tripped' || m.status.indexOf('ended') === 0;
         on.disabled = blocked;
         on.title = blocked ? 'Blocked until the session is renewed / trip is reset' : '';
       }
@@ -251,9 +258,35 @@ var PM = (function () {
 
     function query() {
       var q = 'range=' + state.range + '&ch=' + state.ch;
-      if (state.range === 'custom') q += '&from=' + encodeURIComponent(state.from) + '&to=' + encodeURIComponent(state.to);
+      if (state.range === 'custom') {
+        q += '&from=' + encodeURIComponent(state.from) + '&to=' + encodeURIComponent(state.to);
+        if (state.startTs && state.endTs) q += '&start_ts=' + state.startTs + '&end_ts=' + state.endTs;
+      }
       return q;
     }
+    function localInput(ts) {  // epoch -> "YYYY-MM-DDTHH:MM" in the server's display time zone
+      return new Date((ts + (last ? last.tz_offset_s : 0)) * 1000).toISOString().slice(0, 16);
+    }
+    function showCustom(on) {
+      var cr = document.getElementById('customRange');
+      cr.classList.toggle('d-none', !on); cr.classList.toggle('d-flex', on);
+      document.querySelectorAll('#rangeBtns .active').forEach(function (x) { x.classList.remove('active'); });
+      document.querySelector('#rangeBtns [data-range="' + (on ? 'custom' : state.range) + '"]').classList.add('active');
+    }
+    // "Historical" on a session row: show exactly that session's time range.
+    document.querySelectorAll('[data-hist-from]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.range = 'custom';
+        state.startTs = +btn.dataset.histFrom; state.endTs = +btn.dataset.histTo;
+        state.from = localInput(state.startTs); state.to = localInput(state.endTs + 59);
+        document.getElementById('fromIn').value = state.from;
+        document.getElementById('toIn').value = state.to;
+        showCustom(true);
+        load();
+        document.getElementById('historyCard').scrollIntoView({behavior: 'smooth', block: 'start'});
+        toast(btn.dataset.histLabel + ' shown in Historical data', 'info');
+      });
+    });
     function label(t, span, off) {
       var d = new Date((t + off) * 1000), p = function (n) { return String(n).padStart(2, '0'); };
       var hm = p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
@@ -296,7 +329,8 @@ var PM = (function () {
       document.getElementById('rangeLabel').textContent = last.start_local + ' → ' + last.end_local + ' (' + {raw: 'raw', h: 'hourly', d: 'daily'}[last.source] + ')';
     }
     function load() {
-      document.getElementById('csvBtn').href = opt.csv + '?' + query();
+      var csvBtn = document.getElementById('csvBtn');
+      if (csvBtn) csvBtn.href = opt.csv + '?' + query();
       fetch(opt.history + '?' + query(), {credentials: 'same-origin'}).then(function (r) { return r.json(); })
         .then(function (d) { last = d; draw(); });
     }
@@ -307,11 +341,12 @@ var PM = (function () {
         var custom = b.dataset.range === 'custom';
         var cr = document.getElementById('customRange');
         cr.classList.toggle('d-none', !custom); cr.classList.toggle('d-flex', custom);
-        if (!custom) { state.range = b.dataset.range; load(); }
+        if (!custom) { state.range = b.dataset.range; state.startTs = state.endTs = null; load(); }
       });
     });
     document.getElementById('applyCustom').addEventListener('click', function () {
-      state.range = 'custom'; state.from = document.getElementById('fromIn').value; state.to = document.getElementById('toIn').value; load();
+      state.range = 'custom'; state.startTs = state.endTs = null;
+      state.from = document.getElementById('fromIn').value; state.to = document.getElementById('toIn').value; load();
     });
     document.querySelectorAll('#seriesBtns [data-series]').forEach(function (b) {
       b.addEventListener('click', function () {
