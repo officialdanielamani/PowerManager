@@ -7,7 +7,7 @@ Firmware for the PowerManager meter: ESP32-S3 Super Mini + PZEM-004T + solid-sta
 1. Install **Arduino IDE 2.x**.
 2. *File → Preferences → Additional boards manager URLs*, add:
    `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
-3. *Tools → Board → Boards Manager*: install **esp32 by Espressif Systems**. Tested with **3.3.12** (recommended) and **2.0.17**.
+3. *Tools → Board → Boards Manager*: install **esp32 by Espressif Systems**. Reference version: **3.3.5** (the one used on the real meters). Also compiles on 3.3.12 and 2.0.17.
 4. *Tools → Manage Libraries*: install
    - **ArduinoJson** by Benoit Blanchon (7.x)
    - **WebSockets** by Markus Sattler (2.6 or newer)

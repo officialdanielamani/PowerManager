@@ -164,7 +164,7 @@ Everything else is built into the ESP32 core: WiFi, WebServer, DNSServer, ESPmDN
 
 **Arduino IDE board settings:** Board *ESP32S3 Dev Module* · USB CDC On Boot: *Enabled* · Flash Size: *4MB* · Partition Scheme: **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** (the 128 KB "SPIFFS" partition holds the LittleFS offline buffer; the app uses ~66% of its slot).
 
-Tested to compile with Arduino-ESP32 core 3.3.12 and 2.0.17, ArduinoJson 7.4.2, WebSockets 2.7.3. The only API that differs between the cores is the RGB LED call (`rgbLedWrite` on 3.x, `neopixelWrite` on 2.0.x), handled in `led.cpp`.
+Reference core: Arduino-ESP32 **3.3.5** (used on the hardware). Also compiles on 3.3.12 and 2.0.17. Libraries: ArduinoJson 7.4.2, WebSockets 2.7.3. The only API that differs between the cores is the RGB LED call (`rgbLedWrite` on 3.x, `neopixelWrite` on 2.0.x), handled in `led.cpp`, plus the ESP-NOW receive-callback signature (handled in `mesh.cpp`).
 
 ## 11. Sketch layout
 
