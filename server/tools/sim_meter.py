@@ -54,7 +54,7 @@ def cmd_pair(args):
             resp = json.loads(r.read())
     except urllib.error.HTTPError as e:
         sys.exit(f"Pair failed: HTTP {e.code} {e.read().decode()}")
-    st.update(server=args.server.rstrip("/"), secret=resp["secret"], ws=resp["ws"],
+    st.update(server=args.server.rstrip("/"), secret=resp["secret"], ws=resp["ws"], link_key=resp.get("link_key"),
               cfg=resp["config"]["cfg"], cfg_ver=resp["config"]["ver"], seq=st.get("seq", 0), boot=0,
               sid=0, e_total=st.get("e_total", 12.0))
     save_state(args.state, st)
@@ -82,6 +82,9 @@ class Meter:
         self.last_report = 0
         self.running = True
         self.reading = None
+        self.gateway = None     # set on a leaf: the gateway Meter it talks through
+        self.leaves = {}        # set on a gateway: device_id -> leaf Meter
+        self.dn_last = 0
         self.volt_override = None
         self.volt_out = False
         self.volt_bad = self.volt_good = 0
@@ -291,8 +294,53 @@ class Meter:
             if len(self.buffer) > self.args.buffer:
                 self.buffer = self.buffer[-self.args.buffer:]
 
+    # ------------------------------------------------------------ mesh (simulated ESP-NOW)
+    # A gateway Meter carries leaf Meters (--leaves): leaf messages are wrapped + signed with the
+    # leaf's link_key and sent over the gateway's WebSocket, like the firmware does over ESP-NOW.
+    def sign(self, n, m):
+        import hashlib, hmac
+        return hmac.new(self.st["link_key"].encode(), f"{self.st['device_id']}|{n}|{m}".encode(),
+                        hashlib.sha256).hexdigest()[:32]
+
+    def leaf_send(self, msg):
+        gw = self.gateway
+        if gw is None or gw.ws is None:
+            return False
+        self.st["link_n"] = self.st.get("link_n", 0) + 1
+        m = json.dumps(msg)
+        return gw.send({"t": "via", "d": self.st["device_id"], "n": self.st["link_n"], "h": self.sign(self.st["link_n"], m), "m": m})
+
+    def leaf_receive(self, msg):
+        """Downlink from the server through the gateway: check the server's signature first."""
+        m, n = msg.get("m", ""), msg.get("n", 0)
+        if msg.get("h") != self.sign(n, m) or n <= self.dn_last:
+            self.log("MESH: dropped downlink with bad signature / old counter")
+            return
+        self.dn_last = n
+        self.handle(json.loads(m))
+
+    def leaf_net(self):
+        last_ping, was_up = 0, False
+        while self.running:
+            up = self.gateway.ws is not None
+            if up and not was_up:
+                self.log("MESH: gateway", self.gateway.st["device_id"], "reachable, hello")
+                self.send({"t": "hello", "fw": "sim-0.4", "proto": 1, "boot": self.st["boot"],
+                           "up": int(time.time() - self.boot_t), "tv": 1, "ts": int(time.time()),
+                           "cfg_ver": self.st.get("cfg_ver", 0), "caps": {"channels": 1}, "state": self.state_msg()})
+                last_ping = time.time()
+            was_up = up
+            if up:
+                self.flush()
+                if time.time() - last_ping > 30:
+                    self.send({"t": "ping"})
+                    last_ping = time.time()
+            time.sleep(1)
+
     # ------------------------------------------------------------ network
     def send(self, msg):
+        if self.gateway is not None:
+            return self.leaf_send(msg)
         ws = self.ws
         if ws is None:
             return False
@@ -337,6 +385,14 @@ class Meter:
 
     def handle(self, msg):
         t = msg.get("t")
+        if t == "via":  # gateway: downlink for one of our leaves
+            leaf = self.leaves.get(msg.get("d"))
+            if leaf:
+                leaf.leaf_receive(msg)
+            return
+        if t == "link_key":
+            self.st["link_key"] = msg.get("key")
+            return
         if t == "welcome":
             self.log("WELCOME", msg)
         elif t == "ack":
@@ -499,6 +555,14 @@ class Meter:
     def run(self):
         threading.Thread(target=self.control, daemon=True).start()
         threading.Thread(target=self.net, daemon=True).start()
+        for path in filter(None, (self.args.leaves or "").split(",")):
+            largs = argparse.Namespace(**{**vars(self.args), "state": path, "script": None, "leaves": None})
+            leaf = Meter(largs)
+            leaf.gateway = self
+            self.leaves[leaf.st["device_id"]] = leaf
+            threading.Thread(target=leaf.control, daemon=True).start()
+            threading.Thread(target=leaf.leaf_net, daemon=True).start()
+            self.log("MESH: carrying leaf", leaf.st["device_id"])
         if self.args.script:
             threading.Thread(target=self.scripted, args=(self.args.script,), daemon=True).start()
         if sys.stdin.isatty():
@@ -530,6 +594,7 @@ def main():
     b.add_argument("--energy-x", type=float, default=1.0, help="multiply energy accumulation (test quotas)")
     b.add_argument("--buffer", type=int, default=500, help="offline buffer size")
     b.add_argument("--self-w", type=float, default=0.0, help="the meter's own consumption added to readings (W)")
+    b.add_argument("--leaves", help="act as mesh gateway for these meters (state files, comma separated)")
     args = p.parse_args()
     if args.cmd == "pair":
         cmd_pair(args)

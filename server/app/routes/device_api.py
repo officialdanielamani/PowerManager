@@ -10,7 +10,7 @@ from simple_websocket import ConnectionClosed
 
 from ..extensions import db, limiter, sock
 from ..models import Channel, Device, PairingCode, now
-from ..services import devconfig, hub, ingest
+from ..services import devconfig, hub, ingest, mesh
 
 bp = Blueprint("device_api", __name__)
 log = logging.getLogger(__name__)
@@ -35,24 +35,22 @@ def ensure_device_defaults(device, reset=False):
         device.cfg = devconfig.default_cfg(n)
 
 
-@bp.post("/api/v1/pair")
-@limiter.limit("10 per minute")
-def pair():
-    body = request.get_json(silent=True)
+def pair_device(body):
+    """Pair a meter. Used by the HTTPS endpoint and by gateways (mesh). Returns (status, dict)."""
     if not isinstance(body, dict):
-        return jsonify(err="bad_request"), 400
+        return 400, {"err": "bad_request"}
     code = normalize_code(body.get("code"))
     device_id = str(body.get("device_id", "")).strip().upper()
     if not DEVICE_ID_RE.match(device_id) or len(code) != 8:
-        return jsonify(err="bad_request"), 400
+        return 400, {"err": "bad_request"}
 
     pc = db.session.get(PairingCode, code)
     if pc is None or pc.used_at is not None or pc.expires_at < now():
-        return jsonify(err="invalid_code"), 404
+        return 404, {"err": "invalid_code"}
 
     device = Device.query.filter_by(device_id=device_id).first()
     if device is not None and device.removed_at is None:
-        return jsonify(err="already_paired"), 409
+        return 409, {"err": "already_paired"}
 
     caps = body.get("caps") if isinstance(body.get("caps"), dict) else {}
     if device is None:
@@ -78,6 +76,8 @@ def pair():
 
     secret = secrets.token_urlsafe(32)
     device.set_secret(secret)
+    device.link_key = secrets.token_hex(16)  # mesh signing key (32 hex chars)
+    device.link_up = 0
     device.fw = str(body.get("fw", ""))[:32]
     device.hw = str(body.get("hw", ""))[:64]
     try:
@@ -90,11 +90,18 @@ def pair():
     ensure_device_defaults(device, reset=True)
     pc.used_at = now()
     pc.device_fk = device.id
-    ingest.server_event(device, "paired", {"fw": device.fw})
+    ingest.server_event(device, "paired", {"fw": device.fw, "via": body.get("_via")})
     db.session.commit()
-    log.info("Device %s paired", device_id)
-    return jsonify(secret=secret, ws=WS_PATH, time=now(),
-                   config=devconfig.to_device(device.cfg, device.cfg_ver_wanted))
+    log.info("Device %s paired%s", device_id, f" via {body.get('_via')}" if body.get("_via") else "")
+    return 200, {"secret": secret, "link_key": device.link_key, "ws": WS_PATH, "time": now(),
+                 "config": devconfig.to_device(device.cfg, device.cfg_ver_wanted)}
+
+
+@bp.post("/api/v1/pair")
+@limiter.limit("10 per minute")
+def pair():
+    status, body = pair_device(request.get_json(silent=True))
+    return jsonify(body), status
 
 
 def _auth_device():
@@ -135,12 +142,15 @@ def device_ws(ws):
     ingest.on_connect(device, conn)
     db.session.remove()
     log.info("Device %s connected", device_id)
-    last_rx = time.monotonic()
+    last_rx = last_sweep = time.monotonic()
     reason = "connection_lost"
     try:
         while not conn.closed.is_set() and not hub.SHUTDOWN.is_set():
             while not conn.outbox.empty():
                 ws.send(conn.outbox.get_nowait())
+            if getattr(conn, "leaves", None) and time.monotonic() - last_sweep > 2:
+                last_sweep = time.monotonic()
+                mesh.sweep(conn)  # leaves (mesh) that went silent
             data = ws.receive(timeout=0.5)
             if data is None:
                 if time.monotonic() - last_rx > OFFLINE_AFTER_S:
@@ -160,7 +170,8 @@ def device_ws(ws):
                     conn.send({"t": "bye", "code": 4403})
                     conn.close(4403)
                     continue
-                ingest.handle(conn, device, msg)
+                if not mesh.handle(conn, device, msg):  # messages relayed for leaf meters
+                    ingest.handle(conn, device, msg)
             except Exception:
                 log.exception("Error handling %s from %s", msg.get("t"), device_id)
                 db.session.rollback()
@@ -171,6 +182,8 @@ def device_ws(ws):
     except ConnectionClosed:
         pass
     finally:
+        if getattr(conn, "leaves", None):
+            mesh.gateway_gone(conn)
         replaced = conn.close_code == 4000
         # On server shutdown the device stays marked online; the next start records an
         # "offline (server down)" incident from last_seen (ingest.mark_all_offline_on_startup).

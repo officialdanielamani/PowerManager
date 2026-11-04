@@ -83,7 +83,7 @@ def test_hello_pushes_outdated_config(app, device):
     device.cfg_ver_wanted = 3
     db.session.commit()
     ingest.handle(conn, device, {"t": "hello", "up": 1, "cfg_ver": 2})
-    assert [m["t"] for m in conn.sent] == ["welcome", "cfg"]
+    assert [m["t"] for m in conn.sent if m["t"] != "link_key"] == ["welcome", "cfg"]
     ingest.handle(conn, device, {"t": "cfg_ack", "ver": 3, "ok": True})
     assert device.synced
 

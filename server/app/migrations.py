@@ -42,7 +42,8 @@ def run():
                 "events_autodel BOOLEAN NOT NULL DEFAULT 0", "events_autodel_days INTEGER NOT NULL DEFAULT 120",
                 "last_info JSON NOT NULL DEFAULT '{}'", "last_info_at INTEGER",
                 "resync_pending BOOLEAN NOT NULL DEFAULT 0",
-                "tare_a FLOAT NOT NULL DEFAULT 0", "tare_w FLOAT NOT NULL DEFAULT 0"):
+                "tare_a FLOAT NOT NULL DEFAULT 0", "tare_w FLOAT NOT NULL DEFAULT 0",
+                "link_key VARCHAR(64)", "link_up INTEGER NOT NULL DEFAULT 0", "via_fk INTEGER"):
         _add_column("device", ddl)
 
     # v0.3 -> v0.4: per-viewer CSV / price permissions

@@ -171,6 +171,12 @@ def h_hello(conn, device, msg):
         device.cfg_ver_applied = dev_ver
     conn.send({"t": "welcome", "time": now(), "cfg_ver": device.cfg_ver_wanted,
                "last_seq": device.last_seq})
+    if not device.link_key and getattr(conn, "direct", True):
+        import secrets
+        device.link_key = secrets.token_hex(16)  # mesh signing key for meters paired before 0.4
+        device.link_up = 0
+    if getattr(conn, "direct", True) and device.link_key:
+        conn.send({"t": "link_key", "key": device.link_key})  # meter stores it (needed for mesh)
     if dev_ver != device.cfg_ver_wanted:
         conn.send({"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted)})
     commands.flush_pending(device, conn)

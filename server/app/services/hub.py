@@ -15,6 +15,8 @@ SHUTDOWN = threading.Event()  # set when the server is stopping
 
 
 class Connection:
+    direct = True  # a meter's own WebSocket (mesh leaves use services.mesh.LeafConnection)
+
     def __init__(self, device_pk, ws):
         self.device_pk = device_pk
         self.ws = ws

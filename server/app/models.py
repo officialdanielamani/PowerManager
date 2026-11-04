@@ -105,6 +105,11 @@ class Device(db.Model):
     data_autodel_days = db.Column(db.Integer, nullable=False, default=120)
     events_autodel = db.Column(db.Boolean, nullable=False, default=False)
     events_autodel_days = db.Column(db.Integer, nullable=False, default=120)
+    # Mesh (ESP-NOW): a leaf meter's messages travel through a gateway meter. They are signed with
+    # link_key (HMAC) so the gateway can neither fake nor change them; link_up = last uplink counter.
+    link_key = db.Column(db.String(64))
+    link_up = db.Column(db.Integer, nullable=False, default=0)
+    via_fk = db.Column(db.Integer)  # gateway (device pk) of the last mesh connection
     # Tare: the meter's own consumption, subtracted when showing "tared" values (server-only).
     tare_a = db.Column(db.Float, nullable=False, default=0.0)
     tare_w = db.Column(db.Float, nullable=False, default=0.0)

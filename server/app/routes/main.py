@@ -3,7 +3,7 @@ from flask_login import current_user, login_required
 
 from ..extensions import db
 from ..models import Device, Incident, Notification, Session, now
-from ..services import access, devconfig, hub, settings, tare as tare_svc
+from ..services import access, devconfig, hub, mesh, settings, tare as tare_svc
 
 bp = Blueprint("main", __name__)
 
@@ -87,6 +87,7 @@ def meter_summary(d, show_price=None):
         "sess_ended": bool(sess_end) or sess.get("status") in ("expired", "ended") or bool(sess.get("ended")),
         "block": relays[0].get("block") if relays else None,
         "disabled": bool(d.disabled_at),
+        "via": mesh.via_name(d),  # gateway name when connected through the mesh
         "cost": settings.money(cost, currency) if cost is not None else None,
         "synced": d.synced,
         "ongoing": [i for i in ongoing if i != "offline"],
