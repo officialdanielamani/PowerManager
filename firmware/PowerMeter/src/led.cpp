@@ -19,7 +19,11 @@ static const RGB OFF = {0, 0, 0}, RED = {255, 0, 0}, GREEN = {0, 255, 0}, BLUE =
 
 static void show(RGB c, uint16_t level = 255) {
   uint32_t k = (uint32_t)LED_BRIGHTNESS * level / 255;
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
   rgbLedWrite(PIN_LED, c.r * k / 255, c.g * k / 255, c.b * k / 255);
+#else  // core 2.0.x calls it neopixelWrite()
+  neopixelWrite(PIN_LED, c.r * k / 255, c.g * k / 255, c.b * k / 255);
+#endif
 }
 
 static bool blink(uint32_t t, uint32_t periodMs) { return (t % periodMs) < periodMs / 2; }

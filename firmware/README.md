@@ -7,7 +7,7 @@ Firmware for the PowerManager meter: ESP32-S3 Super Mini + PZEM-004T + solid-sta
 1. Install **Arduino IDE 2.x**.
 2. *File → Preferences → Additional boards manager URLs*, add:
    `https://espressif.github.io/arduino-esp32/package_esp32_index.json`
-3. *Tools → Board → Boards Manager*: install **esp32 by Espressif Systems** (3.x; tested with 3.3.12).
+3. *Tools → Board → Boards Manager*: install **esp32 by Espressif Systems**. Tested with **3.3.12** (recommended) and **2.0.17**.
 4. *Tools → Manage Libraries*: install
    - **ArduinoJson** by Benoit Blanchon (7.x)
    - **WebSockets** by Markus Sattler (2.6 or newer)
@@ -18,12 +18,14 @@ Firmware for the PowerManager meter: ESP32-S3 Super Mini + PZEM-004T + solid-sta
 
 | Setting | Value |
 |---------|-------|
-| Board | ESP32S3 Dev Module |
+| Board | ESP32S3 Dev Module, from the **esp32** (Espressif) list |
 | USB CDC On Boot | Enabled (serial log over the USB-C port) |
 | Flash Size | 4MB |
 | Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** |
 
 Open `firmware/PowerMeter/PowerMeter.ino`, check the pins in `config.h`, then Upload.
+
+If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** for game controllers), the Tools → Board menu has an "ESP32S3 Dev Module" in each of them. Pick the one under **esp32**. Bluepad32's package is based on the older 2.0.x core. The sketch builds on it too, but it is meant for Bluetooth controllers, not tested here, and stays behind on fixes.
 
 ## 3. Wiring (default pins, see `config.h`)
 
