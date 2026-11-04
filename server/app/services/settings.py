@@ -12,6 +12,8 @@ DEFAULTS = {
     "server_tls": "1",
     "timezone": "UTC",
     "raw_retention_days": "90",
+    "currency": "",                 # e.g. MYR
+    "price_per_kwh": "",            # e.g. 0.21; empty = no cost shown
     "login_max_attempts": "5",      # viewer accounts; 0 = no lockout
     "login_lock_minutes": "15",     # 0 = locked until the admin unlocks
     "telegram_enabled": "0",
@@ -124,3 +126,19 @@ def public_server(request=None):
         tls = request.scheme == "https"
     port = int(port) if port else (443 if tls else 80)
     return host, port, tls, configured
+
+
+def price():
+    """(currency, price per kWh) or (None, None) when no price is set."""
+    try:
+        p = float(get("price_per_kwh"))
+    except (TypeError, ValueError):
+        return None, None
+    return (get("currency") or "").strip(), p
+
+
+def money(amount, currency=None):
+    if amount is None:
+        return None
+    cur = currency if currency is not None else (get("currency") or "")
+    return f"{cur} {amount:,.2f}".strip()

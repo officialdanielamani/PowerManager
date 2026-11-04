@@ -74,6 +74,8 @@ var PM = (function () {
     set(root, 'status', function (el) { var s = STATUS[m.status] || ['secondary', m.status]; el.innerHTML = '<span class="badge text-bg-' + s[0] + '">' + esc(s[1]) + '</span>'; });
     set(root, 'ongoing', function (el) { el.innerHTML = m.ongoing.map(function (t) { return INCIDENT[t] || ''; }).join(' '); });
     set(root, 'last_seen', function (el) { el.textContent = m.last_seen; });
+    set(root, 'cost', function (el) { el.textContent = m.cost || '–'; });
+    set(root, 'cost-row', function (el) { el.classList.toggle('d-none', !m.cost); });
     set(root, 'reading_at', function (el) { el.textContent = m.reading_at; });
     set(root, 'next_reset', function (el) { el.textContent = m.next_reset || ''; });
   }
@@ -94,8 +96,10 @@ var PM = (function () {
         '</div>';
     });
     var remain = m.kwh_max ? Math.max(0, m.kwh_max - (m.kwh || 0)) : null;
-    html += '<div class="row g-2"><div class="col-6"><div class="pm-stat"><div class="small text-body-secondary">Session used</div><div class="pm-big">' + fmt(m.kwh, 3) + ' <small class="fs-6 text-body-secondary">kWh</small></div></div></div>' +
-      '<div class="col-6"><div class="pm-stat"><div class="small text-body-secondary">Balance</div><div class="pm-big">' + (remain == null ? '∞' : remain.toFixed(3)) + ' <small class="fs-6 text-body-secondary">kWh</small></div></div></div></div>';
+    var col = m.cost ? 'col-6 col-md-4' : 'col-6';
+    html += '<div class="row g-2"><div class="' + col + '"><div class="pm-stat"><div class="small text-body-secondary">Session used</div><div class="pm-big">' + fmt(m.kwh, 3) + ' <small class="fs-6 text-body-secondary">kWh</small></div></div></div>' +
+      '<div class="' + col + '"><div class="pm-stat"><div class="small text-body-secondary">Balance</div><div class="pm-big">' + (remain == null ? '∞' : remain.toFixed(3)) + ' <small class="fs-6 text-body-secondary">kWh</small></div></div></div>' +
+      (m.cost ? '<div class="col-12 col-md-4"><div class="pm-stat"><div class="small text-body-secondary">Session cost</div><div class="pm-big">' + esc(m.cost) + '</div></div></div>' : '') + '</div>';
     box.innerHTML = html;
   }
 
@@ -124,13 +128,14 @@ var PM = (function () {
     }
     function tick() {
       var m = lastLive, now = Date.now() / 1000 + clockOffset;
-      var ended = m.status === 'quota' || m.status === 'expired' || !!m.sess_end_ts;
+      var ended = !!m.sess_ended;  // with "power off, end at time limit" a quota session keeps running
       set(document.body, 'sess_started', function (el) { el.textContent = m.sess_start || '–'; });
       set(document.body, 'sess_elapsed', function (el) {
         el.textContent = m.sess_start_ts ? dur((m.sess_end_ts || now) - m.sess_start_ts) + (ended ? ' (ended)' : '') : '–';
       });
       set(document.body, 'sess_left', function (el) {
         if (ended) el.textContent = 'Session ended';
+        else if (m.status === 'quota' && !m.next_reset_ts) el.textContent = 'Power off (kWh limit): ends on Renew';
         else if (m.sess_mode === 'none') el.textContent = 'No time limit';
         else if (m.next_reset_ts) el.textContent = dur(m.next_reset_ts - now);
         else el.textContent = '– (meter clock not set)';
@@ -211,7 +216,7 @@ var PM = (function () {
         html += '<div class="col-6 col-md-3"><div class="pm-stat"><div class="text-body-secondary">' + x[1] + ' (' + x[2] + ')</div>' +
           '<div>min <b>' + fmt(k.min, x[3]) + '</b> · max <b>' + fmt(k.max, x[3]) + '</b> · avg <b>' + fmt(k.avg, x[3]) + '</b></div></div></div>';
       });
-      html += '<div class="col-6 col-md-3"><div class="pm-stat"><div class="text-body-secondary">Energy used</div><div><b>' + fmt(st.kwh, 3) + '</b> kWh · ' + (st.n || 0) + ' samples</div></div></div>';
+      html += '<div class="col-6 col-md-3"><div class="pm-stat"><div class="text-body-secondary">Energy used</div><div><b>' + fmt(st.kwh, 3) + '</b> kWh' + (last.cost ? ' · <b>' + esc(last.cost) + '</b>' : '') + ' · ' + (st.n || 0) + ' samples</div></div></div>';
       document.getElementById('stats').innerHTML = html;
       document.getElementById('rangeLabel').textContent = last.start_local + ' → ' + last.end_local + ' (' + {raw: 'raw', h: 'hourly', d: 'daily'}[last.source] + ')';
     }

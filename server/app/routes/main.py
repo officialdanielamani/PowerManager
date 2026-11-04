@@ -33,6 +33,11 @@ def meter_summary(d):
     if isinstance(sess.get("sid"), int):
         cur = Session.query.filter_by(device_fk=d.id, gen=d.pair_gen, sid=sess["sid"]).first()
     sess_start = sess.get("start") or (cur.started_at if cur else None)
+    currency, price = settings.price()
+    kwh_now = sess.get("kwh")
+    if cur is not None and cur.price_per_kwh is not None:
+        currency, price = cur.currency or "", cur.price_per_kwh
+    cost = round(float(kwh_now) * price, 4) if price is not None and kwh_now is not None else None
     sess_end = cur.ended_at if cur and cur.ended_at else None
     return {
         "id": d.id,
@@ -57,6 +62,8 @@ def meter_summary(d):
         "sess_mode": (d.cfg or {}).get("sess_mode", "none"),
         "server_time": now(),
         "reading_ts": reading.get("ts"),
+        "sess_ended": bool(sess_end) or sess.get("status") == "expired" or bool(sess.get("ended")),
+        "cost": settings.money(cost, currency) if cost is not None else None,
         "synced": d.synced,
         "ongoing": [i for i in ongoing if i != "offline"],
         "session_desc": devconfig.describe_session(d.cfg or {}),

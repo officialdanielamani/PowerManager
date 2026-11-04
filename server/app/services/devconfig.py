@@ -18,6 +18,20 @@ NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
 
 REPORT_MIN, REPORT_MAX = 10, 3600
+
+# When the kWh limit is reached (per channel):
+KWH_ACTIONS = {
+    "end": "Turn power off and end the session now, even if time is left",
+    "hold": "Turn power off, but end the session only when the time limit is reached",
+    "warn": "Only warn, keep the power on",
+}
+
+
+def kwh_action(ch_cfg):
+    a = ch_cfg.get("kwh_action")
+    if a in KWH_ACTIONS:
+        return a
+    return "end" if ch_cfg.get("kwh_end", True) else "warn"  # config saved by v0.2
 SESSION_MODES = ("none", "duration", "daily")
 
 
@@ -44,7 +58,7 @@ def default_cfg(n_channels=1):
         "dur_min": 1440,
         "daily_at": "00:00",
         "auto": False,
-        "ch": [{"kwh_max": 0.0, "kwh_end": True, "amp_max": 0.0} for _ in range(n_channels)],
+        "ch": [{"kwh_max": 0.0, "kwh_action": "end", "amp_max": 0.0} for _ in range(n_channels)],
     }
 
 
@@ -92,7 +106,8 @@ def parse_form(form, device):
     rating = amp_rating(device)
     for i, ch in enumerate(cfg["ch"]):
         ch["kwh_max"] = _num(form, f"kwh_max_{i}", float, 0, 100000, f"CH{i+1} max kWh", errors, 0.0)
-        ch["kwh_end"] = form.get(f"kwh_end_{i}") == "on"
+        action = form.get(f"kwh_action_{i}", "end")
+        ch["kwh_action"] = action if action in KWH_ACTIONS else "end"
         ch["amp_max"] = _num(form, f"amp_max_{i}", float, 0, rating, f"CH{i+1} max A", errors, 0.0)
     return cfg, errors
 
@@ -111,7 +126,9 @@ def to_device(cfg, ver):
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "sess": sess,
             "ch": [
-                {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_end": bool(c.get("kwh_end", True)),
+                {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_action": kwh_action(c),
+                 # for meters on firmware 0.1.x that only know kwh_end ("hold" acts like "end" there)
+                 "kwh_end": kwh_action(c) != "warn",
                  "amp_max": float(c.get("amp_max", 0))}
                 for i, c in enumerate(cfg.get("ch", []))
             ],

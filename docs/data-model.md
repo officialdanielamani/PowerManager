@@ -23,7 +23,7 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 `device_fk, user_fk` (PK together). Which view-only users may see which meter. Server-only; never sent to meters.
 
 ### `setting` (key/value)
-`server_address`, `server_port`, `server_tls`, `timezone` (IANA name, e.g. `Asia/Kuala_Lumpur`), `raw_retention_days` (default 90), `telegram_enabled`, `telegram_bot_token`, `login_max_attempts` (5), `login_lock_minutes` (15).
+`server_address`, `server_port`, `server_tls`, `timezone` (IANA name, e.g. `Asia/Kuala_Lumpur`), `raw_retention_days` (default 90), `telegram_enabled`, `telegram_bot_token`, `login_max_attempts` (5), `login_lock_minutes` (15), `currency` (e.g. MYR), `price_per_kwh` (e.g. 0.21; empty = no cost shown).
 
 ### `pairing_code`
 | Column | Notes |
@@ -84,6 +84,7 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | kwh_used, kwh_max | |
 | end_reason | `quota` / `expired` / `manual` / null (active) |
 | auto | started by auto-renew |
+| price_per_kwh, currency | electricity price **locked in when the session starts** (Settings → Server). Cost = kwh_used × price. Changing the price affects new sessions only. |
 
 ### `event`
 `id, device_fk, seq, ts, type, ch, data (JSON), notified_at`. Includes server-made events: `disconnected`, `reconnected`, `config_applied`, `config_rejected`, `server_started`.

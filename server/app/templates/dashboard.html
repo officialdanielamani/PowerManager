@@ -40,6 +40,9 @@
           <span>Session</span>
           <span data-field="kwh">{{ '%.3f'|format(m.kwh) if m.kwh is not none else '–' }} / {{ m.kwh_max if m.kwh_max else '∞' }} kWh</span>
         </div>
+        <div class="small text-body-secondary d-flex justify-content-between {{ '' if m.cost else 'd-none' }}" data-field="cost-row">
+          <span>Cost</span><span data-field="cost">{{ m.cost or '' }}</span>
+        </div>
         <div class="progress mb-2" style="height:6px">
           {% set pct = ((m.kwh or 0) / m.kwh_max * 100) if m.kwh_max else 0 %}
           <div class="progress-bar {{ 'bg-warning' if pct >= 100 else '' }}" data-field="kwh-bar" style="width: {{ [pct, 100]|min }}%"></div>

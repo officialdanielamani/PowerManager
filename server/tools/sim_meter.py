@@ -125,10 +125,15 @@ class Meter:
             return t
         return None
 
-    def new_session(self, auto, reason):
-        # like the firmware: a session stopped by its kWh/time limit was already ended
-        if self.sess and reason and self.sess.get("status", "active") == "active":
+    def end_session(self, reason):
+        # like the firmware: session_end is sent once per session
+        if self.sess and not self.sess.get("ended"):
+            self.sess["ended"] = True
             self.event("session_end", sid=self.sess["sid"], reason=reason, kwh=round(self.session_kwh(), 4))
+
+    def new_session(self, auto, reason):
+        if reason:
+            self.end_session(reason)
         self.st["sid"] = self.st.get("sid", 0) + 1
         self.sess = {"sid": self.st["sid"], "start": int(time.time()), "e0": self.st.get("e_total", 0.0),
                      "status": "active"}
@@ -162,6 +167,7 @@ class Meter:
                 "sess": {"sid": self.sess["sid"], "start": self.sess["start"], "kwh": round(self.session_kwh(), 4),
                          "max": self.ch_cfg().get("kwh_max", 0), "status": self.session_status(),
                          **({"over": True} if self.sess.get("over") else {}),
+                         "ended": bool(self.sess.get("ended")),
                          **({"next_reset": nr} if nr else {})}}
 
     # ------------------------------------------------------------ control loop (1 s)
@@ -186,23 +192,23 @@ class Meter:
                 self.reading = None
             kmax = self.ch_cfg().get("kwh_max", 0)
             if kmax and self.session_status() == "active" and self.session_kwh() >= kmax:
-                end = self.ch_cfg().get("kwh_end", True)
-                if end:  # hard limit: end the session now
-                    self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), end=True)
-                    self.event("session_end", sid=self.sess["sid"], reason="quota",
-                               kwh=round(self.session_kwh(), 4))
+                ch = self.ch_cfg()
+                action = ch.get("kwh_action") or ("end" if ch.get("kwh_end", True) else "warn")
+                if action == "warn":
+                    if not self.sess.get("over"):
+                        self.sess["over"] = True
+                        self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), action="warn", end=False)
+                else:
+                    self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), action=action, end=True)
+                    if action == "end":
+                        self.end_session("quota")
                     self.sess["status"] = "quota"
-                elif not self.sess.get("over"):  # soft limit: warn once
-                    self.sess["over"] = True
-                    self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), end=False)
             nr = self.next_reset()
             if nr and time.time() >= nr and self.session_status() != "expired":
                 if (self.cfg().get("sess") or {}).get("auto"):
                     self.new_session(auto=True, reason="expired")
                 else:
-                    if self.session_status() == "active":
-                        self.event("session_end", sid=self.sess["sid"], reason="expired",
-                                   kwh=round(self.session_kwh(), 4))
+                    self.end_session("expired")
                     self.sess["status"] = "expired"
             if time.time() - self.last_report >= self.cfg().get("report_s", 60) * self.args.speed:
                 self.report()

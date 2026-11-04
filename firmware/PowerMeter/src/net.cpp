@@ -193,7 +193,11 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (kwh < 0 || kwh > 100000) { err = "ch[0].kwh_max"; return false; }
   if (amp < 0 || amp > SENSOR_AMP_RATING) { err = "ch[0].amp_max"; return false; }
   m.kwh_max = kwh;
-  m.kwh_end = ch["kwh_end"] | true;  // older servers do not send it: keep the hard limit
+  const char *act = ch["kwh_action"] | "";
+  if (!strcmp(act, "hold")) m.kwh_action = KWH_HOLD;
+  else if (!strcmp(act, "warn")) m.kwh_action = KWH_WARN;
+  else if (!*act && !(ch["kwh_end"] | true)) m.kwh_action = KWH_WARN;  // server v0.2.x
+  else m.kwh_action = KWH_END;
   m.amp_max = amp;
   out = m;
   return true;

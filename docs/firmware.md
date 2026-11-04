@@ -92,7 +92,7 @@ relay_on = want_on
 ```
 
 - **Over-current**: A > `amp_max` for 2 reads in a row → `tripped = true` (stored in NVS, survives reboot), relay OFF, event `overcurrent`.
-- **Quota**: `session_kwh = e_now − e_at_session_start ≥ kwh_max` → if `kwh_end` (default): session **ends** now (`quota` + `session_end` reason `quota`), status `quota`, relay OFF until renewed (manually, or by auto renew at the next scheduled reset). If `kwh_end` is off: `quota` event once + `sess.over`, power stays on.
+- **Quota**: `session_kwh = e_now − e_at_session_start ≥ kwh_max` → per `kwh_action`: **end** (default): `quota` + `session_end` (reason `quota`) now, relay OFF until renewed (manually, or by auto renew at the next scheduled reset); **hold**: relay OFF, the session ends at its time limit; **warn**: `quota` once + `sess.over`, power stays on. `session_end` is sent exactly once per session (`sess.ended`).
 - **Session expiry**: `now ≥ next_reset` (needs valid time) → end session `expired` (unless a kWh limit already ended it); if `auto` → start a new one at once; else relay OFF until `renew`.
 - Every telemetry item carries the session progress `s: {sid, kwh}`, so the server's "session used" stays current between `state` messages.
 - The local dashboard shows **Time elapsed / Time left** for the session.

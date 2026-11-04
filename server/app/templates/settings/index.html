@@ -81,6 +81,14 @@
       <div class="input-group"><input class="form-control" type="number" min="7" max="3650" name="raw_retention_days" value="{{ s.get('raw_retention_days') }}"><span class="input-group-text">days</span></div>
       <div class="form-text">Hourly summaries: 2 years. Daily: forever.</div></div>
   </div>
+  <div class="card-header fw-semibold border-top">Electricity price</div>
+  <div class="card-body row g-3">
+    <div class="col-12"><div class="input-group" style="max-width:360px">
+      <input class="form-control" name="currency" maxlength="8" placeholder="MYR" value="{{ s.get('currency') }}" style="max-width:100px">
+      <input class="form-control" name="price_per_kwh" inputmode="decimal" placeholder="0.21" value="{{ s.get('price_per_kwh') }}">
+      <span class="input-group-text">/ kWh</span></div>
+      <div class="form-text">Shows the cost of each session and of the history range. The price is locked in when a session starts, so changing it does not change past or running sessions. Empty = no cost shown.</div></div>
+  </div>
   <div class="card-footer text-end"><button class="btn btn-primary">Save</button></div>
 </form>
 

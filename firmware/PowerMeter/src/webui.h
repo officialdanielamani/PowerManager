@@ -144,7 +144,7 @@ function load(){api('/api/state').then(function(d){if(d._s==401)return route();i
  var block=st.tripped||ss.status=='quota'||ss.status=='expired';$('bOn').disabled=block;$('bOn').title=block?'Blocked until the session is renewed / trip is reset':'';
  $('bTrip').classList.toggle('hide',!st.tripped);
  var status=st.tripped?pill('Over-current trip','bad'):ss.status=='quota'?pill('kWh limit reached','warn'):ss.status=='expired'?pill('Session ended','warn'):ss.over?pill('Over kWh limit (power on)','warn'):pill('Active','ok');
- var now=d.time||0,ended=ss.status!='active',el=ss.start&&now?dur(now-ss.start):'–',left=ended?'Session ended':(d.cfg||{}).mode=='none'?'No time limit':(ss.next_reset&&now?dur(ss.next_reset-now):'–');
+ var now=d.time||0,ended=ss.ended!=null?ss.ended:ss.status!='active',el=ss.start&&now?dur(now-ss.start):'–',left=ended?'Session ended':(d.cfg||{}).mode=='none'?'No time limit':(ss.next_reset&&now?dur(ss.next_reset-now):'–');
  var bal=ss.max>0?Math.max(0,ss.max-ss.kwh):null;
  $('dGrid').innerHTML=[['Relay',rl.on?'ON':'OFF'],['Voltage',r.ok?n(r.v,1)+' V':(st.ac?'–':'No AC')],['Current',r.ok?n(r.a,3)+' A':'–'],['Power',r.ok?n(r.w,1)+' W':'–'],['Power factor',r.ok?n(r.pf,2):'–'],['Frequency',r.ok?n(r.hz,1)+' Hz':'–'],['Session used',n(ss.kwh,3)+' kWh'],['Balance',bal==null?'∞':n(bal,3)+' kWh']]
   .map(function(x){return'<div class="stat"><small>'+x[0]+'</small><b>'+x[1]+'</b></div>'}).join('');

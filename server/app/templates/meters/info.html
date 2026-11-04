@@ -27,8 +27,10 @@
       <dl class="row mb-0 small">
         <dt class="col-6">Status</dt><dd class="col-6" data-field="status">{{ status_badge(m.status) }}</dd>
         <dt class="col-6">Relay</dt><dd class="col-6"><span class="badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span></dd>
-        <dt class="col-6">kWh per session</dt><dd class="col-6">{% for c in cfg.get('ch', []) %}{{ c.kwh_max if c.kwh_max else 'Unlimited' }}{% if c.kwh_max %} kWh{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
-        <dt class="col-6">Session restarts</dt><dd class="col-6">{{ m.session_desc }}{% if m.next_reset %}<br><span class="text-body-secondary">next: <span data-field="next_reset">{{ m.next_reset }}</span></span>{% endif %}</dd>
+        <dt class="col-6">kWh per session</dt><dd class="col-6">{% for c in cfg.get('ch', []) %}{{ c.kwh_max if c.kwh_max else 'Unlimited' }}{% if c.kwh_max %} kWh
+          {% set ka = c.get('kwh_action') or ('end' if c.get('kwh_end', true) else 'warn') %}<div class="small text-body-secondary">{{ {'end': 'At the limit: power off, session ends', 'hold': 'At the limit: power off, session ends at its time limit', 'warn': 'At the limit: warning only'}[ka] }}</div>{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
+        {% if price[1] is not none %}<dt class="col-6">Session cost</dt><dd class="col-6 fw-semibold" data-field="cost">{{ m.cost or '–' }}</dd>{% endif %}
+        <dt class="col-6">Session restarts</dt><dd class="col-6">{{ m.session_desc }}{% if m.next_reset and (m.auto or not m.sess_ended) %}<br><span class="text-body-secondary">next: <span data-field="next_reset">{{ m.next_reset }}</span></span>{% endif %}</dd>
         <dt class="col-6">Session started</dt><dd class="col-6" data-field="sess_started">–</dd>
         <dt class="col-6">Time elapsed</dt><dd class="col-6 fw-semibold" data-field="sess_elapsed">–</dd>
         <dt class="col-6">Time left</dt><dd class="col-6 fw-semibold" data-field="sess_left">–</dd>
@@ -136,16 +138,17 @@
     <div class="tab-pane fade" id="tabSessions">
       <div class="table-responsive">
       <table class="table table-sm">
-        <thead><tr><th>#</th><th>Started</th><th>Ended</th><th>Duration</th><th>kWh used</th><th>Limit</th><th>End reason</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>Started</th><th>Ended</th><th>Duration</th><th>kWh used</th>{% if price[1] is not none %}<th>Cost</th>{% endif %}<th>Limit</th><th>End reason</th><th></th></tr></thead>
         <tbody>
         {% for s in sessions %}
           <tr><td>{{ s.sid }}</td><td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
             <td class="text-nowrap">{{ ((s.ended_at or now) - s.started_at)|duration if s.started_at else '–' }}</td>
-            <td>{{ '%.3f'|format(s.kwh_used) }}</td><td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
+            <td>{{ '%.3f'|format(s.kwh_used) }}</td>
+            {% if price[1] is not none %}<td>{{ money(s.cost(price[1]), s.currency if s.price_per_kwh is not none else price[0]) }}{% if s.price_per_kwh is not none %} <span class="small text-body-secondary">@ {{ '%g'|format(s.price_per_kwh) }}</span>{% endif %}</td>{% endif %}<td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
             <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
             <td class="text-end">{% if s.started_at %}<a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('meters.export_csv', pk=d.id, session=s.id) }}" title="Power data of this session"><i class="bi bi-download"></i> CSV</a>{% endif %}</td></tr>
         {% else %}
-          <tr><td colspan="8" class="text-body-secondary">No sessions yet.</td></tr>
+          <tr><td colspan="9" class="text-body-secondary">No sessions yet.</td></tr>
         {% endfor %}
         </tbody>
       </table>

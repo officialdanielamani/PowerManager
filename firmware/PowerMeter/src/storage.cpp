@@ -128,13 +128,13 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 2) return false;  // older layout: use defaults, the server re-sends the config
+  if (b.version != 3) return false;  // older layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 2;
+  b.version = 3;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }
@@ -145,6 +145,7 @@ void loadSession(SessionState &s) {
   s.e0 = pm.getDouble("s_e0", 0);
   s.status = (SessStatus)pm.getUChar("s_stat", SESS_ACTIVE);
   s.over = pm.getBool("s_over", false);
+  s.ended = pm.getBool("s_end", s.status != SESS_ACTIVE);
   s.startMs = millis();
 }
 void saveSession(const SessionState &s) {
@@ -153,6 +154,7 @@ void saveSession(const SessionState &s) {
   pm.putDouble("s_e0", s.e0);
   pm.putUChar("s_stat", (uint8_t)s.status);
   pm.putBool("s_over", s.over);
+  pm.putBool("s_end", s.ended);
 }
 
 void loadFlags(bool &wantOn, bool &tripped) {

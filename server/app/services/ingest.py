@@ -5,7 +5,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..extensions import db
 from ..models import Device, Event, Incident, Measurement, RollupDirty, Session, now
-from . import commands, devconfig, incidents, notify
+from . import commands, devconfig, incidents, notify, settings
 
 log = logging.getLogger(__name__)
 
@@ -329,18 +329,34 @@ def process_event(device, ev):
     elif e == "ac_restored":
         incidents.close_incident(device.id, "power", ev.ts, event=ev, estimated=est)
     elif e == "quota":
-        if d.get("end", True):
+        # action: end (power off, session ends now) | hold (power off, session ends at its time
+        # limit) | warn (power stays on). Firmware 0.1.x sends only "end": true/false.
+        action = d.get("action") or ("end" if d.get("end", True) else "warn")
+        kwh = d.get("kwh", "?")
+        if action == "end":
+            # Close the session record here as well, so it ends at the limit even if the
+            # meter's session_end arrives late or never (older firmware only sent it on Renew).
+            sid = ((device.last_state or {}).get("sess") or {}).get("sid")
+            if isinstance(sid, int):
+                s = _session(device, sid)
+                if s.ended_at is None:
+                    s.ended_at, s.end_reason = ev.ts, "quota"
+                    s.kwh_used = _f(kwh) or s.kwh_used
+            notify.notify(device, "kwh_exceeded", f"Session kWh limit reached ({kwh} kWh): power off, session ended")
+        elif action == "hold":
             notify.notify(device, "kwh_exceeded",
-                          f"Session kWh limit reached ({d.get('kwh', '?')} kWh): session ended, power off")
+                          f"Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed")
         else:
-            notify.notify(device, "kwh_exceeded",
-                          f"Session kWh limit exceeded ({d.get('kwh', '?')} kWh): power kept on")
+            notify.notify(device, "kwh_exceeded", f"Session kWh limit exceeded ({kwh} kWh): power kept on")
     elif e == "session_start":
         sid = d.get("sid")
         if isinstance(sid, int):
             s = _session(device, sid)
             s.started_at = ev.ts
             s.auto = bool(d.get("auto"))
+            cur, price = settings.price()
+            if price is not None and s.price_per_kwh is None:
+                s.price_per_kwh, s.currency = price, cur
             s.kwh_max = _f(d.get("max")) or s.kwh_max
         if sid != 1:  # the very first session after pairing is not a "renew"
             notify.notify(device, "session_renew",
@@ -349,8 +365,9 @@ def process_event(device, ev):
         sid = d.get("sid")
         if isinstance(sid, int):
             s = _session(device, sid)
-            s.ended_at = ev.ts
-            s.end_reason = str(d.get("reason", ""))[:10] or None
+            if s.ended_at is None:  # keep the first end (e.g. the kWh limit), not a later Renew
+                s.ended_at = ev.ts
+                s.end_reason = str(d.get("reason", ""))[:10] or None
             if d.get("kwh") is not None:
                 s.kwh_used = _f(d.get("kwh")) or 0.0
     elif e == "server_back":

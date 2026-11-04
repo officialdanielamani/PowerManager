@@ -136,7 +136,7 @@ def configure(pk):
     cfg = device.cfg or devconfig.default_cfg(devconfig.channel_count(device))
     dur = int(cfg.get("dur_min", 1440))
     return render_template("meters/configure.html", d=device, cfg=cfg, errors=errors,
-                           waiting=waiting, online=hub.is_online(device.id),
+                           waiting=waiting, online=hub.is_online(device.id), kwh_actions=devconfig.KWH_ACTIONS,
                            viewers=_viewers(), linked={v.user_fk for v in MeterViewer.query.filter_by(device_fk=device.id)},
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
@@ -286,7 +286,8 @@ def info(pk):
                            pagination=pagination, incident_types=incidents.TYPES, sel_types=types,
                            f_from=request.args.get("from", ""), f_to=request.args.get("to", ""),
                            detail_text=incident_detail_text, sessions=sessions, now=now(),
-                           cfg=device.cfg or {}, channels=device.channels)
+                           cfg=device.cfg or {}, channels=device.channels,
+                           price=settings.price(), money=settings.money)
 
 
 _last_refresh = {}  # meter pk -> time of last "Get Data Now" (any user)
@@ -331,6 +332,9 @@ def history_json(pk):
     data["start_local"] = settings.fmt_ts(start, False)
     data["end_local"] = settings.fmt_ts(end, False)
     data["tz_offset_s"] = _tz_offset_s()
+    currency, price = settings.price()
+    kwh = data["stats"].get("kwh")
+    data["cost"] = settings.money(kwh * price, currency) if price is not None and kwh is not None else None
     return jsonify(data)
 
 

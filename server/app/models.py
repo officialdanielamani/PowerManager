@@ -172,6 +172,13 @@ class Session(db.Model):
     kwh_max = db.Column(db.Float, nullable=False, default=0.0)
     end_reason = db.Column(db.String(10))  # quota | expired | manual
     auto = db.Column(db.Boolean, nullable=False, default=False)
+    # Electricity price locked in when the session starts (Settings -> Server -> Price).
+    price_per_kwh = db.Column(db.Float)
+    currency = db.Column(db.String(8))
+
+    def cost(self, fallback_price=None):
+        price = self.price_per_kwh if self.price_per_kwh is not None else fallback_price
+        return None if price is None else round((self.kwh_used or 0) * price, 4)
 
     __table_args__ = (db.UniqueConstraint("device_fk", "gen", "sid", name="uq_session_sid"),)
 

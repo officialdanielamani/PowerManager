@@ -168,7 +168,7 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `e` | Meaning |
 |-----|---------|
 | `overcurrent` | A > `amp_max` → relay OFF, latched |
-| `quota` | Session kWh ≥ `kwh_max`. `end: true` → the session ends now (followed by `session_end` reason `quota`), relay OFF. `end: false` → warning only, power stays on (sent once per session) |
+| `quota` | Session kWh ≥ `kwh_max`. `action`: `end` → followed by `session_end` reason `quota` (the **server also closes the session record on this event**, in case `session_end` is late); `hold` → relay OFF, session stays open; `warn` → power stays on (sent once per session). `end` (bool) is kept for older servers |
 | `session_end` | Session ended (`reason`: quota/expired/manual). Sent **once** per session: renewing a session that a limit already ended does not send another |
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch |
@@ -195,7 +195,7 @@ Disconnect / reconnect notifications are produced **by the server** (from the WS
 }
 ```
 
-`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_end` off (power still on).
+`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_action: warn` (power still on). `sess.ended: true` = `session_end` already sent for this session (by the kWh or time limit).
 
 ## 3. Config document
 
@@ -213,7 +213,7 @@ The server sends the whole config every time (no partial updates).
       "dur_min": 1440,
       "auto": true
     },
-    "ch": [ {"i":0, "kwh_max":2.0, "kwh_end":true, "amp_max":10.2} ]
+    "ch": [ {"i":0, "kwh_max":2.0, "kwh_action":"end", "kwh_end":true, "amp_max":10.2} ]
   }
 }
 ```
@@ -227,7 +227,8 @@ The server sends the whole config every time (no partial updates).
 | `sess.dur_min` | 1–525600 | – | Duration mode; UI enters days/hours/minutes |
 | `sess.auto` | bool | false | |
 | `ch[].kwh_max` | 0–100000 | 0 | 0 = unlimited |
-| `ch[].kwh_end` | bool | true | true: reaching `kwh_max` **ends the session** (relay OFF until renewed). false: warning only (`quota` event once, `sess.over`), power stays on. Missing = true. |
+| `ch[].kwh_action` | `end` / `hold` / `warn` | `end` | What happens at `kwh_max`. **end**: relay OFF and the session ends now, even with time left. **hold**: relay OFF, the session ends at its time limit (or on Renew; with no time limit, only on Renew). **warn**: `quota` event once + `sess.over`, power stays on. |
+| `ch[].kwh_end` | bool | true | Only for firmware 0.1.x, which predates `kwh_action`: `false` = warn, otherwise end. New firmware uses `kwh_action` when present. |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |
 
 The device checks every value. If anything is out of range it rejects the **whole** config (`cfg_ack ok:false err:"<field>"`) and keeps the old one.

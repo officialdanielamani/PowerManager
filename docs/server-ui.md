@@ -34,7 +34,7 @@ Shows a **Synced / Pending sync** badge.
 |---------|--------|
 | General | Device ID (read-only), Nick Name, Info, Send data every [10 s – 1 h] |
 | Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · [Remove Device] (confirm dialog with [ ] Also delete history; warns that the meter will **factory reset**) |
-| Limits | Max kWh per session (0 = unlimited) + [x] **End session when kWh limit is reached** (default on; off = warning only, power stays on) · Session reset: ( ) None ( ) Duration [D][H][M] ( ) Daily at [HH:MM] (display timezone) · [ ] Auto renew · Max A to switch relay off (0 = off) · [ ] Relay off if device offline for [X] min |
+| Limits | Max kWh per session (0 = unlimited) + **When the kWh limit is reached**: (•) power off and end the session now, even if time is left (default) · ( ) power off, end the session only at the time limit · ( ) only warn, keep power on · Session reset: ( ) None ( ) Duration [D][H][M] ( ) Daily at [HH:MM] (display timezone) · [ ] Auto renew · Max A to switch relay off (0 = off) · [ ] Relay off if device offline for [X] min |
 | Link this meter to users | Checkbox per view-only user (server-only, never sent to the meter) |
 
 Notification options are **not** here any more: see *Notification Options* below.
@@ -50,7 +50,7 @@ Each meter has three tabs: **Info** (everyone with access), **Notification Optio
 Switches: kWh exceeded · Session renewed · Max amp · Panel open · No voltage · Disconnected for [X] min · Reconnected. They apply only to the logged-in account.
 
 ### Meter Info (view-only; admin and viewers)
-- Device ID, Nick Name, Info, kWh per session, next session reset (display TZ), **session started, time elapsed, time left** (live, ticks every second; "Session ended" once a limit ended it), auto renew yes/no, last online, firmware.
+- Device ID, Nick Name, Info, kWh per session, next session reset (display TZ), **session cost** (if a price is set), **session started, time elapsed, time left** (live, ticks every second; "Session ended" once a limit ended it), auto renew yes/no, last online, firmware.
 - **[Get Data Now]** in *Latest data* (admin and viewers): asks the meter for a reading now and waits up to 15 s for it (rate limited to once per 5 s per meter).
 - Latest data: V, A, W, PF, Hz, session kWh used / remaining.
 - Admin-only buttons: Relay ON/OFF, [Renew Now], [Reset Trip], [Send Data Now], [Configure].
@@ -70,13 +70,13 @@ Switches: kWh exceeded · Session renewed · Max amp · Panel open · No voltage
   - [Export CSV] exports the filtered list (UTC + local time, duration in seconds).
   - `~` before a time marks an estimated timestamp.
 - Dashboard meter cards show a small badge for each **ongoing** incident (⚡ no power, ⛔ trip, 🔓 tamper, offline dot).
-- Session history (start, end, duration, kWh used, end reason, **[CSV]** = power data of that session) as a second tab next to Historical Events.
+- Session history (start, end, duration, kWh used, **cost**, end reason, **[CSV]** = power data of that session); the history stats show the cost of the selected range as a second tab next to Historical Events.
 
 ### Settings
 | Tab | Content |
 |-----|---------|
 | Account | Change username, password, phone, email (current password required) · My Telegram chat ID + [Send test] |
-| Server (admin) | Public address, port, TLS · Display timezone (IANA list, shows its UTC offset) · Raw data retention |
+| Server (admin) | Public address, port, TLS · Display timezone (IANA list, shows its UTC offset) · Raw data retention · **Electricity price**: [Currency][Price] / kWh (e.g. MYR 0.21) |
 | Users (admin) | View-only accounts: select + Enable/Disable/Unlock selected, Enable all / Disable all · per user: meters they can see (or *View all meters*), reset password (also unlocks), enable/disable, delete · Add account (with meters) · Login protection (max failed logins, lock minutes) |
 | Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID) |
 

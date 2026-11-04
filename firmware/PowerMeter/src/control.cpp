@@ -123,6 +123,7 @@ static void startSession(bool autoRenew) {
   g.sess.e0 = g.lastE;
   g.sess.status = SESS_ACTIVE;
   g.sess.over = false;
+  g.sess.ended = false;
   store::saveSession(g.sess);
   struct Ctx {
     uint32_t sid;
@@ -139,7 +140,9 @@ static void startSession(bool autoRenew) {
 }
 
 static void endSession(const char *reason) {
-  // caller holds StateLock
+  // caller holds StateLock. Sends session_end once per session.
+  if (g.sess.ended) return;
+  g.sess.ended = true;
   EndCtx ctx = {g.sess.sid, reason, g.lastE - g.sess.e0};
   emitEvent("session_end", [](JsonObject o, void *p) {
     EndCtx *c = (EndCtx *)p;
@@ -151,8 +154,7 @@ static void endSession(const char *reason) {
 
 void renew(const char *reason, bool autoRenew) {
   StateLock l;
-  // A session stopped by its kWh limit or time limit has already been ended.
-  if (g.sess.sid && g.sess.status == SESS_ACTIVE) endSession(reason);
+  if (g.sess.sid) endSession(reason);  // no-op if a limit already ended it
   startSession(autoRenew);
 }
 
@@ -236,6 +238,7 @@ void stateJson(JsonObject o) {
   s["max"] = g.cfg.kwh_max;
   s["status"] = sessStatusName(g.sess.status);
   if (g.sess.over) s["over"] = true;
+  s["ended"] = g.sess.ended;
   if (nr) s["next_reset"] = nr;
 }
 
@@ -307,26 +310,30 @@ static void checkRules(bool firstPass) {
   // kWh quota.
   double kwh = g.lastE - g.sess.e0;
   if (g.sess.sid && g.sess.status == SESS_ACTIVE && g.cfg.kwh_max > 0 && kwh >= g.cfg.kwh_max) {
+    static const char *ACT[] = {"end", "hold", "warn"};
     struct QCtx {
       double kwh;
-      bool end;
-    } q = {kwh, g.cfg.kwh_end};
+      const char *action;
+    } q = {kwh, ACT[g.cfg.kwh_action % 3]};
     auto fillQuota = [](JsonObject o, void *p) {
       QCtx *c = (QCtx *)p;
       o["ch"] = 0;
       o["kwh"] = serialized(String(c->kwh, 4));
-      o["end"] = c->end;
+      o["action"] = c->action;
+      o["end"] = strcmp(c->action, "warn") != 0;  // for server v0.2.x
     };
-    if (g.cfg.kwh_end) {  // hard limit: the session ends now, relay off until renewed
+    if (g.cfg.kwh_action == KWH_WARN) {
+      if (!g.sess.over) {  // warn once, keep the power on
+        g.sess.over = true;
+        store::saveSession(g.sess);
+        emitEvent("quota", fillQuota, &q);
+        bump();
+      }
+    } else {
       emitEvent("quota", fillQuota, &q);
-      endSession("quota");
-      g.sess.status = SESS_QUOTA;
+      if (g.cfg.kwh_action == KWH_END) endSession("quota");  // end now, even with time left
+      g.sess.status = SESS_QUOTA;                            // relay off either way
       store::saveSession(g.sess);
-      bump();
-    } else if (!g.sess.over) {  // soft limit: warn once, keep the power on
-      g.sess.over = true;
-      store::saveSession(g.sess);
-      emitEvent("quota", fillQuota, &q);
       bump();
     }
   }
@@ -336,12 +343,10 @@ static void checkRules(bool firstPass) {
     uint32_t nr = nextReset();
     bool due = (nr && timekeep::valid() && timekeep::now() >= nr) || durationElapsedNoClock();
     if (due) {
-      bool running = g.sess.status == SESS_ACTIVE;  // a kWh-ended session was already closed
+      endSession("expired");  // no-op if the kWh limit already ended it
       if (g.cfg.auto_renew) {
-        if (running) endSession("expired");
         startSession(true);
       } else {
-        if (running) endSession("expired");
         g.sess.status = SESS_EXPIRED;
         store::saveSession(g.sess);
         bump();

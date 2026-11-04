@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+enum KwhAction : uint8_t { KWH_END = 0, KWH_HOLD = 1, KWH_WARN = 2 };
 enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
 enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2 };
 enum NetStatus : uint8_t {
@@ -23,7 +24,11 @@ struct MeterConfig {
   uint32_t dur_min = 1440;
   bool auto_renew = false;
   float kwh_max = 0;  // channel 0; 0 = unlimited
-  bool kwh_end = true; // true: reaching kwh_max ends the session (relay off); false: warning only
+  // What happens when kwh_max is reached:
+  //   KWH_END  relay off and the session ends now (even if time is left)       [default]
+  //   KWH_HOLD relay off, the session ends when its time limit is reached (or on Renew)
+  //   KWH_WARN warning only, relay stays on
+  uint8_t kwh_action = 0;
   float amp_max = 0;  // channel 0; 0 = disabled
 };
 
@@ -40,7 +45,8 @@ struct SessionState {
   uint32_t startMs = 0;   // millis() at start (used while start == 0)
   double e0 = 0;          // energy register at session start
   SessStatus status = SESS_ACTIVE;
-  bool over = false;      // kWh limit passed while kwh_end is off (warned once, power stays on)
+  bool over = false;      // kWh limit passed with KWH_WARN (warned once, power stays on)
+  bool ended = false;     // session_end already sent (kWh limit with KWH_END, or time limit)
 };
 
 struct AppState {

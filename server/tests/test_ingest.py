@@ -131,11 +131,57 @@ def test_session_progress_from_telemetry(app, device):
     assert device.last_state["sess"]["kwh"] == 0.75
 
 
-def test_kwh_end_option_reaches_device(app, device):
+def test_kwh_action_option_reaches_device(app, device):
     with app.app_context():
-        form = {"report_s": "60", "sess_mode": "none", "kwh_max_0": "2", "amp_max_0": "0", "daily_at": "00:00"}
-        cfg, errors = devconfig.parse_form(form, device)            # checkbox not sent = unticked
-        assert not errors and devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_end"] is False
-        cfg, _ = devconfig.parse_form({**form, "kwh_end_0": "on"}, device)
-        assert devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_end"] is True
-        assert devconfig.to_device({"ch": [{"kwh_max": 1}]}, 1)["cfg"]["ch"][0]["kwh_end"] is True  # old cfg
+        form = {"report_s": "60", "sess_mode": "duration", "dur_m": "5", "kwh_max_0": "2", "amp_max_0": "0",
+                "daily_at": "00:00"}
+        for action, legacy_end in (("end", True), ("hold", True), ("warn", False)):
+            cfg, errors = devconfig.parse_form({**form, "kwh_action_0": action}, device)
+            ch = devconfig.to_device(cfg, 1)["cfg"]["ch"][0]
+            assert not errors and ch["kwh_action"] == action and ch["kwh_end"] is legacy_end
+        cfg, _ = devconfig.parse_form(form, device)  # nothing chosen -> default "end"
+        assert devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_action"] == "end"
+        # config saved by v0.2 (kwh_end only)
+        assert devconfig.to_device({"ch": [{"kwh_max": 1, "kwh_end": False}]}, 1)["cfg"]["ch"][0]["kwh_action"] == "warn"
+
+
+def _start(conn, device, sid, ts):
+    ingest.handle(conn, device, {"t": "evt", "seq": sid * 10, "ts": ts, "tv": 1, "e": "session_start", "sid": sid, "max": 1.0})
+    ingest.handle(conn, device, {"t": "state", "sess": {"sid": sid, "kwh": 0, "max": 1.0, "status": "active"}})
+
+
+def test_server_ends_session_at_kwh_limit_even_without_session_end(app, device):
+    """Older firmware only sent session_end on Renew; the session must still end at the limit."""
+    from app.models import Session
+    conn = FakeConn()
+    t = now() - 600
+    _start(conn, device, 1, t)
+    ingest.handle(conn, device, {"t": "evt", "seq": 11, "ts": t + 120, "tv": 1, "e": "quota", "ch": 0, "kwh": 1.0})
+    s = Session.query.filter_by(sid=1).one()
+    assert s.ended_at == t + 120 and s.end_reason == "quota"
+    # later Renew from old firmware sends session_end "manual": the kWh end is kept
+    ingest.handle(conn, device, {"t": "evt", "seq": 12, "ts": t + 500, "tv": 1, "e": "session_end", "sid": 1, "reason": "manual"})
+    s = Session.query.filter_by(sid=1).one()
+    assert s.ended_at == t + 120 and s.end_reason == "quota"
+
+
+def test_hold_action_keeps_session_open(app, device):
+    from app.models import Session
+    conn = FakeConn()
+    t = now() - 600
+    _start(conn, device, 2, t)
+    ingest.handle(conn, device, {"t": "evt", "seq": 21, "ts": t + 60, "tv": 1, "e": "quota", "kwh": 1.0, "action": "hold"})
+    assert Session.query.filter_by(sid=2).one().ended_at is None
+    ingest.handle(conn, device, {"t": "evt", "seq": 22, "ts": t + 300, "tv": 1, "e": "session_end", "sid": 2, "reason": "expired"})
+    assert Session.query.filter_by(sid=2).one().ended_at == t + 300
+
+
+def test_session_price_locked_at_start(app, device):
+    from app.models import Session
+    settings.set_many({"currency": "MYR", "price_per_kwh": "0.21"})
+    conn = FakeConn()
+    _start(conn, device, 3, now() - 100)
+    ingest.handle(conn, device, {"t": "tel", "items": [{**tel(31, now() - 50, 5.0), "s": {"sid": 3, "kwh": 10.0}}]})
+    settings.set_many({"price_per_kwh": "0.50"})  # price change does not touch a running session
+    s = Session.query.filter_by(sid=3).one()
+    assert s.price_per_kwh == 0.21 and s.currency == "MYR" and s.cost() == 2.1

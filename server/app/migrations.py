@@ -34,6 +34,10 @@ def run():
     _add_column("user", "telegram_chat_id VARCHAR(32) NOT NULL DEFAULT ''")
     _add_column("notification", "user_fk INTEGER REFERENCES user(id)")
 
+    # v0.2 -> v0.3: price per session
+    _add_column("meter_session", "price_per_kwh FLOAT")
+    _add_column("meter_session", "currency VARCHAR(8)")
+
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:
         # Old rules were per meter; give them to the admin, then rebuild with the new key.

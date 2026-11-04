@@ -295,7 +295,8 @@ static void hState() {
   JsonObject c = d["cfg"].to<JsonObject>();
   c["report_s"] = g.cfg.report_s;
   c["kwh_max"] = g.cfg.kwh_max;
-  c["kwh_end"] = g.cfg.kwh_end;
+  static const char *KA[] = {"end", "hold", "warn"};
+  c["kwh_action"] = KA[g.cfg.kwh_action % 3];
   c["amp_max"] = g.cfg.amp_max;
   c["auto"] = g.cfg.auto_renew;
   c["mode"] = g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
