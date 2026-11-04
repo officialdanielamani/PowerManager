@@ -56,6 +56,7 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | resync_pending | an unsynced meter paired again: admin chooses continue / new |
 | data_autodel(_days), events_autodel(_days) | per-meter clean-up (default off, 120 days) |
 | last_info, last_info_at | last answer to Get meter info |
+| tare_a, tare_w | own-consumption offsets (A, W) for tared views; raw data is never changed |
 
 ### `channel`
 | Column | Notes |
@@ -175,3 +176,8 @@ CSV export covers **exactly the range selected** in the history view (1 week sho
 ## No power + Offline
 
 When an *Offline* and a *No power* incident are both ongoing and started within 60 s of each other, the meter itself lost power (its UPS ran out): the *No power* incident is closed (`closed_by: offline`) and the *Offline* incident gets `power_lost: true`.
+
+## Tare
+
+Raw readings are stored unchanged. Tared values are computed for display/export only:
+`A' = max(0, A − tare_a)`, `W' = max(0, W − tare_w)`, `kWh' = max(0, kWh − tare_w × hours)` (hours = the session's duration, or the time covered by the history range/bucket). CSV exports of raw data get extra `A_tared` / `W_tared` columns when a tare is set.

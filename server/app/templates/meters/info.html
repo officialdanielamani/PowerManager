@@ -57,6 +57,8 @@
   </div>
   <div class="col-12 col-lg-7">
     <div class="card h-100"><div class="card-header fw-semibold d-flex align-items-center gap-2">Latest data <span class="ms-auto small text-body-secondary fw-normal" data-field="reading_at">{{ m.reading_at }}</span>
+      {% if m.tare %}<div class="btn-group btn-group-sm" role="group" id="tareToggle" title="Tare: own consumption {{ '%g'|format(d.tare_a) }} A / {{ '%g'|format(d.tare_w) }} W">
+        <button type="button" class="btn btn-outline-secondary" data-view="raw">Raw</button><button type="button" class="btn btn-outline-secondary" data-view="tared">Tared</button></div>{% endif %}
       {% if not d.removed_at %}<button class="btn btn-sm btn-outline-primary" id="btnGetData" title="Ask the meter for a reading now instead of waiting for its interval"><i class="bi bi-arrow-clockwise me-1"></i>Get Data Now</button>{% endif %}</div>
       <div class="card-body" id="latest">
         {# filled by JS (PM.renderLatest) #}
@@ -159,8 +161,9 @@
         {% for s in sessions %}
           <tr><td>{{ s.sid }}</td><td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
             <td class="text-nowrap">{{ ((s.ended_at or now) - s.started_at)|duration if s.started_at else '–' }}</td>
-            <td>{{ '%.3f'|format(s.kwh_used) }}</td>
-            {% if price[1] is not none %}<td>{{ money(s.cost(price[1]), s.currency if s.price_per_kwh is not none else price[0]) }}{% if s.price_per_kwh is not none %} <span class="small text-body-secondary">@ {{ '%g'|format(s.price_per_kwh) }}</span>{% endif %}</td>{% endif %}<td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
+            {% set kt = tare_kwh(s) %}
+            <td><span class="v-raw">{{ '%.3f'|format(s.kwh_used) }}</span>{% if kt is not none %}<span class="v-tared">{{ '%.3f'|format(kt) }}</span>{% endif %}</td>
+            {% if price[1] is not none %}{% set pp = s.price_per_kwh if s.price_per_kwh is not none else price[1] %}<td><span class="v-raw">{{ money(s.cost(price[1]), s.currency if s.price_per_kwh is not none else price[0]) }}</span>{% if kt is not none %}<span class="v-tared">{{ money(kt * pp, s.currency if s.price_per_kwh is not none else price[0]) }}</span>{% endif %}{% if s.price_per_kwh is not none %} <span class="small text-body-secondary">@ {{ '%g'|format(s.price_per_kwh) }}</span>{% endif %}</td>{% endif %}<td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
             <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now', 'voltage': 'Voltage out of range', 'tamper': 'Tamper'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
             <td class="text-end text-nowrap">{% if s.started_at %}
               {% set s_end = s.ended_at or now %}
@@ -194,6 +197,7 @@ PM.meterInfo({
   csv: "{{ url_for('meters.export_csv', pk=d.id) }}",
   action: {{ (url_for('meters.action', pk=d.id) if current_user.is_admin else none)|tojson }},
   refresh: "{{ url_for('meters.refresh', pk=d.id) }}",
+  hasTare: {{ 'true' if m.tare else 'false' }},
   deviceInfo: {{ (url_for('meters.device_info', pk=d.id) if current_user.is_admin else none)|tojson }},
   incDelete: {{ (url_for('meters.incidents_delete', pk=d.id) if current_user.is_admin else none)|tojson }},
   initial: {{ m|tojson }}

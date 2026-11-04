@@ -123,3 +123,33 @@ def csv_rows(device_pk, ch, start, end):
     return period, header, [(r.bucket_start, [r.n, r.v_min, r.v_max, r.v_avg, r.a_min, r.a_max, r.a_avg,
                                               r.w_min, r.w_max, r.w_avg, r.pf_avg, r.hz_avg, r.kwh])
                             for r in rows]
+
+
+def apply_tare(data, tare):
+    """Turn a query() result into tared values: current/power minus the offsets, energy minus
+    the offset power over the time covered. Voltage, PF and Hz are unchanged."""
+    from . import tare as t
+    if not tare:
+        return data
+    pts = data["points"]
+    bucket_s = {"h": 3600, "d": 86400}.get(data["source"])
+    t0 = pts[0]["t"] if pts else data["start"]
+    for p in pts:
+        for f, fn in (("a", t.amps), ("w", t.watts)):
+            for k in (f, f + "_min", f + "_max"):
+                if p.get(k) is not None:
+                    p[k] = _r(fn(p[k], tare))
+        if p.get("kwh") is not None and bucket_s:
+            p["kwh"] = _r(t.kwh(p["kwh"], bucket_s, tare), 4)
+        if p.get("kwh_cum") is not None:
+            p["kwh_cum"] = round(t.kwh(p["kwh_cum"], p["t"] - t0, tare), 4)
+    st = data["stats"]
+    for f, fn in (("a", t.amps), ("w", t.watts)):
+        for k in ("min", "max", "avg"):
+            if (st.get(f) or {}).get(k) is not None:
+                st[f][k] = _r(fn(st[f][k], tare))
+    if st.get("kwh") is not None:
+        covered = (pts[-1]["t"] - pts[0]["t"]) if (pts and not bucket_s) else len(pts) * (bucket_s or 0)
+        st["kwh"] = _r(t.kwh(st["kwh"], covered, tare), 4)
+    data["tared"] = True
+    return data

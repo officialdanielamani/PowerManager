@@ -105,6 +105,9 @@ class Device(db.Model):
     data_autodel_days = db.Column(db.Integer, nullable=False, default=120)
     events_autodel = db.Column(db.Boolean, nullable=False, default=False)
     events_autodel_days = db.Column(db.Integer, nullable=False, default=120)
+    # Tare: the meter's own consumption, subtracted when showing "tared" values (server-only).
+    tare_a = db.Column(db.Float, nullable=False, default=0.0)
+    tare_w = db.Column(db.Float, nullable=False, default=0.0)
     # Last answer to "Get meter info".
     last_info = db.Column(db.JSON, nullable=False, default=dict)
     last_info_at = db.Column(db.Integer)

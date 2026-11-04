@@ -66,6 +66,14 @@ var PM = (function () {
     root.querySelectorAll('[data-field="' + field + '"]').forEach(fn);
   }
 
+  // Summary with tared numbers in the normal fields (when the meter has a tare and tared view is on).
+  function view(m, tared) {
+    if (!tared || !m.tare) return m;
+    var o = Object.assign({}, m);
+    o.w = m.w_tared; o.kwh = m.kwh_tared; o.cost = m.cost_tared; o.reading = m.reading_tared;
+    return o;
+  }
+
   function updateMeterCard(root, m) {
     set(root, 'online', function (el) { el.className = 'pm-dot ' + (m.online ? 'on' : 'off'); el.title = m.online ? 'Online' : 'Offline'; });
     set(root, 'w', function (el) { el.textContent = m.w == null ? '–' : m.w; });
@@ -133,7 +141,7 @@ var PM = (function () {
       store(data.meters);
       data.meters.forEach(function (m) {
         var card = document.querySelector('[data-meter="' + m.id + '"]');
-        if (card) updateMeterCard(card, m);
+        if (card) updateMeterCard(card, view(m, true));
       });
       tick();
     });
@@ -225,8 +233,25 @@ var PM = (function () {
         else el.textContent = '– (meter clock not set)';
       });
     }
+    // ---- Raw / Tared switch (remembered per browser)
+    var tared = false;
+    try { tared = opt.hasTare && localStorage.getItem('pm-tared') !== '0'; } catch (e) { tared = opt.hasTare; }
+    function applyTareView() {
+      document.body.classList.toggle('pm-tared', tared);
+      document.querySelectorAll('#tareToggle [data-view]').forEach(function (b) {
+        b.classList.toggle('active', (b.dataset.view === 'tared') === tared);
+      });
+    }
+    document.querySelectorAll('#tareToggle [data-view]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        tared = b.dataset.view === 'tared';
+        try { localStorage.setItem('pm-tared', tared ? '1' : '0'); } catch (e) {}
+        applyTareView(); onLive(lastLive); load();
+      });
+    });
+    applyTareView();
     var origOnLive = onLive;
-    onLive = function (m) { lastLive = m; if (m.server_time) clockOffset = m.server_time - Date.now() / 1000; origOnLive(m); tick(); };
+    onLive = function (m) { lastLive = m; if (m.server_time) clockOffset = m.server_time - Date.now() / 1000; origOnLive(view(m, tared)); tick(); };
     setInterval(tick, 1000);
 
     onLive(opt.initial);
@@ -312,7 +337,7 @@ var PM = (function () {
     var units = {w: 'W', a: 'A', v: 'V', kwh: 'kWh'};
 
     function query() {
-      var q = 'range=' + state.range + '&ch=' + state.ch;
+      var q = 'range=' + state.range + '&ch=' + state.ch + (tared ? '&tared=1' : '');
       if (state.range === 'custom') {
         q += '&from=' + encodeURIComponent(state.from) + '&to=' + encodeURIComponent(state.to);
         if (state.startTs && state.endTs) q += '&start_ts=' + state.startTs + '&end_ts=' + state.endTs;

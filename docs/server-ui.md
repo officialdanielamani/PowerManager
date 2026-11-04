@@ -46,6 +46,7 @@ Shows a **Synced / Pending sync** badge.
 |---------|--------|
 | General | Device ID (read-only), Nick Name, Info, Send data every [10 s – 1 h] |
 | Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · **[Disable / Unsync / Remove]** (dialog explaining each option, "I understand" tick, Device ID typed for Remove) |
+| Tare (self-consumption) | Current [A] + Power [W] offsets, **[Tare now]** (fills both from the latest reading; relay must be OFF, reading < 2 min old), Clear. Server-only; limits on the meter keep using raw values |
 | Data clean-up | [ ] Automatically delete data if session more than [120] days ago · [ ] Automatically delete Historical Events more than [120] days ago |
 | Set Limit | In this order: **Max kWh per session** + *When the kWh limit is reached*: ( ) Session run as usual · (•) Off relay, but session continue (default) · ( ) End session — **Session time limit** (none / duration D-H-M / daily HH:MM), Auto renew, Relay off when offline — **Max Amp** (0 = off; latched until Reset Trip) — **Operating Voltage Range** Min–Max V + *If out of range* (same 3 choices) — **Tamper Protection** [ ] enable + *If tamper detected* (same 3 choices) |
 | Link this meter to users | Checkbox per view-only user (server-only, never sent to the meter) |
@@ -73,6 +74,7 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 
 ### Meter Info (view-only; admin and viewers)
 - Device ID, Nick Name, Info, kWh per session, next session reset (display TZ), **session cost** (if a price is set), **session started, time elapsed, time left** (live, ticks every second; "Session ended" once a limit ended it), auto renew yes/no, last online, firmware.
+- **[Raw | Tared]** switch in *Latest data* (only when the meter has a tare; remembered per browser): latest data, session kWh/balance/cost, history chart + stats and the Sessions table switch between raw and tared values. Dashboard cards show tared values when a tare is set.
 - **[Get meter info]** (admin) in the *Meter* card: asks the meter for IP, Wi-Fi, MAC, battery voltage + % (if enabled), free heap, PSRAM, firmware, hardware name, `HW_INFO`, chip, uptime; shown in a dialog.
 - Historical Events (admin): checkboxes + **Delete selected**.
 - **[Get Data Now]** in *Latest data* (admin and viewers): asks the meter for a reading now and waits up to 15 s for it (rate limited to once per 5 s per meter).

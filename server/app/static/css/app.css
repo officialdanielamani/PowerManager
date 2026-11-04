@@ -32,3 +32,7 @@ body { min-height: 100vh; background: var(--bs-tertiary-bg); }
 .meter-card.pm-selected { outline: 2px solid var(--bs-primary); }
 .pm-bg-orange { background: #fd7e14; color: #fff; }
 .meter-card.pm-disabled { opacity: .65; }
+/* Raw / Tared values: body.pm-tared shows .v-tared (when present) instead of .v-raw */
+.v-tared { display: none; }
+body.pm-tared .v-tared { display: inline; }
+body.pm-tared td:has(> .v-tared) > .v-raw { display: none; }

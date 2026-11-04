@@ -122,6 +122,20 @@
   </div>
 
   <div class="col-12">
+    <div class="card"><div class="card-header fw-semibold">Tare (self-consumption)</div><div class="card-body">
+      <p class="small text-body-secondary mb-2">If the meter's own power supply (ESP32, SSR) is on the measured line, the PZEM also measures it.
+        These offsets are subtracted when showing <strong>Tared</strong> values (Info page switch, dashboard, CSV extra columns). Raw values are always stored; limits on the meter use raw values.</p>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Current</span><input class="form-control" type="number" step="0.001" min="0" max="5" name="tare_a" id="tare_a" value="{{ val('tare_a', d.tare_a) }}"><span class="input-group-text">A</span></div>
+        <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Power</span><input class="form-control" type="number" step="0.1" min="0" max="500" name="tare_w" id="tare_w" value="{{ val('tare_w', d.tare_w) }}"><span class="input-group-text">W</span></div>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="tareNow" title="Fill from the latest reading (relay must be OFF)"><i class="bi bi-bullseye me-1"></i>Tare now</button>
+        <button type="button" class="btn btn-sm btn-link" onclick="document.getElementById('tare_a').value=0;document.getElementById('tare_w').value=0">Clear</button>
+      </div>
+      <div class="form-text">Tare now: turn the relay OFF, wait for a fresh reading (or use Get Data Now), then press it. 0 = no tare.</div>
+    </div></div>
+  </div>
+
+  <div class="col-12">
     <div class="card"><div class="card-header fw-semibold">Data clean-up</div><div class="card-body">
       <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
         <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="data_autodel" id="data_autodel" {{ chk('data_autodel', d.data_autodel) }}>
@@ -174,6 +188,13 @@
   document.querySelectorAll('input[name=sess_mode]').forEach(function (r) { r.addEventListener('change', syncMode); });
   syncMode();
   PM.bindActions(actionUrl);
+  document.getElementById('tareNow').addEventListener('click', function () {
+    PM.post(actionUrl, {action: 'tare_now'}).then(function (r) {
+      if (!r.ok) return PM.toast(r.message || r.error, 'warning');
+      document.getElementById('tare_a').value = r.a; document.getElementById('tare_w').value = r.w;
+      PM.toast(r.message, 'info');
+    });
+  });
   var tp = document.getElementById('tamper_protect'), to = document.getElementById('tamperOpts');
   function syncTamper() { to.querySelectorAll('input').forEach(function (r) { r.disabled = !tp.checked; }); to.style.opacity = tp.checked ? 1 : .5; }
   tp.addEventListener('change', syncTamper); syncTamper();

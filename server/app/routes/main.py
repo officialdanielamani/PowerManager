@@ -3,7 +3,7 @@ from flask_login import current_user, login_required
 
 from ..extensions import db
 from ..models import Device, Incident, Notification, Session, now
-from ..services import access, devconfig, hub, settings
+from ..services import access, devconfig, hub, settings, tare as tare_svc
 
 bp = Blueprint("main", __name__)
 
@@ -45,7 +45,21 @@ def meter_summary(d, show_price=None):
         currency, price = cur.currency or "", cur.price_per_kwh
     cost = round(float(kwh_now) * price, 4) if show_price and price is not None and kwh_now is not None else None
     sess_end = cur.ended_at if cur and cur.ended_at else None
+    # Tared view (own consumption subtracted); raw values stay in the normal fields.
+    tare = tare_svc.offsets(d)
+    chans_t = [tare_svc.reading(c, tare) for c in chans]
+    w_t = sum((c.get("w") or 0) for c in chans_t) if chans_t else None
+    kwh_t = None
+    if kwh_now is not None:
+        secs = ((sess_end or now()) - sess_start) if sess_start else 0
+        kwh_t = round(tare_svc.kwh(float(kwh_now), secs, tare), 4)
+    cost_t = round(kwh_t * price, 4) if show_price and price is not None and kwh_t is not None else None
     return {
+        "tare": {"a": d.tare_a, "w": d.tare_w} if tare else None,
+        "reading_tared": chans_t,
+        "w_tared": round(w_t, 1) if w_t is not None else None,
+        "kwh_tared": kwh_t,
+        "cost_tared": settings.money(cost_t, currency) if cost_t is not None else None,
         "id": d.id,
         "device_id": d.device_id,
         "name": d.name,

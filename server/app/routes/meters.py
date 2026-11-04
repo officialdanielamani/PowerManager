@@ -15,6 +15,7 @@ from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer
                       NotificationRule, User,
                       PairingCode, Rollup, RollupDirty, Session, now)
 from ..services import access, commands, devconfig, history, hub, incidents, ingest, lifecycle, settings, validation
+from ..services import tare as tare_svc
 from .decorators import admin_required
 from .device_api import ensure_device_defaults
 from .main import meter_summary
@@ -129,7 +130,17 @@ def configure(pk):
                 errors.append(f"{label} auto-delete: days must be 1–3650")
             else:
                 retention[key] = (form.get(f"{key}_autodel") == "on", int(raw))
+        tare_vals = {}
+        for key, label, hi in (("tare_a", "Tare current", 5.0), ("tare_w", "Tare power", 500.0)):
+            raw = (form.get(key) or "0").strip() or "0"
+            try:
+                tare_vals[key] = float(raw)
+                if not 0 <= tare_vals[key] <= hi:
+                    raise ValueError
+            except ValueError:
+                errors.append(f"{label} must be between 0 and {hi:g}")
         if not errors:
+            device.tare_a, device.tare_w = tare_vals["tare_a"], tare_vals["tare_w"]
             device.data_autodel, device.data_autodel_days = retention["data"]
             device.events_autodel, device.events_autodel_days = retention["events"]
             device.name, device.info = name, info
@@ -251,7 +262,7 @@ def action(pk):
     elif act in ("renew", "reset_trip", "send_now"):
         params = {"by": current_user.username} if act == "reset_trip" else {}
         cmd, err = commands.issue(device, act, params, current_user)
-    elif device.disabled_at and act not in ("send_now", "enable", "disable", "unsync", "remove", "get_info"):
+    elif device.disabled_at and act not in ("send_now", "enable", "disable", "unsync", "remove", "get_info", "tare_now"):
         return jsonify(ok=False, error="disabled", message="This meter is disabled (read-only). Enable it first."), 409
     elif act == "set_default":
         device.cfg = devconfig.default_cfg(devconfig.channel_count(device))
@@ -276,6 +287,20 @@ def action(pk):
         flash(msgs[act], "success")
         dest = url_for("meters.info", pk=device.id) if act in ("disable", "enable") else url_for("main.dashboard")
         return jsonify(ok=True, redirect=dest)
+    elif act == "tare_now":
+        # Suggest offsets from the latest reading. Only meaningful with the relay OFF (then the
+        # meter measures nothing but its own power supply). The form is filled, not saved.
+        relays = (device.last_state or {}).get("relay") or []
+        if relays and relays[0].get("on"):
+            return jsonify(ok=False, error="relay_on",
+                           message="Turn the relay OFF first: with the load off, the meter only measures itself."), 409
+        reading = device.last_reading or {}
+        ch = (reading.get("ch") or [{}])[0]
+        if not reading.get("ts") or now() - reading["ts"] > 120 or ch.get("w") is None:
+            return jsonify(ok=False, error="stale",
+                           message="No reading from the last 2 minutes. Use Get Data Now on the Info page, then try again."), 409
+        return jsonify(ok=True, a=round(ch.get("a") or 0, 3), w=round(ch.get("w") or 0, 1),
+                       message=f"Filled from the reading at {settings.fmt_ts(reading['ts'])}. Press Save to keep it.")
     elif act == "get_info":
         cmd, err = commands.issue(device, "get_info", {}, current_user)
         if err or (cmd is not None and not cmd.sent_at):
@@ -358,7 +383,10 @@ def info(pk):
                            detail_text=incident_detail_text, sessions=sessions, now=now(),
                            cfg=device.cfg or {}, channels=device.channels,
                            price=settings.price() if access.can_price(current_user) else (None, None),
-                           money=settings.money, can_csv=access.can_csv(current_user))
+                           money=settings.money, can_csv=access.can_csv(current_user),
+                           tare_kwh=lambda sess: (round(tare_svc.kwh(sess.kwh_used or 0, (sess.ended_at or now()) - sess.started_at,
+                                                                     tare_svc.offsets(device)), 4)
+                                                  if tare_svc.offsets(device) and sess.started_at else None))
 
 
 _last_refresh = {}  # meter pk -> time of last "Get Data Now" (any user)
@@ -404,6 +432,8 @@ def history_json(pk):
     start, end = _range_args(device)
     ch = request.args.get("ch", 0, type=int)
     data = history.query(device.id, ch, start, end)
+    if request.args.get("tared") == "1":
+        data = history.apply_tare(data, tare_svc.offsets(device))
     data["start_local"] = settings.fmt_ts(start, False)
     data["end_local"] = settings.fmt_ts(end, False)
     data["tz_offset_s"] = _tz_offset_s()
@@ -422,6 +452,18 @@ def _tz_offset_s():
 def _utc(ts):
     from datetime import datetime, timezone
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _csv_tare(device, source, header, rows):
+    """When a tare is set, add tared current/power columns next to the raw ones (raw data only)."""
+    tare = tare_svc.offsets(device)
+    if not tare or source != "raw":
+        return header, rows
+    ia, iw = header.index("A"), header.index("W")
+    out = [(ts, list(vals) + [None if vals[ia] is None else round(tare_svc.amps(vals[ia], tare), 3),
+                              None if vals[iw] is None else round(tare_svc.watts(vals[iw], tare), 1)])
+           for ts, vals in rows]
+    return header + [f"A_tared (-{tare[0]:g})", f"W_tared (-{tare[1]:g})"], out
 
 
 def _csv_response(filename, header, rows):
@@ -451,11 +493,13 @@ def export_csv(pk):
             abort(404)
         start, end = sess.started_at, sess.ended_at or now()
         source, header, rows = history.csv_rows(device.id, ch, start, end)
+        header, rows = _csv_tare(device, source, header, rows)
         out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals] for ts, vals in rows]
         hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
         return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
     start, end = _range_args(device)
     source, header, rows = history.csv_rows(device.id, ch, start, end)
+    header, rows = _csv_tare(device, source, header, rows)
     out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals]
            for ts, vals in rows]
     hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
