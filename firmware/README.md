@@ -42,14 +42,15 @@ Power the PZEM's TTL side from **3.3 V** (ESP32 pins are not 5 V tolerant). The 
 
 ## 4. First start
 
-The serial monitor (115200) prints the device ID and the **setup Wi-Fi name + password**:
+Open the Serial Monitor (115200). It shows the device ID and the **setup Wi-Fi name + password**:
 
 ```
  PowerMeter 0.1.0   Device ID: K7P29QXM
- Setup Wi-Fi: Power_K7P29QXM   password: ab3k9mxq
+ Setup Wi-Fi: Power_K7P29QXM   password: K7P29QXM   (ON now, open http://192.168.4.1)
 ```
 
-Write the password on a label. It stays the same after a factory reset.
+- By default the password is the **same code as in the Wi-Fi name** (here `K7P29QXM`), so you can set it up without the serial monitor. It's easy to guess, which is acceptable because the hotspot is only for setup. Create the admin account soon after powering a new meter. For a random password instead, set `AP_PASSWORD_IS_DEVICE_ID 0` in `config.h`.
+- Missed the message? It repeats every 30 s while the setup hotspot is on, or type `info` + Enter in the Serial Monitor.
 
 1. Connect your phone to `Power_XXXXXXXX`. The setup page opens by itself, or browse to `http://192.168.4.1`.
 2. Create the meter's admin account.

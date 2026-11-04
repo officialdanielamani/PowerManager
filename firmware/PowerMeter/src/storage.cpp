@@ -1,5 +1,7 @@
 #include "storage.h"
 
+#include "../config.h"
+
 #include <Preferences.h>
 #include <esp_random.h>
 #include <mbedtls/sha256.h>
@@ -66,7 +68,13 @@ void begin() {
 }
 
 String deviceId() { return sDeviceId; }
-String apPassword() { return sApPass; }
+String apPassword() {
+#if AP_PASSWORD_IS_DEVICE_ID
+  return sDeviceId;  // 8 characters, meets the WPA2 minimum
+#else
+  return sApPass;
+#endif
+}
 uint32_t bootCount() { return sBoot; }
 
 bool hasWifi() { return pm.getString("wssid", "").length() > 0; }

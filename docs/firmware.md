@@ -34,7 +34,7 @@ Avoid: GPIO 0/3/45/46 (strapping), 19/20 (USB), 43/44 (UART0 / serial log).
 
 - `device_id` = 8 characters (base32 of a hash of the eFuse MAC), e.g. `MTR23H4R`. Public, used in the SSID and on the server.
 - SSID: `Power_<device_id>`.
-- AP password: **8 random characters made on first boot**, stored in NVS, printed on the serial log at every boot. Write it on a label. (It is not derived from the MAC: the MAC is visible in the Wi-Fi BSSID and the firmware is public, so a derived password could be computed by anyone.)
+- AP password: by default **the device ID itself** (`AP_PASSWORD_IS_DEVICE_ID 1`), e.g. SSID `Power_K7P29QXM`, password `K7P29QXM`. Chosen for easy setup; anyone who sees the SSID can join, so the risk window is first setup (before the admin account exists). Later fallback hotspots still need the admin login. Set it to `0` for a random 8-character password made on first boot (stored in NVS, kept after factory reset). The banner with SSID/password prints at boot (after waiting up to 3 s for USB serial), every 30 s while the hotspot is on, and on the serial command `info`.
 
 ## 3. Setup flow
 

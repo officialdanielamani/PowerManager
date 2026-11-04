@@ -21,6 +21,13 @@
 // Set to 1 if a DS3231 RTC module is fitted.
 #define HAS_DS3231 0
 
+// ---------------------------------------------------------------- setup Wi-Fi (access point)
+// SSID is always "Power_<DeviceID>".
+// 1 = password is the same Device ID (easy: SSID Power_K7P29QXM, password K7P29QXM).
+//     Anyone who can see the SSID can join, so finish setup (create the admin) promptly.
+// 0 = random 8-character password made on first boot (printed on serial; write it on a label).
+#define AP_PASSWORD_IS_DEVICE_ID 1
+
 // ---------------------------------------------------------------- sensor
 #define PZEM_ADDRESS 0xF8         // general address, works with a single PZEM on the bus
 #define PZEM_TIMEOUT_MS 250

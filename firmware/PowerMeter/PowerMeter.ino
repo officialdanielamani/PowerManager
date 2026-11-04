@@ -34,9 +34,35 @@ static void loadState() {
   store::loadFlags(g.wantOn, g.tripped);
 }
 
+static void printBanner() {
+  bool ap;
+  NetStatus st;
+  {
+    StateLock l;
+    ap = g.apActive;
+    st = g.net;
+  }
+  Serial.println();
+  Serial.println("==============================================");
+  Serial.printf(" PowerMeter %s   Device ID: %s\n", FW_VERSION, store::deviceId().c_str());
+  Serial.printf(" Setup Wi-Fi: %s   password: %s   (%s)\n", net::apSsid().c_str(),
+                store::apPassword().c_str(), ap ? "ON now, open http://192.168.4.1" : "off");
+  String ip = net::ipAddress();
+  if (ip.length()) Serial.printf(" On your network: http://%s/\n", ip.c_str());
+  static const char *NET[] = {"setup", "Wi-Fi connecting", "not paired", "server offline", "online"};
+  Serial.printf(" Status: %s   Boot #%u   %u item(s) waiting to send\n", NET[st],
+                (unsigned)store::bootCount(), outbox::count());
+  Serial.println(" Type 'info' + Enter to show this again.");
+  Serial.println("==============================================");
+}
+
 void setup() {
   Serial.begin(115200);
-  delay(300);
+  // With "USB CDC On Boot", the PC needs a moment to reopen the port after a reset.
+  // Wait up to 3 s for the Serial Monitor so the banner is not lost (no wait without USB).
+  uint32_t t0 = millis();
+  while (!Serial && millis() - t0 < 3000) delay(10);
+  delay(200);
   state_init();
   store::begin();
   loadState();
@@ -47,12 +73,7 @@ void setup() {
   net::begin();
   web::begin();
 
-  Serial.println();
-  Serial.println("==============================================");
-  Serial.printf(" PowerMeter %s   Device ID: %s\n", FW_VERSION, store::deviceId().c_str());
-  Serial.printf(" Setup Wi-Fi: %s   password: %s\n", net::apSsid().c_str(), store::apPassword().c_str());
-  Serial.printf(" Boot #%u, %u item(s) waiting to send\n", (unsigned)store::bootCount(), outbox::count());
-  Serial.println("==============================================");
+  printBanner();
 
   xTaskCreatePinnedToCore(control::task, "control", 6144, nullptr, 3, nullptr, 1);
   xTaskCreatePinnedToCore(led::task, "led", 3072, nullptr, 1, nullptr, 1);
@@ -74,5 +95,24 @@ void loop() {
     pressedMs = 0;
   }
   sys::checkHeartbeats();
+
+  // Serial command "info" prints the banner again.
+  static String line;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      line.trim();
+      if (line.equalsIgnoreCase("info")) printBanner();
+      line = "";
+    } else if (line.length() < 32) {
+      line += c;
+    }
+  }
+  // Repeat the banner every 30 s while the setup hotspot is on (easy to catch late).
+  static uint32_t lastBanner = 0;
+  if (millis() - lastBanner > 30000) {
+    lastBanner = millis();
+    if (g.apActive) printBanner();
+  }
   vTaskDelay(pdMS_TO_TICKS(50));
 }
