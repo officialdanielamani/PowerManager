@@ -84,7 +84,7 @@ static void pushTelemetry() {
 
 double sessionKwh() {
   StateLock l;
-  double kwh = sessionKwhLimit();
+  double kwh = g.lastE - g.sess.e0;  // raw, as measured (never call the tared/limit helpers here)
   return kwh > 0 ? kwh : 0;
 }
 
@@ -423,7 +423,7 @@ static void checkRules(bool firstPass) {
   }
 
   // kWh quota.
-  double kwh = g.lastE - g.sess.e0;
+  double kwh = sessionKwhLimit();  // tared when "tare_limits" is on
   if (g.sess.sid && g.sess.status == SESS_ACTIVE && g.cfg.kwh_max > 0 && kwh >= g.cfg.kwh_max) {
     static const char *ACT[] = {"end", "hold", "warn"};
     struct QCtx {
