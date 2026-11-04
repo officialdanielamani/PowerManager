@@ -65,15 +65,29 @@ void setup() {
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 3000) delay(10);
   delay(200);
+  // Boot steps are printed so a crash during start-up shows how far it got.
+  auto step = [](const char *what) {
+    Serial.printf("[boot] %s\n", what);
+    Serial.flush();
+  };
+  step("state");
   state_init();
+  step("storage (NVS)");
   store::begin();
   loadState();
+  step("offline buffer (LittleFS)");
   outbox::begin();
+  step(HAS_DS3231 ? "clock (DS3231)" : "clock");
   timekeep::begin();
+  step("LED");
   led::begin();
+  step("sensor + relay");
   control::begin(&pzem);
+  step(MESH_ENABLE ? "Wi-Fi + mesh" : "Wi-Fi");
   net::begin();
+  step("web server");
   web::begin();
+  step("start tasks");
 
   printBanner();
 

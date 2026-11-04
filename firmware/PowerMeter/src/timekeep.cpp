@@ -77,11 +77,17 @@ void set(uint32_t epoch, TimeSource src) {
 #endif
 }
 
-static void onNtpSync(struct timeval *tv) {
+#if HAS_DS3231
+static volatile bool rtcWritePending = false;
+#endif
+
+// Runs in the lwIP task, which has a very small stack: never do I2C here (that overflowed the
+// stack and crashed on boot in 0.4.0/0.4.1). Only note it; loop() (net task) writes the RTC.
+static void onNtpSync(struct timeval *) {
   // SNTP already set the system clock. Server time stays the stronger source.
   if (src_ != TS_SERVER) src_ = TS_NTP;
 #if HAS_DS3231
-  rtcWrite((uint32_t)tv->tv_sec);
+  rtcWritePending = true;
 #endif
 }
 
@@ -91,6 +97,12 @@ void loop() {
     configTime(0, 0, "pool.ntp.org", "time.google.com");
     ntpStarted = true;
   }
+#if HAS_DS3231
+  if (rtcWritePending) {
+    rtcWritePending = false;
+    rtcWrite((uint32_t)time(nullptr));
+  }
+#endif
 }
 
 bool valid() { return src_ != TS_NONE && (uint32_t)time(nullptr) > MIN_VALID; }

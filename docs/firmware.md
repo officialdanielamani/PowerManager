@@ -111,6 +111,9 @@ relay_on = want_on
 
 Priority: **server time** (`welcome`, `ack`, `time`) > NTP (if internet) > DS3231 (if fitted) > browser time from the local UI.
 With no valid time: telemetry uses `tv:0` + uptime (protocol §2.4), and **daily reset is paused** until time is valid (duration mode keeps counting by uptime).
+The DS3231 is only written from the net task (never inside the SNTP sync callback, which runs in the lwIP task with a very small stack — doing I2C there overflowed it and boot-looped firmware 0.4.0/0.4.1).
+
+At boot the serial monitor prints a `[boot] <step>` line before each init step (storage, offline buffer, clock, LED, sensor + relay, Wi-Fi + mesh, web server, tasks), so a crash shows which step it happened in.
 
 ## 8. Offline buffer
 
