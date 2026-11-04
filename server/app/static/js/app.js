@@ -91,6 +91,8 @@ var PM = (function () {
     set(root, 'status', function (el) { var s = STATUS[m.status] || ['secondary', m.status]; el.innerHTML = '<span class="badge text-bg-' + s[0] + '">' + esc(s[1]) + '</span>'; });
     set(root, 'ongoing', function (el) { el.innerHTML = m.ongoing.map(function (t) { return INCIDENT[t] || ''; }).join(' '); });
     set(root, 'last_seen', function (el) { el.textContent = m.last_seen; });
+    set(root, 'via-badge', function (el) { el.innerHTML = m.via ? '<i class="bi bi-diagram-3"></i> via ' + esc(m.via) : ''; });
+    set(root, 'via', function (el) { el.textContent = m.via ? 'Mesh via ' + m.via : (m.online ? 'Wi-Fi' : '–'); });
     set(root, 'cost', function (el) { el.textContent = m.cost || '–'; });
     set(root, 'cost-row', function (el) { el.classList.toggle('d-none', !m.cost); });
     set(root, 'reading_at', function (el) { el.textContent = m.reading_at; });
@@ -262,7 +264,9 @@ var PM = (function () {
     var mi = document.getElementById('btnMeterInfo');
     function infoTable(d) {
       var i = d.info || {}, rows = [
-        ['IP address', i.ip], ['Wi-Fi', i.ssid ? i.ssid + (i.rssi ? ' (' + i.rssi + ' dBm)' : '') : null], ['MAC', i.mac],
+        ['Connection', i.link === 'mesh' ? 'Mesh via ' + i.gateway + (i.mesh_ch ? ' (channel ' + i.mesh_ch + ')' : '') :
+          i.link === 'wifi' ? 'Wi-Fi' + (i.leaves ? ' · gateway for ' + i.leaves + ' meter(s)' : '') : i.link],
+        ['IP address', i.ip || null], ['Wi-Fi', i.link !== 'mesh' && i.ssid ? i.ssid + (i.rssi ? ' (' + i.rssi + ' dBm)' : '') : null], ['MAC', i.mac],
         ['Battery', i.bat_v != null ? Number(i.bat_v).toFixed(2) + ' V' + (i.bat_pct != null ? ' · ~' + i.bat_pct + ' %' : '') : 'not enabled (config.h)'],
         ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
         ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],

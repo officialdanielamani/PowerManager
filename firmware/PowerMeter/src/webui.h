@@ -49,6 +49,7 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <label>Network name (SSID)</label><input id="ws" maxlength="32">
 <label>Password</label><input id="wp" type="password" maxlength="63">
 <p><button id="wbtn" onclick="saveWifi()">Connect</button> <button class="sec hide" id="wcancel" onclick="show('dash')">Cancel</button></p>
+<p class="mut" id="meshOnlyBox">No Wi-Fi where this meter is? <button class="sec" onclick="if(confirm('Use mesh only? This meter will reach the server through a nearby meter that is on Wi-Fi (gateway). Its own page stays on the Power_… hotspot.'))post('/api/wifi/meshonly').then(r=>note(r.message||r.error,r.ok?'inf':'err'))">Use mesh only (no Wi-Fi here)</button></p>
 <div id="wres"></div></div></section>
 
 <section id="v-login" class="hide"><div class="card"><h2>Login</h2>
@@ -92,6 +93,9 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <p><button onclick="chpw()">Change password</button></p></div>
 <div class="card"><h2>Wi-Fi</h2><p class="mut">Connected to <b id="curSsid"></b>. Changing it restarts the meter.</p>
 <button class="sec" onclick="show('wifi');scan(1)">Change Wi-Fi</button></div>
+<div class="card"><h2>Mesh</h2><p class="mut">Auto: Wi-Fi first. Without Wi-Fi for 90 s the meter talks through a nearby meter that is online (gateway), and an online meter relays for others. Wi-Fi only: never uses or offers the mesh.</p>
+<div class="row"><select id="mrole"><option value="auto">Auto (recommended)</option><option value="wifi">Wi-Fi only</option></select>
+<button class="sec" style="flex:0" onclick="post('/api/mesh',{role:$('mrole').value}).then(r=>note(r.message||r.error,r.ok?'inf':'err'))">Save</button></div></div>
 <div class="card"><h2>Firmware</h2><p class="mut">Installed: <b id="fwVer"></b></p>
 <button class="sec" disabled title="Coming in a later version">Check OTA Update</button>
 <p class="mut">Over-the-air updates from the server are coming in a later version.</p></div>
@@ -137,8 +141,8 @@ function fmt(e){if(!e)return'–';return new Date(e*1000).toLocaleString()}
 function n(v,d){return v==null?'–':Number(v).toFixed(d)}
 function pill(t,k){return'<span class="pill '+k+'">'+esc(t)+'</span>'}
 function load(){api('/api/state').then(function(d){if(d._s==401)return route();if(!d.state)return;var st=d.state,ss=st.sess||{},rl=(st.relay||[{}])[0],r=d.reading||{};
- var netMap={online:['Online','ok'],connecting:['Server offline','bad'],not_paired:['Not paired','warn'],wifi_connecting:['Wi-Fi connecting','warn'],setup:['Setup','warn']};
- var nm=netMap[d.net]||[d.net,''];$('dNet').innerHTML=pill(nm[0],nm[1]);$('curSsid').textContent=d.ssid;
+ var netMap={online:[d.link=='mesh'?'Online (mesh)':'Online','ok'],connecting:['Server offline','bad'],not_paired:['Not paired','warn'],wifi_connecting:['Wi-Fi connecting','warn'],setup:['Setup','warn']};
+ var nm=netMap[d.net]||[d.net,''];$('dNet').innerHTML=pill(nm[0],nm[1]);$('curSsid').textContent=d.mesh_only?'(mesh only)':d.ssid;$('mrole').value=d.role||'auto';
  $('pairCard').classList.toggle('hide',d.paired);if(d.unauthorized)note('The server no longer accepts this meter. Pair it again.');
  $('dTime').textContent=(d.time?fmt(d.time):'Clock not set')+' · time from '+d.time_src;
  var block=st.disabled||st.tripped||ss.status=='quota'||ss.status=='expired'||ss.status=='ended';$('bOn').disabled=block;$('bOn').title=block?'Blocked until the session is renewed / trip is reset':'';
@@ -149,7 +153,7 @@ function load(){api('/api/state').then(function(d){if(d._s==401)return route();i
  $('dGrid').innerHTML=[['Relay',rl.on?'ON':'OFF'+(rl.block?' <small>('+rl.block+')</small>':'')],['Voltage',r.ok?n(r.v,1)+' V':(st.ac?'–':'No AC')],['Current',r.ok?n(r.a,3)+' A':'–'],['Power',r.ok?n(r.w,1)+' W':'–'],['Power factor',r.ok?n(r.pf,2):'–'],['Frequency',r.ok?n(r.hz,1)+' Hz':'–'],['Session used',n(ss.kwh,3)+' kWh'+(ss.kwh_t!=null?'<small> (tared '+n(ss.kwh_t,3)+')</small>':'')],['Balance',bal==null?'∞':n(bal,3)+' kWh']]
   .map(function(x){return'<div class="stat"><small>'+x[0]+'</small><b>'+x[1]+'</b></div>'}).join('');
  var c=d.cfg||{};$('dSess').innerHTML='<dt>Status</dt><dd>'+status+(st.tamper?' '+pill('Panel open','bad'):'')+'</dd><dt>kWh per session</dt><dd>'+(c.kwh_max?c.kwh_max+' kWh':'Unlimited')+'</dd><dt>Session restarts</dt><dd>'+(c.mode=='none'?'No time limit':fmt(d.next_reset))+'</dd><dt>Auto renew</dt><dd>'+(c.auto?'Yes':'No')+'</dd><dt>Max current</dt><dd>'+(c.amp_max?c.amp_max+' A':'Off')+'</dd><dt>Tare</dt><dd>'+(c.tare_a||c.tare_w?c.tare_a+' A / '+c.tare_w+' W'+(c.tare_limits?' (used for limits)':' (display only)'):'Off')+'</dd><dt>Relay off when offline</dt><dd>'+(c.offline_off_min?'after '+c.offline_off_min+' min':'Off')+'</dd><dt>Send data every</dt><dd>'+c.report_s+' s</dd>';
- $('dDev').innerHTML='<dt>Device ID</dt><dd>'+esc(d.device_id)+'</dd><dt>Firmware</dt><dd>'+esc(d.fw)+'</dd><dt>Hardware</dt><dd>'+esc(d.hw_info||'')+'</dd>'+(d.bat_v!=null?'<dt>Battery</dt><dd>'+d.bat_v+' V (~'+d.bat_pct+' %)</dd>':'')+'<dt>Free memory</dt><dd>'+Math.round((d.heap||0)/1024)+' KB</dd><dt>Server</dt><dd>'+esc(d.server||'–')+'</dd><dt>Last sync</dt><dd>'+fmt(d.last_sync)+'</dd><dt>Waiting to send</dt><dd>'+d.outbox+' item(s)</dd><dt>Wi-Fi</dt><dd>'+esc(d.ssid)+' ('+d.rssi+' dBm) · '+esc(d.ip)+'</dd><dt>Uptime</dt><dd>'+Math.floor(d.uptime/3600)+' h '+Math.floor(d.uptime%3600/60)+' min</dd>'})}
+ $('dDev').innerHTML='<dt>Device ID</dt><dd>'+esc(d.device_id)+'</dd><dt>Firmware</dt><dd>'+esc(d.fw)+'</dd><dt>Hardware</dt><dd>'+esc(d.hw_info||'')+'</dd>'+(d.bat_v!=null?'<dt>Battery</dt><dd>'+d.bat_v+' V (~'+d.bat_pct+' %)</dd>':'')+'<dt>Free memory</dt><dd>'+Math.round((d.heap||0)/1024)+' KB</dd><dt>Server</dt><dd>'+esc(d.server||'–')+'</dd><dt>Last sync</dt><dd>'+fmt(d.last_sync)+'</dd><dt>Waiting to send</dt><dd>'+d.outbox+' item(s)</dd><dt>Connection</dt><dd>'+(d.link=='mesh'?'Mesh via '+esc(d.gateway):d.link=='searching'?'Mesh: looking for a gateway…':d.link=='wifi'?'Wi-Fi '+esc(d.ssid)+' ('+d.rssi+' dBm) · '+esc(d.ip)+(d.leaves?' · relaying '+d.leaves+' meter(s)':''):'Not connected')+'</dd><dt>Uptime</dt><dd>'+Math.floor(d.uptime/3600)+' h '+Math.floor(d.uptime%3600/60)+' min</dd>'})}
 function relay(on){post('/api/relay',{on:on}).then(function(r){if(!r.ok)note(r.error);load()})}
 function fromText(t){try{var q=JSON.parse(t.trim());if(!q.h||!q.c)return;$('ph').value=q.h;$('pp').value=q.p||'';$('pt').checked=!!q.s;$('pc').value=q.c.slice(0,4)+'-'+q.c.slice(4);note('Pairing details filled in. Press Pair.','okm')}catch(e){}}
 function readQr(inp){var f=inp.files[0];inp.value='';if(!f)return;

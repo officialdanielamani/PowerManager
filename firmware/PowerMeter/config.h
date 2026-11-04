@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 #define HW_NAME "esp32s3-supermini"
 #define HW_INFO "PZEM-004T 1Chn"   // free text shown in "Get meter info" on the server
 #define PROTO_VERSION 1
@@ -62,6 +62,18 @@
 #define AP_CLOSE_AFTER_STA_MS (5UL * 60UL * 1000UL) // close fallback AP after STA is back
 #define FACTORY_RESET_HOLD_MS 10000
 #define WEB_SESSION_TTL_S (12UL * 3600UL)
+
+// ---------------------------------------------------------------- mesh (ESP-NOW)
+// Auto role: Wi-Fi first; if Wi-Fi is down for MESH_LEAF_AFTER_MS the meter becomes a "leaf" and
+// reaches the server through a nearby "gateway" meter (any Auto meter that is online on Wi-Fi).
+// One hop only. See docs/mesh.md.
+#define MESH_LEAF_AFTER_MS (90UL * 1000UL)            // Wi-Fi down this long -> leaf
+#define MESH_WIFI_RETRY_MS (10UL * 60UL * 1000UL)     // leaf: try Wi-Fi again this often
+#define MESH_BEACON_MS 2000                            // gateway beacon interval
+#define MESH_GATEWAY_LOST_MS 10000                     // leaf: no beacon this long -> find another
+#define MESH_MAX_LEAVES 10                             // per gateway
+#define MESH_SCAN_DWELL_MS 300                         // leaf: listen time per channel when searching
+#define MESH_BATCH_MAX 8                               // telemetry items per message on the mesh
 
 // ---------------------------------------------------------------- outbox (offline buffer)
 // Stored in the LittleFS partition: choose Tools > Partition Scheme >

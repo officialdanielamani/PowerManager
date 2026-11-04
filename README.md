@@ -20,6 +20,7 @@ Self-hosted energy meter system: ESP32 meters measure and switch loads, and a Do
 | [docs/protocol.md](docs/protocol.md) | Pairing flow and WebSocket message contract between meter and server |
 | [docs/data-model.md](docs/data-model.md) | Server database tables, retention, roll-ups |
 | [docs/server-ui.md](docs/server-ui.md) | Server pages, fields, validation rules, roles |
+| [docs/mesh.md](docs/mesh.md) | Mesh over ESP-NOW: roles, security, radio details, test plan |
 | [docs/firmware.md](docs/firmware.md) | ESP32 behaviour: setup, tasks, enforcement, LED, buffering, pin map, libraries |
 
 ## Planned deployment (summary)

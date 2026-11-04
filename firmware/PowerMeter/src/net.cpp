@@ -6,6 +6,7 @@
 #include <WebSocketsClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_wifi.h>
 
 #include "../config.h"
 #include "app_state.h"
@@ -13,6 +14,7 @@
 #include "certs.h"
 #include "control.h"
 #include "led.h"
+#include "mesh.h"
 #include "outbox.h"
 #include "storage.h"
 #include "system.h"
@@ -40,6 +42,13 @@ static bool pairPending = false;
 static String pairStatus_ = "idle";
 
 static uint32_t wifiDownSinceMs = 0, wifiUpSinceMs = 0, lastWifiRetryMs = 0;
+// mesh: leaf mode = no Wi-Fi, talk to the server through a gateway meter
+static bool leafMode = false;
+static uint32_t leafSinceMs = 0, helloSentMs = 0;
+static bool linkWasUp = false;
+static PairRequest meshPairReq;
+static bool meshPairPending = false;
+static uint32_t meshPairDeadline = 0;
 static String testSsid, testPass;
 static volatile bool testPending = false, testing = false;
 static volatile uint8_t testState = 0;  // 0 idle, 1 connecting, 2 ok, 3 failed
@@ -48,8 +57,14 @@ static bool mdnsStarted = false;
 
 String apSsid() { return "Power_" + store::deviceId(); }
 String serverHost() { return srv.host; }
+String linkMode() {
+  if (leafMode) return mesh::leafLinked() ? "mesh" : "searching";
+  return WiFi.status() == WL_CONNECTED ? "wifi" : "none";
+}
+String meshGateway() { return leafMode ? mesh::gatewayId() : String(""); }
+uint8_t meshLeaves() { return leafMode ? 0 : mesh::leafCount(); }
 uint16_t outboxCount() { return outbox::count(); }
-String ipAddress() { return WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String(""); }
+String ipAddress() { return (!leafMode && WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : String(""); }
 int rssi() { return WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0; }
 
 static void setNet(NetStatus s) {
@@ -130,7 +145,7 @@ static void wifiLoop() {
   if (wifiTestLoop()) return;
   if (!store::hasWifi()) {
     startAp();
-    setNet(NET_SETUP_AP);
+    if (!store::meshOnly()) setNet(NET_SETUP_AP);
     return;
   }
   uint32_t now = millis();
@@ -162,10 +177,16 @@ static void wifiLoop() {
 
 // ------------------------------------------------------------------ helpers
 
+// Every message to the server goes through here: the WebSocket, or the mesh when a leaf.
+static void txt(String s) {
+  if (leafMode) mesh::leafSend(s);
+  else ws.sendTXT(s);
+}
+
 static void sendJson(JsonDocument &doc) {
   String s;
   serializeJson(doc, s);
-  ws.sendTXT(s);
+  txt(s);
 }
 
 static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
@@ -256,12 +277,7 @@ static void stopWs() {
   wsStarted = wsConnected = helloDone = false;
 }
 
-static void doPair(PairRequest r) {
-  if (WiFi.status() != WL_CONNECTED) {
-    setPairStatus("Wi-Fi is not connected");
-    return;
-  }
-  String url = String(r.tls ? "https://" : "http://") + r.host + ":" + r.port + "/api/v1/pair";
+static String pairBody(const PairRequest &r) {
   JsonDocument body;
   body["code"] = r.code;
   body["device_id"] = store::deviceId();
@@ -277,7 +293,80 @@ static void doPair(PairRequest r) {
   caps["amp_rating"] = SENSOR_AMP_RATING;
   String payload;
   serializeJson(body, payload);
+  return payload;
+}
 
+// Same handling for a direct (HTTPS) and a mesh pairing answer.
+static void applyPairResult(int code, JsonObject doc, const PairRequest &r, const String &netError) {
+  if (code == 200) {
+    if (!doc["secret"].is<const char *>()) {
+      setPairStatus("Unexpected reply from server");
+      return;
+    }
+    stopWs();
+    srv.host = r.host;
+    srv.port = r.port;
+    srv.tls = r.tls;
+    srv.insecure = r.insecure;
+    srv.secret = doc["secret"].as<String>();
+    store::saveServer(srv);
+    if (doc["link_key"].is<const char *>()) store::setLinkKey(doc["link_key"].as<String>());
+    timekeep::set(doc["time"] | 0, TS_SERVER);
+    MeterConfig c;
+    String err;
+    if (parseConfig(doc["config"]["cfg"], c, err)) {
+      c.ver = doc["config"]["ver"] | 0;
+      control::applyConfig(c);
+    }
+    outbox::clear();  // old items belong to a previous pairing
+    {
+      StateLock l;
+      g.paired = true;
+      g.unauthorized = false;
+      g.offlineSinceMs = 0;
+    }
+    everOnline = false;
+    linkWasUp = false;
+    helloDone = false;
+    led::flash(led::FLASH_PAIRED);
+    setPairStatus("ok");
+    Serial.println("[net] paired");
+    return;
+  }
+  String msg;
+  if (code == 404) msg = "Pairing code is wrong or expired. Make a new one on the server.";
+  else if (code == 409) msg = "This meter is still paired on the server. Remove it there first.";
+  else if (code == 429) msg = "Too many attempts. Wait a minute.";
+  else if (code < 0) msg = "Cannot reach server: " + netError;
+  else msg = "Server replied HTTP " + String(code);
+  setPairStatus(msg);
+}
+
+void meshPairResult(int code, JsonObject resp) {
+  if (!meshPairPending) return;
+  meshPairPending = false;
+  applyPairResult(code, resp, meshPairReq, "");
+}
+
+static void doPair(PairRequest r) {
+  String payload = pairBody(r);
+  if (leafMode) {  // no Wi-Fi: ask a gateway meter to pair us
+    if (!mesh::leafLinked()) {
+      setPairStatus("No Wi-Fi and no gateway meter found yet. Wait a moment and try again.");
+      return;
+    }
+    meshPairReq = r;
+    meshPairPending = true;
+    meshPairDeadline = millis() + 20000;
+    mesh::leafSendPair(payload);
+    Serial.printf("[net] pairing through gateway %s\n", mesh::gatewayId().c_str());
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    setPairStatus("Wi-Fi is not connected");
+    return;
+  }
+  String url = String(r.tls ? "https://" : "http://") + r.host + ":" + r.port + "/api/v1/pair";
   HTTPClient http;
   WiFiClientSecure secure;
   WiFiClient plain;
@@ -299,48 +388,14 @@ static void doPair(PairRequest r) {
   Serial.printf("[net] pairing with %s\n", url.c_str());
   int code = http.POST(payload);
   String resp = http.getString();
+  String netErr = code < 0 ? http.errorToString(code) : String("");
   http.end();
-
-  if (code == 200) {
-    JsonDocument doc;
-    if (deserializeJson(doc, resp) || !doc["secret"].is<const char *>()) {
-      setPairStatus("Unexpected reply from server");
-      return;
-    }
-    stopWs();
-    srv.host = r.host;
-    srv.port = r.port;
-    srv.tls = r.tls;
-    srv.insecure = r.insecure;
-    srv.secret = doc["secret"].as<String>();
-    store::saveServer(srv);
-    timekeep::set(doc["time"] | 0, TS_SERVER);
-    MeterConfig c;
-    String err;
-    if (parseConfig(doc["config"]["cfg"], c, err)) {
-      c.ver = doc["config"]["ver"] | 0;
-      control::applyConfig(c);
-    }
-    outbox::clear();  // old items belong to a previous pairing
-    {
-      StateLock l;
-      g.paired = true;
-      g.unauthorized = false;
-      g.offlineSinceMs = 0;
-    }
-    everOnline = false;
-    led::flash(led::FLASH_PAIRED);
-    setPairStatus("ok");
-    Serial.println("[net] paired");
+  JsonDocument doc;
+  if (code == 200 && deserializeJson(doc, resp)) {
+    setPairStatus("Unexpected reply from server");
     return;
   }
-  String msg;
-  if (code == 404) msg = "Pairing code is wrong or expired. Make a new one on the server.";
-  else if (code == 409) msg = "This meter is still paired on the server. Remove it there first.";
-  else if (code == 429) msg = "Too many attempts. Wait a minute.";
-  else if (code < 0) msg = "Cannot reach server: " + http.errorToString(code);
-  else msg = "Server replied HTTP " + String(code);
-  setPairStatus(msg);
+  applyPairResult(code, doc.as<JsonObject>(), r, netErr);
 }
 
 // ------------------------------------------------------------------ outbox flush
@@ -349,10 +404,10 @@ static void flushOutbox() {
   if (!outbox::count()) return;
   if (awaitingAck && millis() - sentAtMs < ACK_TIMEOUT_MS) return;
   std::vector<outbox::Item> items;
-  outbox::nextBatch(items, OUTBOX_BATCH_MAX);
+  outbox::nextBatch(items, leafMode ? MESH_BATCH_MAX : OUTBOX_BATCH_MAX);
   if (items.empty()) return;
   if (items[0].kind == outbox::EVT) {
-    ws.sendTXT(items[0].json);
+    txt(items[0].json);
   } else {
     String msg = "{\"t\":\"tel\",\"items\":[";
     for (size_t i = 0; i < items.size(); i++) {
@@ -360,7 +415,7 @@ static void flushOutbox() {
       msg += items[i].json;
     }
     msg += "]}";
-    ws.sendTXT(msg);
+    txt(msg);
   }
   sentMaxSeq = items.back().seq;
   awaitingAck = true;
@@ -414,7 +469,14 @@ static void markOffline() {
 static void sendInfo() {
   JsonDocument doc;
   doc["t"] = "info";
-  doc["ip"] = WiFi.localIP().toString();
+  doc["ip"] = ipAddress();
+  doc["link"] = linkMode();
+  if (leafMode) {
+    doc["gateway"] = mesh::gatewayId();
+    doc["mesh_ch"] = mesh::channel();
+  } else {
+    doc["leaves"] = mesh::leafCount();
+  }
   doc["ssid"] = WiFi.SSID();
   doc["rssi"] = WiFi.RSSI();
   doc["mac"] = WiFi.macAddress();
@@ -489,7 +551,7 @@ static void handleCommand(JsonObject m) {
     sendInfo();
   } else if (!strcmp(c, "remove")) {
     cmdAck(ref, true, nullptr);
-    ws.loop();
+    if (!leafMode) ws.loop();
     delay(200);
     sys::factoryReset("removed by server");
     return;
@@ -500,7 +562,7 @@ static void handleCommand(JsonObject m) {
   cmdAck(ref, ok, err);
 }
 
-static void handleMessage(uint8_t *payload, size_t len) {
+static void handleMessage(const char *payload, size_t len) {
   JsonDocument doc;
   if (deserializeJson(doc, payload, len)) return;
   JsonObject m = doc.as<JsonObject>();
@@ -542,6 +604,8 @@ static void handleMessage(uint8_t *payload, size_t len) {
     handleCommand(m);
   } else if (!strcmp(t, "pong")) {
     awaitingPong = false;
+  } else if (!strcmp(t, "link_key")) {
+    store::setLinkKey(m["key"] | "");  // needed to talk through the mesh later
   } else if (!strcmp(t, "bye")) {
     int code = m["code"] | 0;
     if (code == 4403) {
@@ -551,6 +615,24 @@ static void handleMessage(uint8_t *payload, size_t len) {
       StateLock l;
       g.unauthorized = true;
     }
+  }
+}
+
+void meshToServer(const char *json, size_t len) {
+  if (!leafMode && wsConnected) ws.sendTXT((uint8_t *)json, len);
+}
+
+void meshDeliver(const char *json, size_t len) { handleMessage(json, len); }
+
+void meshChannel(uint8_t ch) {
+  // Our hotspot must use the same radio channel as the gateway (single radio).
+  if (g.apActive) {
+    uint8_t cur;
+    wifi_second_chan_t second;
+    esp_wifi_get_channel(&cur, &second);
+    if (cur != ch) WiFi.softAP(apSsid().c_str(), store::apPassword().c_str(), ch);
+  } else {
+    esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
   }
 }
 
@@ -570,9 +652,21 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
       reconnectMs = min<uint32_t>(reconnectMs * 2, 60000);
       ws.setReconnectInterval(reconnectMs + (esp_random() % 1000));
       break;
-    case WStype_TEXT:
-      handleMessage(payload, len);
+    case WStype_TEXT: {
+      // Messages for our mesh leaves are forwarded as they are (they are signed by the server).
+      JsonDocument filter, head;
+      filter["t"] = true;
+      filter["d"] = true;
+      if (!deserializeJson(head, (const char *)payload, len, DeserializationOption::Filter(filter))) {
+        const char *t = head["t"] | "";
+        if (!strcmp(t, "via") || !strcmp(t, "via_pair_res")) {
+          mesh::toLeaf((const char *)payload, len, head["d"] | "", t[3] == '_');
+          break;
+        }
+      }
+      handleMessage((const char *)payload, len);
       break;
+    }
     default:
       break;
   }
@@ -592,6 +686,28 @@ static void startWs() {
   }
   wsStarted = true;
   Serial.printf("[net] connecting to %s://%s:%u/ws/device\n", srv.tls ? "wss" : "ws", srv.host.c_str(), srv.port);
+}
+
+static void onlineWork() {
+  uint32_t now = millis();
+  if (now - lastPingMs > WS_PING_INTERVAL_MS) {
+    txt("{\"t\":\"ping\"}");
+    lastPingMs = pingSentMs = now;
+    awaitingPong = true;
+  }
+  if (awaitingPong && now - pingSentMs > WS_PONG_TIMEOUT_MS) {
+    Serial.println("[net] no pong, reconnecting");
+    awaitingPong = false;
+    if (leafMode) {
+      mesh::leafReset();  // find a (maybe other) gateway
+      helloDone = linkWasUp = false;
+    } else {
+      ws.disconnect();
+    }
+    return;
+  }
+  flushOutbox();
+  if (control::stateVersion() != lastStateVer && now - lastStateSentMs > 500) sendState();
 }
 
 static void serverLoop() {
@@ -618,23 +734,85 @@ static void serverLoop() {
     return;
   }
 
-  uint32_t now = millis();
-  if (now - lastPingMs > WS_PING_INTERVAL_MS) {
-    ws.sendTXT("{\"t\":\"ping\"}");
-    lastPingMs = pingSentMs = now;
-    awaitingPong = true;
+  onlineWork();
+}
+
+// Leaf: same protocol, through a gateway meter.
+static void leafLoop() {
+  bool paired, unauthorized;
+  {
+    StateLock l;
+    paired = g.paired;
+    unauthorized = g.unauthorized;
   }
-  if (awaitingPong && now - pingSentMs > WS_PONG_TIMEOUT_MS) {
-    Serial.println("[net] no pong, reconnecting");
-    awaitingPong = false;
-    ws.disconnect();
+  if (!paired || unauthorized) {
+    setNet(NET_NOT_PAIRED);
     return;
   }
-  flushOutbox();
-  if (control::stateVersion() != lastStateVer && now - lastStateSentMs > 500) sendState();
+  uint32_t now = millis();
+  if (!mesh::leafLinked()) {
+    linkWasUp = helloDone = false;
+    setNet(NET_CONNECTING);
+    markOffline();
+    return;
+  }
+  if (!linkWasUp) {
+    linkWasUp = true;
+    awaitingAck = awaitingPong = false;
+    lastPingMs = helloSentMs = now;
+    sendHello();
+  }
+  if (!helloDone) {
+    setNet(NET_CONNECTING);
+    markOffline();
+    if (now - helloSentMs > 10000) {  // no welcome yet: say hello again
+      helloSentMs = now;
+      sendHello();
+    }
+    return;
+  }
+  onlineWork();
 }
 
 // ------------------------------------------------------------------ task
+
+// ------------------------------------------------------------------ mesh mode (Auto role)
+
+static void enterLeaf() {
+  Serial.println("[net] no Wi-Fi: switching to mesh (leaf)");
+  leafMode = true;
+  leafSinceMs = millis();
+  stopWs();
+  helloDone = linkWasUp = false;
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect();
+  startAp();  // the meter's own page stays reachable on its hotspot
+  mesh::setGateway(false);
+  mesh::startLeaf();
+}
+
+static void exitLeaf() {
+  Serial.println("[net] leaving mesh: trying Wi-Fi again");
+  mesh::stopLeaf();
+  leafMode = false;
+  helloDone = linkWasUp = false;
+  WiFi.setAutoReconnect(true);
+  if (store::hasWifi()) WiFi.begin(store::wifiSsid().c_str(), store::wifiPass().c_str());
+  wifiDownSinceMs = lastWifiRetryMs = millis();
+}
+
+static void modeLoop() {
+  bool meshAllowed = store::meshRole() == 0;  // Auto
+  uint32_t now = millis();
+  if (!leafMode) {
+    bool wifiGone = store::hasWifi() && WiFi.status() != WL_CONNECTED && wifiDownSinceMs &&
+                    now - wifiDownSinceMs > MESH_LEAF_AFTER_MS;
+    bool configured = store::hasAdmin() && (store::meshOnly() || store::hasWifi());
+    if (meshAllowed && configured && !testing && (store::meshOnly() || wifiGone)) enterLeaf();
+  } else if (!meshAllowed || (store::hasWifi() && !store::meshOnly() && now - leafSinceMs > MESH_WIFI_RETRY_MS)) {
+    exitLeaf();
+  }
+}
 
 void begin() {
   pairLock = xSemaphoreCreateMutex();
@@ -654,12 +832,14 @@ void begin() {
     startAp();
     setNet(NET_SETUP_AP);
   }
+  mesh::begin();
 }
 
 void task(void *) {
   for (;;) {
     sys::heartbeat(sys::HB_NET);
-    wifiLoop();
+    modeLoop();
+    if (!leafMode) wifiLoop();
     bool pending;
     PairRequest r;
     xSemaphoreTake(pairLock, portMAX_DELAY);
@@ -670,14 +850,24 @@ void task(void *) {
     }
     xSemaphoreGive(pairLock);
     if (pending) doPair(r);
+    if (meshPairPending && (int32_t)(millis() - meshPairDeadline) > 0) {
+      meshPairPending = false;
+      setPairStatus("The gateway meter did not answer. Try again.");
+    }
 
-    if (WiFi.status() == WL_CONNECTED) {
+    mesh::loop();
+    sys::heartbeat(sys::HB_NET);  // a gateway search can take a few seconds
+    if (leafMode) {
+      leafLoop();
+    } else if (WiFi.status() == WL_CONNECTED) {
       serverLoop();
     } else {
       if (wsStarted) stopWs();
       helloDone = false;
       markOffline();
     }
+    // Auto role: an online meter also relays for nearby leaf meters.
+    mesh::setGateway(!leafMode && helloDone && WiFi.status() == WL_CONNECTED && store::meshRole() == 0);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }

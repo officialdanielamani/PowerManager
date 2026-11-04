@@ -158,7 +158,7 @@ static void hStatus() {  // public: tells the page which screen to show
   d["device_id"] = store::deviceId();
   d["fw"] = FW_VERSION;
   d["admin"] = store::hasAdmin();
-  d["wifi"] = store::hasWifi();
+  d["wifi"] = store::hasWifi() || store::meshOnly();
   d["auth"] = store::hasAdmin() && authed();
   StateLock l;
   d["paired"] = g.paired && !g.unauthorized;
@@ -245,6 +245,7 @@ static void hWifi() {
     net::tryWifi(ssid, pass);  // first setup: test while the setup AP stays on
     return sendOk("Connecting…");
   }
+  store::setMeshOnly(false);
   store::setWifi(ssid, pass);  // changing networks later: save and restart
   sendOk("Saved. Restarting…");
   sys::reboot(1500);
@@ -261,6 +262,25 @@ static void hWifiStatus() {
   sendJson(200, d);
 }
 
+// First setup without Wi-Fi: this meter always talks through a gateway meter (mesh).
+static void hMeshOnly() {
+  if (!requireAuth()) return;
+  store::setMeshOnly(true);
+  store::setMeshRole(0);
+  sendOk("Mesh only. Restarting…");
+  sys::reboot(1500);
+}
+
+static void hMeshRole() {
+  if (!requireAuth()) return;
+  JsonDocument b;
+  if (!body(b)) return;
+  String role = b["role"] | "auto";
+  store::setMeshRole(role == "wifi" ? 1 : 0);
+  sendOk("Saved. Restarting…");
+  sys::reboot(1500);
+}
+
 static void hState() {
   if (!requireAuth()) return;
   JsonDocument d;
@@ -273,6 +293,11 @@ static void hState() {
   d["rssi"] = net::rssi();
   d["ssid"] = store::wifiSsid();
   d["server"] = net::serverHost();
+  d["link"] = net::linkMode();
+  d["gateway"] = net::meshGateway();
+  d["leaves"] = net::meshLeaves();
+  d["role"] = store::meshRole() == 0 ? "auto" : "wifi";
+  d["mesh_only"] = store::meshOnly();
   d["outbox"] = net::outboxCount();
   d["next_reset"] = control::nextReset();
   d["kwh"] = serialized(String(control::sessionKwh(), 4));
@@ -366,7 +391,8 @@ static void hPair() {
   if (!r.port) r.port = r.tls ? 443 : 80;
   if (!r.host.length() || r.host.indexOf('/') >= 0) return sendErr(400, "Server address is required (no http://)");
   if (r.code.length() != 8) return sendErr(400, "Pairing code must be 8 characters");
-  if (WiFi.status() != WL_CONNECTED) return sendErr(409, "Wi-Fi is not connected yet");
+  if (WiFi.status() != WL_CONNECTED && net::linkMode() != "mesh")
+    return sendErr(409, "Not connected yet (no Wi-Fi and no gateway meter found)");
   net::requestPair(r);
   sendOk();
 }
@@ -428,6 +454,8 @@ void begin() {
   server.on("/api/wifi/scan", HTTP_GET, hScan);
   server.on("/api/wifi", HTTP_POST, hWifi);
   server.on("/api/wifi/status", HTTP_GET, hWifiStatus);
+  server.on("/api/wifi/meshonly", HTTP_POST, hMeshOnly);
+  server.on("/api/mesh", HTTP_POST, hMeshRole);
   server.on("/api/state", HTTP_GET, hState);
   server.on("/api/relay", HTTP_POST, hRelay);
   server.on("/api/send_now", HTTP_POST, hSendNow);

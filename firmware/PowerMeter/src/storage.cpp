@@ -187,6 +187,32 @@ uint32_t nextSeq() {
   return v;
 }
 
+String linkKey() { return pm.getString("lkey", ""); }
+void setLinkKey(const String &k) {
+  if (pm.getString("lkey", "") != k) pm.putString("lkey", k);
+}
+
+static uint32_t sNonce = 0, sNonceReserved = 0;
+uint32_t nextLinkNonce() {
+  xSemaphoreTake(sSeqLock, portMAX_DELAY);
+  if (!sNonceReserved) sNonce = sNonceReserved = pm.getUInt("lnres", 0);
+  sNonce++;
+  if (sNonce >= sNonceReserved) {
+    sNonceReserved = sNonce + 100;
+    pm.putUInt("lnres", sNonceReserved);
+  }
+  uint32_t v = sNonce;
+  xSemaphoreGive(sSeqLock);
+  return v;
+}
+
+uint64_t linkDownLast() { return pm.getULong64("ldn", 0); }
+void setLinkDownLast(uint64_t n) { pm.putULong64("ldn", n); }
+uint8_t meshRole() { return pm.getUChar("mrole", 0); }
+void setMeshRole(uint8_t r) { pm.putUChar("mrole", r); }
+bool meshOnly() { return pm.getBool("monly", false); }
+void setMeshOnly(bool on) { pm.putBool("monly", on); }
+
 void factoryReset() {
   pm.clear();  // identity + AP password stay in "ident"
 }

@@ -81,3 +81,9 @@ Open the Serial Monitor (115200). It shows the device ID and the **setup Wi-Fi n
 | Very dim red | Disabled by the server |
 
 The full table is in `docs/firmware.md` §9.
+
+## 6. Mesh (no Wi-Fi at the meter)
+
+Meters can reach the server through a nearby meter that is on Wi-Fi (ESP-NOW). Same firmware; default role **Auto**
+(Wi-Fi first, mesh after 90 s without Wi-Fi, online meters relay for others). Settings → Mesh on the meter's page, or
+*Use mesh only* during setup. Details and a test plan: [`../docs/mesh.md`](../docs/mesh.md).

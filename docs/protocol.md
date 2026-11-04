@@ -261,3 +261,18 @@ The device checks every value. If anything is out of range it rejects the **whol
 
 - `proto` = 1 for this document. A breaking change bumps it; the server supports the current and previous version.
 - New optional fields may be added without a bump; both sides ignore unknown fields.
+
+## 6. Mesh (gateway-relayed leaves)
+
+See [mesh.md](mesh.md). Extra messages on a **gateway's** WebSocket:
+
+| Direction | Message | Meaning |
+|---|---|---|
+| gateway → server | `{"t":"via","d":<leaf>,"n":<uint>,"h":<hmac>,"m":"<json>"}` | One protocol message of leaf `d`, signed by the leaf |
+| server → gateway | same shape | One protocol message for leaf `d`, signed by the server (`n` = ms counter) |
+| gateway → server | `{"t":"via_pair","body":{…pair body…}}` | Pair a leaf (body as for `/api/v1/pair`) |
+| server → gateway | `{"t":"via_pair_res","d":<leaf>,"code":<http status>,"resp":{…}}` | Pairing answer for the leaf |
+| server → meter (direct only) | `{"t":"link_key","key":"<32 hex>"}` | The meter's mesh signing key (also in the pairing answer as `link_key`) |
+
+`h` = first 128 bits (hex) of HMAC-SHA256(link_key, `"<d>|<n>|<m>"`). The server drops messages with a bad signature or a counter
+that is not higher than the last one; the leaf does the same for downlink messages.

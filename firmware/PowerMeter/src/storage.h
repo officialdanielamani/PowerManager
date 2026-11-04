@@ -46,6 +46,17 @@ void saveDisabled(bool disabled);
 
 uint32_t nextSeq();  // strictly increasing, survives reboot
 
+// Mesh
+String linkKey();                 // HMAC key for mesh messages (from the server)
+void setLinkKey(const String &k);
+uint32_t nextLinkNonce();         // uplink counter, strictly increasing, survives reboot
+uint64_t linkDownLast();          // highest downlink counter accepted (replay protection)
+void setLinkDownLast(uint64_t n);
+uint8_t meshRole();               // 0 = Auto (Wi-Fi first, mesh fallback, relay for others), 1 = Wi-Fi only
+void setMeshRole(uint8_t r);
+bool meshOnly();                  // set up without Wi-Fi: always a mesh leaf
+void setMeshOnly(bool on);
+
 void factoryReset();  // wipe everything except identity + AP password
 
 }  // namespace store

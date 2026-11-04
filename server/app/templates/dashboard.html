@@ -81,7 +81,8 @@
           {% if not m.synced and not m.disabled %}<span class="badge text-bg-info" data-field="sync">Pending sync</span>{% endif %}
         </div>
       </div>
-      <div class="card-footer small text-body-secondary">Last seen <span data-field="last_seen">{{ m.last_seen }}</span></div>
+      <div class="card-footer small text-body-secondary d-flex">Last seen&nbsp;<span data-field="last_seen">{{ m.last_seen }}</span>
+        <span class="ms-auto" data-field="via-badge">{% if m.via %}<i class="bi bi-diagram-3"></i> via {{ m.via }}{% endif %}</span></div>
     </div>
   </div>
   {% endfor %}
