@@ -23,6 +23,7 @@ struct MeterConfig {
   uint32_t dur_min = 1440;
   bool auto_renew = false;
   float kwh_max = 0;  // channel 0; 0 = unlimited
+  bool kwh_end = true; // true: reaching kwh_max ends the session (relay off); false: warning only
   float amp_max = 0;  // channel 0; 0 = disabled
 };
 
@@ -39,6 +40,7 @@ struct SessionState {
   uint32_t startMs = 0;   // millis() at start (used while start == 0)
   double e0 = 0;          // energy register at session start
   SessStatus status = SESS_ACTIVE;
+  bool over = false;      // kWh limit passed while kwh_end is off (warned once, power stays on)
 };
 
 struct AppState {

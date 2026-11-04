@@ -183,7 +183,29 @@ def h_tel(conn, device, msg):
                 {"i": r["ch"], **{f: r[f] for f in FIELDS}} for r in rows]}
     if newest is not None and newest["ch"] and newest["ts"] >= (device.last_reading or {}).get("ts", 0):
         device.last_reading = newest
+    _session_progress(device, items)
     conn.send({"t": "ack", "last_seq": device.last_seq, "time": now()})
+
+
+def _session_progress(device, items):
+    """Telemetry items carry {"s": {"sid", "kwh"}}: keep "session used" current between state messages."""
+    latest = None
+    for item in items[:200]:
+        if isinstance(item, dict) and isinstance(item.get("s"), dict) and isinstance(item["s"].get("sid"), int):
+            latest = item["s"]
+    if latest is None:
+        return
+    kwh = _f(latest.get("kwh"))
+    st = dict(device.last_state or {})
+    sess = dict(st.get("sess") or {})
+    if kwh is None or sess.get("sid") not in (None, latest["sid"]):
+        return  # older session than the one we know: ignore
+    sess["sid"], sess["kwh"] = latest["sid"], kwh
+    st["sess"] = sess
+    device.last_state = st
+    s = Session.query.filter_by(device_fk=device.id, gen=device.pair_gen, sid=latest["sid"]).first()
+    if s is not None and s.ended_at is None:
+        s.kwh_used = kwh
 
 
 def h_evt(conn, device, msg):
@@ -307,7 +329,12 @@ def process_event(device, ev):
     elif e == "ac_restored":
         incidents.close_incident(device.id, "power", ev.ts, event=ev, estimated=est)
     elif e == "quota":
-        notify.notify(device, "kwh_exceeded", f"Session kWh limit reached ({d.get('kwh', '?')} kWh)")
+        if d.get("end", True):
+            notify.notify(device, "kwh_exceeded",
+                          f"Session kWh limit reached ({d.get('kwh', '?')} kWh): session ended, power off")
+        else:
+            notify.notify(device, "kwh_exceeded",
+                          f"Session kWh limit exceeded ({d.get('kwh', '?')} kWh): power kept on")
     elif e == "session_start":
         sid = d.get("sid")
         if isinstance(sid, int):

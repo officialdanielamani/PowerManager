@@ -52,7 +52,8 @@ var PM = (function () {
   }
 
   var STATUS = {active: ['success', 'Active'], quota: ['warning', 'kWh limit reached'], expired: ['warning', 'Session ended'],
-                tripped: ['danger', 'Over-current trip'], unknown: ['secondary', 'No data yet']};
+                tripped: ['danger', 'Over-current trip'], unknown: ['secondary', 'No data yet'],
+                over: ['warning', 'Over kWh limit (power on)']};
   var INCIDENT = {power: '<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>',
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>'};
@@ -112,9 +113,55 @@ var PM = (function () {
       var rt = document.getElementById('btnResetTrip');
       if (rt) rt.classList.toggle('d-none', m.status !== 'tripped');
     }
+    // ---- session timer (ticks every second between live updates)
+    var lastLive = opt.initial, clockOffset = 0;
+    function dur(sec) {
+      sec = Math.max(0, Math.floor(sec));
+      var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+      if (d) return d + ' d ' + h + ' h ' + m + ' min';
+      if (h) return h + ' h ' + m + ' min ' + s + ' sec';
+      return m + ' min ' + s + ' sec';
+    }
+    function tick() {
+      var m = lastLive, now = Date.now() / 1000 + clockOffset;
+      var ended = m.status === 'quota' || m.status === 'expired' || !!m.sess_end_ts;
+      set(document.body, 'sess_started', function (el) { el.textContent = m.sess_start || '–'; });
+      set(document.body, 'sess_elapsed', function (el) {
+        el.textContent = m.sess_start_ts ? dur((m.sess_end_ts || now) - m.sess_start_ts) + (ended ? ' (ended)' : '') : '–';
+      });
+      set(document.body, 'sess_left', function (el) {
+        if (ended) el.textContent = 'Session ended';
+        else if (m.sess_mode === 'none') el.textContent = 'No time limit';
+        else if (m.next_reset_ts) el.textContent = dur(m.next_reset_ts - now);
+        else el.textContent = '– (meter clock not set)';
+      });
+    }
+    var origOnLive = onLive;
+    onLive = function (m) { lastLive = m; if (m.server_time) clockOffset = m.server_time - Date.now() / 1000; origOnLive(m); tick(); };
+    setInterval(tick, 1000);
+
     onLive(opt.initial);
     poll(opt.live, 5000, onLive);
     if (opt.action) bindActions(opt.action);
+
+    // ---- Get Data Now: ask the meter for a reading and wait for it to arrive
+    var gd = document.getElementById('btnGetData');
+    if (gd) gd.addEventListener('click', function () {
+      var before = lastLive.reading_ts || 0, html = gd.innerHTML;
+      gd.disabled = true; gd.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Waiting…';
+      function done(msg, kind) { gd.disabled = false; gd.innerHTML = html; if (msg) toast(msg, kind); }
+      post(opt.refresh, {}).then(function (r) {
+        if (!r.ok) return done(r.message || r.error, 'danger');
+        var tries = 0;
+        (function check() {
+          fetch(opt.live, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (m) {
+            if ((m.reading_ts || 0) > before) { onLive(m); return done('Latest data received', 'success'); }
+            if (++tries >= 15) return done('The meter did not answer yet; it will show up when it does.', 'warning');
+            setTimeout(check, 1000);
+          }).catch(function () { setTimeout(check, 1000); });
+        })();
+      });
+    });
 
     // history
     var state = {range: '1d', series: 'w', from: '', to: '', ch: 0};

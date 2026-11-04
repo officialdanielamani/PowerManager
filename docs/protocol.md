@@ -139,7 +139,8 @@ Commands for an offline device are **queued** on the server and sent on reconnec
   "items": [
     {
       "seq": 10233, "ts": 1762170000, "tv": 1,
-      "ch": [ {"i":0, "v":230.1, "a":4.21, "w":960.2, "pf":0.98, "hz":50.0, "e":12.345} ]
+      "ch": [ {"i":0, "v":230.1, "a":4.21, "w":960.2, "pf":0.98, "hz":50.0, "e":12.345} ],
+      "s": {"sid":17, "kwh":1.2345}
     }
   ]
 }
@@ -149,6 +150,7 @@ Commands for an offline device are **queued** on the server and sent on reconnec
 |-------|----------------|
 | `seq` | Strictly increasing per device, survives reboot (kept in NVS, stored in blocks so it is not written every time). The server stores each `seq` once → resending is safe. After a factory reset `seq` starts again at 1; the server handles this because every (re)pairing starts a new *pairing generation*. |
 | `ts` | Time of the reading |
+| `s` | Session progress: `{"sid": 17, "kwh": 1.2345}` (kWh used in the current session). Keeps the server's "session used" current; `state` is only sent on changes. |
 | `tv` | 1 = clock was valid. 0 = the device had no valid time; then `ts` holds **uptime seconds** and the item also has `boot`. The server fixes the time using the `hello` (`up` + `ts` of that boot) when possible, otherwise marks the item `time_estimated`. |
 | `v` V, `a` A, `w` W, `pf` 0–1, `hz` Hz, `e` kWh | PZEM values. `e` is the PZEM's total energy register. |
 | channel missing / `null` values | Sensor not responding (e.g. AC lost: the PZEM measurement side is powered from AC) |
@@ -166,8 +168,8 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `e` | Meaning |
 |-----|---------|
 | `overcurrent` | A > `amp_max` → relay OFF, latched |
-| `quota` | Session kWh ≥ `kwh_max` → relay OFF |
-| `session_end` | Session ended (`reason`: quota/expired/manual) |
+| `quota` | Session kWh ≥ `kwh_max`. `end: true` → the session ends now (followed by `session_end` reason `quota`), relay OFF. `end: false` → warning only, power stays on (sent once per session) |
+| `session_end` | Session ended (`reason`: quota/expired/manual). Sent **once** per session: renewing a session that a limit already ended does not send another |
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch |
 | `ac_lost` / `ac_restored` | V < 50 V or PZEM not responding for 3 reads / back to normal |
@@ -193,7 +195,7 @@ Disconnect / reconnect notifications are produced **by the server** (from the WS
 }
 ```
 
-`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`.
+`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_end` off (power still on).
 
 ## 3. Config document
 
@@ -211,7 +213,7 @@ The server sends the whole config every time (no partial updates).
       "dur_min": 1440,
       "auto": true
     },
-    "ch": [ {"i":0, "kwh_max":2.0, "amp_max":10.2} ]
+    "ch": [ {"i":0, "kwh_max":2.0, "kwh_end":true, "amp_max":10.2} ]
   }
 }
 ```
@@ -225,6 +227,7 @@ The server sends the whole config every time (no partial updates).
 | `sess.dur_min` | 1–525600 | – | Duration mode; UI enters days/hours/minutes |
 | `sess.auto` | bool | false | |
 | `ch[].kwh_max` | 0–100000 | 0 | 0 = unlimited |
+| `ch[].kwh_end` | bool | true | true: reaching `kwh_max` **ends the session** (relay OFF until renewed). false: warning only (`quota` event once, `sess.over`), power stays on. Missing = true. |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |
 
 The device checks every value. If anything is out of range it rejects the **whole** config (`cfg_ack ok:false err:"<field>"`) and keeps the old one.

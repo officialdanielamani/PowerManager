@@ -132,6 +132,7 @@ function pollWifi(){api('/api/wifi/status').then(function(r){
  if(r.status=='connecting')return setTimeout(pollWifi,1500);$('wbtn').disabled=false;
  if(r.status=='ok'){$('wres').innerHTML='<div class="msg okm"><b>Connected!</b><br>Meter address on your network: <b>http://'+esc(r.ip)+'/</b> (or http://'+esc(r.mdns)+'/).<br>Write it down, switch your phone back to your Wi-Fi and open that address. This setup hotspot turns off in 5 minutes.</div><button onclick="route()">Continue here for now</button>'}
  else $('wres').innerHTML='<div class="msg err">Could not connect. Check the name and password.</div>'})}
+function dur(s){s=Math.max(0,Math.floor(s));var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?d+' d '+h+' h '+m+' min':h?h+' h '+m+' min '+(s%60)+' sec':m+' min '+(s%60)+' sec'}
 function fmt(e){if(!e)return'–';return new Date(e*1000).toLocaleString()}
 function n(v,d){return v==null?'–':Number(v).toFixed(d)}
 function pill(t,k){return'<span class="pill '+k+'">'+esc(t)+'</span>'}
@@ -142,7 +143,8 @@ function load(){api('/api/state').then(function(d){if(d._s==401)return route();i
  $('dTime').textContent=(d.time?fmt(d.time):'Clock not set')+' · time from '+d.time_src;
  var block=st.tripped||ss.status=='quota'||ss.status=='expired';$('bOn').disabled=block;$('bOn').title=block?'Blocked until the session is renewed / trip is reset':'';
  $('bTrip').classList.toggle('hide',!st.tripped);
- var status=st.tripped?pill('Over-current trip','bad'):ss.status=='quota'?pill('kWh limit reached','warn'):ss.status=='expired'?pill('Session ended','warn'):pill('Active','ok');
+ var status=st.tripped?pill('Over-current trip','bad'):ss.status=='quota'?pill('kWh limit reached','warn'):ss.status=='expired'?pill('Session ended','warn'):ss.over?pill('Over kWh limit (power on)','warn'):pill('Active','ok');
+ var now=d.time||0,ended=ss.status!='active',el=ss.start&&now?dur(now-ss.start):'–',left=ended?'Session ended':(d.cfg||{}).mode=='none'?'No time limit':(ss.next_reset&&now?dur(ss.next_reset-now):'–');
  var bal=ss.max>0?Math.max(0,ss.max-ss.kwh):null;
  $('dGrid').innerHTML=[['Relay',rl.on?'ON':'OFF'],['Voltage',r.ok?n(r.v,1)+' V':(st.ac?'–':'No AC')],['Current',r.ok?n(r.a,3)+' A':'–'],['Power',r.ok?n(r.w,1)+' W':'–'],['Power factor',r.ok?n(r.pf,2):'–'],['Frequency',r.ok?n(r.hz,1)+' Hz':'–'],['Session used',n(ss.kwh,3)+' kWh'],['Balance',bal==null?'∞':n(bal,3)+' kWh']]
   .map(function(x){return'<div class="stat"><small>'+x[0]+'</small><b>'+x[1]+'</b></div>'}).join('');

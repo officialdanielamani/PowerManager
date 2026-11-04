@@ -92,8 +92,10 @@ relay_on = want_on
 ```
 
 - **Over-current**: A > `amp_max` for 2 reads in a row → `tripped = true` (stored in NVS, survives reboot), relay OFF, event `overcurrent`.
-- **Quota**: `session_kwh = e_now − e_at_session_start ≥ kwh_max` → status `quota`, relay OFF, event.
-- **Session expiry**: `now ≥ next_reset` (needs valid time) → end session `expired`; if `auto` → start a new one at once; else relay OFF until `renew`.
+- **Quota**: `session_kwh = e_now − e_at_session_start ≥ kwh_max` → if `kwh_end` (default): session **ends** now (`quota` + `session_end` reason `quota`), status `quota`, relay OFF until renewed (manually, or by auto renew at the next scheduled reset). If `kwh_end` is off: `quota` event once + `sess.over`, power stays on.
+- **Session expiry**: `now ≥ next_reset` (needs valid time) → end session `expired` (unless a kWh limit already ended it); if `auto` → start a new one at once; else relay OFF until `renew`.
+- Every telemetry item carries the session progress `s: {sid, kwh}`, so the server's "session used" stays current between `state` messages.
+- The local dashboard shows **Time elapsed / Time left** for the session.
 - **No voltage**: PZEM no reply ×3 or V < 50 V → `ac_lost` event (relay state kept; there is no load power anyway).
 - **Tamper**: input change (debounced 200 ms) → event.
 - Session data (`sid`, `e_at_start`, `start`, `status`) is stored in NVS **only when it changes**, so there is no flash wear.

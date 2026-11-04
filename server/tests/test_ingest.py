@@ -114,3 +114,28 @@ def test_rollups_and_history(app, device):
 
 def test_energy_ignores_resets():
     assert rollup.energy_kwh([5.0, 5.5, 0.1, 0.4], prev_e=4.9) == pytest.approx(0.9)
+
+
+def test_session_progress_from_telemetry(app, device):
+    """Session kWh comes with every reading, not only with (rare) state messages."""
+    conn = FakeConn()
+    t = now() - 30
+    ingest.handle(conn, device, {"t": "evt", "seq": 1, "ts": t, "tv": 1, "e": "session_start", "sid": 4, "max": 2.0})
+    ingest.handle(conn, device, {"t": "state", "sess": {"sid": 4, "kwh": 0.1, "max": 2.0, "status": "active"}})
+    ingest.handle(conn, device, {"t": "tel", "items": [{**tel(2, t + 10, 5.0), "s": {"sid": 4, "kwh": 0.75}}]})
+    assert device.last_state["sess"]["kwh"] == 0.75
+    from app.models import Session
+    assert Session.query.filter_by(sid=4).one().kwh_used == 0.75
+    # telemetry from an older session is ignored
+    ingest.handle(conn, device, {"t": "tel", "items": [{**tel(3, t + 11, 5.1), "s": {"sid": 3, "kwh": 9.9}}]})
+    assert device.last_state["sess"]["kwh"] == 0.75
+
+
+def test_kwh_end_option_reaches_device(app, device):
+    with app.app_context():
+        form = {"report_s": "60", "sess_mode": "none", "kwh_max_0": "2", "amp_max_0": "0", "daily_at": "00:00"}
+        cfg, errors = devconfig.parse_form(form, device)            # checkbox not sent = unticked
+        assert not errors and devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_end"] is False
+        cfg, _ = devconfig.parse_form({**form, "kwh_end_0": "on"}, device)
+        assert devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_end"] is True
+        assert devconfig.to_device({"ch": [{"kwh_max": 1}]}, 1)["cfg"]["ch"][0]["kwh_end"] is True  # old cfg

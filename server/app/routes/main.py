@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, render_template, request
 from flask_login import current_user, login_required
 
 from ..extensions import db
-from ..models import Device, Incident, Notification
+from ..models import Device, Incident, Notification, Session, now
 from ..services import access, devconfig, hub, settings
 
 bp = Blueprint("main", __name__)
@@ -26,6 +26,14 @@ def meter_summary(d):
         status = "tripped"
     else:
         status = sess.get("status") or "unknown"
+        if status == "active" and sess.get("over"):
+            status = "over"  # kWh limit passed but "End session when kWh limit is reached" is off
+    # Current session for the timer: start from the meter, end from our session record.
+    cur = None
+    if isinstance(sess.get("sid"), int):
+        cur = Session.query.filter_by(device_fk=d.id, gen=d.pair_gen, sid=sess["sid"]).first()
+    sess_start = sess.get("start") or (cur.started_at if cur else None)
+    sess_end = cur.ended_at if cur and cur.ended_at else None
     return {
         "id": d.id,
         "device_id": d.device_id,
@@ -42,6 +50,13 @@ def meter_summary(d):
         "kwh_max": sess.get("max"),
         "status": status,
         "next_reset": settings.fmt_ts(sess.get("next_reset"), with_seconds=False) if sess.get("next_reset") else None,
+        "next_reset_ts": sess.get("next_reset"),
+        "sess_start_ts": sess_start,
+        "sess_start": settings.fmt_ts(sess_start) if sess_start else None,
+        "sess_end_ts": sess_end,
+        "sess_mode": (d.cfg or {}).get("sess_mode", "none"),
+        "server_time": now(),
+        "reading_ts": reading.get("ts"),
         "synced": d.synced,
         "ongoing": [i for i in ongoing if i != "offline"],
         "session_desc": devconfig.describe_session(d.cfg or {}),

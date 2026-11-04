@@ -16,7 +16,6 @@
     <button class="btn btn-sm btn-outline-secondary" data-action="relay_off"><i class="bi bi-toggle-off me-1"></i>Relay OFF</button>
     <button class="btn btn-sm btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
     <button class="btn btn-sm btn-outline-danger {{ '' if m.status == 'tripped' else 'd-none' }}" data-action="reset_trip" id="btnResetTrip"><i class="bi bi-shield-check me-1"></i>Reset Trip</button>
-    <button class="btn btn-sm btn-outline-secondary" data-action="send_now"><i class="bi bi-send me-1"></i>Send Data Now</button>
     {% endif %}
   </div>
 </div>
@@ -30,6 +29,9 @@
         <dt class="col-6">Relay</dt><dd class="col-6"><span class="badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span></dd>
         <dt class="col-6">kWh per session</dt><dd class="col-6">{% for c in cfg.get('ch', []) %}{{ c.kwh_max if c.kwh_max else 'Unlimited' }}{% if c.kwh_max %} kWh{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
         <dt class="col-6">Session restarts</dt><dd class="col-6">{{ m.session_desc }}{% if m.next_reset %}<br><span class="text-body-secondary">next: <span data-field="next_reset">{{ m.next_reset }}</span></span>{% endif %}</dd>
+        <dt class="col-6">Session started</dt><dd class="col-6" data-field="sess_started">–</dd>
+        <dt class="col-6">Time elapsed</dt><dd class="col-6 fw-semibold" data-field="sess_elapsed">–</dd>
+        <dt class="col-6">Time left</dt><dd class="col-6 fw-semibold" data-field="sess_left">–</dd>
         <dt class="col-6">Auto renew</dt><dd class="col-6">{{ 'Yes' if m.auto else 'No' }}</dd>
         <dt class="col-6">Max current</dt><dd class="col-6">{% for c in cfg.get('ch', []) %}{{ (c.amp_max ~ ' A') if c.amp_max else 'Off' }}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
         <dt class="col-6">Offline relay-off</dt><dd class="col-6">{{ ('after ' ~ cfg.offline_off_min ~ ' min') if cfg.get('offline_off') else 'Off' }}</dd>
@@ -40,7 +42,8 @@
     </div></div>
   </div>
   <div class="col-12 col-lg-7">
-    <div class="card h-100"><div class="card-header fw-semibold d-flex">Latest data <span class="ms-auto small text-body-secondary fw-normal" data-field="reading_at">{{ m.reading_at }}</span></div>
+    <div class="card h-100"><div class="card-header fw-semibold d-flex align-items-center gap-2">Latest data <span class="ms-auto small text-body-secondary fw-normal" data-field="reading_at">{{ m.reading_at }}</span>
+      {% if not d.removed_at %}<button class="btn btn-sm btn-outline-primary" id="btnGetData" title="Ask the meter for a reading now instead of waiting for its interval"><i class="bi bi-arrow-clockwise me-1"></i>Get Data Now</button>{% endif %}</div>
       <div class="card-body" id="latest">
         {# filled by JS (PM.renderLatest) #}
       </div>
@@ -133,14 +136,16 @@
     <div class="tab-pane fade" id="tabSessions">
       <div class="table-responsive">
       <table class="table table-sm">
-        <thead><tr><th>#</th><th>Started</th><th>Ended</th><th>kWh used</th><th>Limit</th><th>End reason</th></tr></thead>
+        <thead><tr><th>#</th><th>Started</th><th>Ended</th><th>Duration</th><th>kWh used</th><th>Limit</th><th>End reason</th><th></th></tr></thead>
         <tbody>
         {% for s in sessions %}
           <tr><td>{{ s.sid }}</td><td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
+            <td class="text-nowrap">{{ ((s.ended_at or now) - s.started_at)|duration if s.started_at else '–' }}</td>
             <td>{{ '%.3f'|format(s.kwh_used) }}</td><td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
-            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td></tr>
+            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
+            <td class="text-end">{% if s.started_at %}<a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('meters.export_csv', pk=d.id, session=s.id) }}" title="Power data of this session"><i class="bi bi-download"></i> CSV</a>{% endif %}</td></tr>
         {% else %}
-          <tr><td colspan="6" class="text-body-secondary">No sessions yet.</td></tr>
+          <tr><td colspan="8" class="text-body-secondary">No sessions yet.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -156,7 +161,8 @@ PM.meterInfo({
   live: "{{ url_for('meters.live', pk=d.id) }}",
   history: "{{ url_for('meters.history_json', pk=d.id) }}",
   csv: "{{ url_for('meters.export_csv', pk=d.id) }}",
-  action: "{{ url_for('meters.action', pk=d.id) }}",
+  action: {{ (url_for('meters.action', pk=d.id) if current_user.is_admin else none)|tojson }},
+  refresh: "{{ url_for('meters.refresh', pk=d.id) }}",
   initial: {{ m|tojson }}
 });
 </script>

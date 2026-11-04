@@ -126,7 +126,8 @@ class Meter:
         return None
 
     def new_session(self, auto, reason):
-        if self.sess and reason:
+        # like the firmware: a session stopped by its kWh/time limit was already ended
+        if self.sess and reason and self.sess.get("status", "active") == "active":
             self.event("session_end", sid=self.sess["sid"], reason=reason, kwh=round(self.session_kwh(), 4))
         self.st["sid"] = self.st.get("sid", 0) + 1
         self.sess = {"sid": self.st["sid"], "start": int(time.time()), "e0": self.st.get("e_total", 0.0),
@@ -160,6 +161,7 @@ class Meter:
                 "tripped": self.tripped, "tamper": self.tamper, "ac": self.ac,
                 "sess": {"sid": self.sess["sid"], "start": self.sess["start"], "kwh": round(self.session_kwh(), 4),
                          "max": self.ch_cfg().get("kwh_max", 0), "status": self.session_status(),
+                         **({"over": True} if self.sess.get("over") else {}),
                          **({"next_reset": nr} if nr else {})}}
 
     # ------------------------------------------------------------ control loop (1 s)
@@ -184,17 +186,24 @@ class Meter:
                 self.reading = None
             kmax = self.ch_cfg().get("kwh_max", 0)
             if kmax and self.session_status() == "active" and self.session_kwh() >= kmax:
-                self.sess["status"] = "quota"
-                self.event("quota", ch=0, kwh=round(self.session_kwh(), 4))
+                end = self.ch_cfg().get("kwh_end", True)
+                if end:  # hard limit: end the session now
+                    self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), end=True)
+                    self.event("session_end", sid=self.sess["sid"], reason="quota",
+                               kwh=round(self.session_kwh(), 4))
+                    self.sess["status"] = "quota"
+                elif not self.sess.get("over"):  # soft limit: warn once
+                    self.sess["over"] = True
+                    self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), end=False)
             nr = self.next_reset()
             if nr and time.time() >= nr and self.session_status() != "expired":
                 if (self.cfg().get("sess") or {}).get("auto"):
                     self.new_session(auto=True, reason="expired")
                 else:
-                    if self.session_status() == "active" or self.session_status() == "quota":
-                        self.sess["status"] = "expired"
+                    if self.session_status() == "active":
                         self.event("session_end", sid=self.sess["sid"], reason="expired",
                                    kwh=round(self.session_kwh(), 4))
+                    self.sess["status"] = "expired"
             if time.time() - self.last_report >= self.cfg().get("report_s", 60) * self.args.speed:
                 self.report()
             # like the firmware: send "state" only on real changes, not on every kWh tick
@@ -209,7 +218,8 @@ class Meter:
     def report(self):
         self.last_report = time.time()
         item = {"seq": self.next_seq(), "ts": int(time.time()), "tv": 1,
-                "ch": [self.reading] if self.reading else []}
+                "ch": [self.reading] if self.reading else [],
+                "s": {"sid": self.sess["sid"], "kwh": round(self.session_kwh(), 4)}}
         with self.lock:
             self.buffer.append({"t": "tel", "items": [item]})
             # keep at most N buffered entries (oldest dropped), like the device ring buffer

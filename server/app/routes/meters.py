@@ -289,6 +289,25 @@ def info(pk):
                            cfg=device.cfg or {}, channels=device.channels)
 
 
+_last_refresh = {}  # meter pk -> time of last "Get Data Now" (any user)
+
+
+@bp.post("/<int:pk>/refresh")
+@login_required
+def refresh(pk):
+    """Ask the meter for a fresh reading now ("Get Data Now"). Viewers may use it too."""
+    device = access.device_for_current_user(pk)
+    if not hub.is_online(device.id):
+        return jsonify(ok=False, error="offline", message="The meter is offline."), 409
+    if now() - _last_refresh.get(device.id, 0) < 5:
+        return jsonify(ok=True, message="Already requested")
+    _last_refresh[device.id] = now()
+    cmd, err = commands.issue(device, "send_now", {}, current_user)
+    if err:
+        return jsonify(ok=False, error=err, message="The meter is offline."), 409
+    return jsonify(ok=True, message="Requested")
+
+
 @bp.get("/<int:pk>/live")
 @login_required
 def live(pk):
@@ -342,8 +361,18 @@ def _fname_ts(ts):
 @login_required
 def export_csv(pk):
     device = access.device_for_current_user(pk, allow_removed=True)
-    start, end = _range_args(device)
     ch = request.args.get("ch", 0, type=int)
+    sess_id = request.args.get("session", type=int)
+    if sess_id:  # one session: from its start to its end (or now, if still running)
+        sess = db.session.get(Session, sess_id)
+        if sess is None or sess.device_fk != device.id or not sess.started_at:
+            abort(404)
+        start, end = sess.started_at, sess.ended_at or now()
+        source, header, rows = history.csv_rows(device.id, ch, start, end)
+        out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals] for ts, vals in rows]
+        hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
+        return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
+    start, end = _range_args(device)
     source, header, rows = history.csv_rows(device.id, ch, start, end)
     out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals]
            for ts, vals in rows]
