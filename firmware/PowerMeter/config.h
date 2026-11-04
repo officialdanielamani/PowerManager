@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.4.1"
 #define HW_NAME "esp32s3-supermini"
 #define HW_INFO "PZEM-004T 1Chn"   // free text shown in "Get meter info" on the server
 #define PROTO_VERSION 1
@@ -51,6 +51,10 @@
 #define LED_BRIGHTNESS 40         // 0-255, kept low on purpose
 
 // ---------------------------------------------------------------- timing
+#define STACK_NET 20480           // bytes; TLS handshake + JSON + mesh need room
+#define STACK_WEB 10240
+#define STACK_CONTROL 6144
+#define STACK_LED 3072
 #define CONTROL_TICK_MS 250       // tamper/relay loop; sensor read every 4th tick (1 s)
 #define TRIP_CONFIRM_READS 2      // over-current must be seen this many reads in a row
 #define VOLT_OUT_READS 3          // operating voltage: out of range for 3 reads (~3 s) to trigger
@@ -67,6 +71,7 @@
 // Auto role: Wi-Fi first; if Wi-Fi is down for MESH_LEAF_AFTER_MS the meter becomes a "leaf" and
 // reaches the server through a nearby "gateway" meter (any Auto meter that is online on Wi-Fi).
 // One hop only. See docs/mesh.md.
+#define MESH_ENABLE 1                                 // 0 = no ESP-NOW at all (behaves like firmware 0.3)
 #define MESH_LEAF_AFTER_MS (90UL * 1000UL)            // Wi-Fi down this long -> leaf
 #define MESH_WIFI_RETRY_MS (10UL * 60UL * 1000UL)     // leaf: try Wi-Fi again this often
 #define MESH_BEACON_MS 2000                            // gateway beacon interval

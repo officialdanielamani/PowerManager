@@ -69,14 +69,16 @@ static int8_t candRssi = -127;
 
 // ------------------------------------------------------------------ callbacks (Wi-Fi task)
 
+// Runs inside the Wi-Fi driver task, which has a small stack: copy into a static buffer (not on
+// the stack), queue it, and return. Everything else happens later in the net task.
+static RxFrame rxBuf;
 static void onRecv(const uint8_t *mac, const uint8_t *data, int len, int8_t rssi) {
-  if (!rxq || len < (int)HDR || len > (int)FRAME_MAX || data[0] != MAGIC) return;
-  RxFrame f;
-  memcpy(f.mac, mac, 6);
-  f.rssi = rssi;
-  f.len = len;
-  memcpy(f.data, data, len);
-  xQueueSend(rxq, &f, 0);  // drop if full
+  if (!rxq || !mac || !data || len < (int)HDR || len > (int)FRAME_MAX || data[0] != MAGIC) return;
+  memcpy(rxBuf.mac, mac, 6);
+  rxBuf.rssi = rssi;
+  rxBuf.len = len;
+  memcpy(rxBuf.data, data, len);
+  xQueueSend(rxq, &rxBuf, 0);  // copies; drop if full
 }
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
@@ -353,6 +355,10 @@ static void scanForGateway() {
 // ------------------------------------------------------------------ public
 
 void begin() {
+#if !MESH_ENABLE
+  Serial.println("[mesh] disabled in config.h (MESH_ENABLE 0)");
+  return;
+#endif
   if (ready) return;
   rxq = xQueueCreate(32, sizeof(RxFrame));
   if (esp_now_init() != ESP_OK) {

@@ -28,6 +28,30 @@ void reboot(uint32_t delayMs) {
 
 void heartbeat(uint8_t task) { beats[task] = millis(); }
 
+TaskHandle_t taskHandles[4] = {nullptr, nullptr, nullptr, nullptr};
+static const char *TASK_NAMES[4] = {"control", "led", "net", "web"};
+
+String stackReport() {
+  String s = "Stack free:";
+  for (int i = 0; i < 4; i++) {
+    if (!taskHandles[i]) continue;
+    // ESP-IDF reports the high-water mark in bytes
+    s += String(" ") + TASK_NAMES[i] + " " + String((unsigned)uxTaskGetStackHighWaterMark(taskHandles[i])) + " B";
+  }
+  return s;
+}
+
+void checkStacks() {
+  static uint32_t lastMs = 0;
+  if (millis() - lastMs < 60000) return;
+  lastMs = millis();
+  for (int i = 0; i < 4; i++) {
+    if (taskHandles[i] && uxTaskGetStackHighWaterMark(taskHandles[i]) < 1024)
+      Serial.printf("[system] WARNING: task %s has only %u B of stack left\n", TASK_NAMES[i],
+                    (unsigned)uxTaskGetStackHighWaterMark(taskHandles[i]));
+  }
+}
+
 void checkHeartbeats() {
   uint32_t now = millis();
   for (int i = 0; i < HB_COUNT; i++) {

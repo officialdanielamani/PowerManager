@@ -494,6 +494,7 @@ static void sendInfo() {
   doc["boot"] = store::bootCount();
   doc["outbox"] = outbox::count();
   doc["time_src"] = timekeep::sourceName();
+  doc["stack"] = sys::stackReport();
   if (battery::enabled()) {
     float v = battery::volts();
     doc["bat_v"] = serialized(String(v, 2));
@@ -802,8 +803,14 @@ static void exitLeaf() {
 }
 
 static void modeLoop() {
-  bool meshAllowed = store::meshRole() == 0;  // Auto
+#if !MESH_ENABLE
+  return;
+#endif
+  static uint32_t lastCheck = 0;
   uint32_t now = millis();
+  if (now - lastCheck < 2000) return;  // settings live in NVS: no need to read them every loop
+  lastCheck = now;
+  bool meshAllowed = store::meshRole() == 0;  // Auto
   if (!leafMode) {
     bool wifiGone = store::hasWifi() && WiFi.status() != WL_CONNECTED && wifiDownSinceMs &&
                     now - wifiDownSinceMs > MESH_LEAF_AFTER_MS;
@@ -867,7 +874,8 @@ void task(void *) {
       markOffline();
     }
     // Auto role: an online meter also relays for nearby leaf meters.
-    mesh::setGateway(!leafMode && helloDone && WiFi.status() == WL_CONNECTED && store::meshRole() == 0);
+    static uint8_t role = store::meshRole();  // changing the role restarts the meter
+    mesh::setGateway(!leafMode && helloDone && WiFi.status() == WL_CONNECTED && role == 0);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }

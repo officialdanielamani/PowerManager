@@ -53,6 +53,7 @@ static void printBanner() {
   static const char *NET[] = {"setup", "Wi-Fi connecting", "not paired", "server offline", "online"};
   Serial.printf(" Status: %s   Boot #%u   %u item(s) waiting to send\n", NET[st],
                 (unsigned)store::bootCount(), outbox::count());
+  Serial.printf(" Free heap %u B, lowest %u B. %s\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), sys::stackReport().c_str());
   Serial.println(" Type 'info' + Enter to show this again.");
   Serial.println("==============================================");
 }
@@ -76,10 +77,10 @@ void setup() {
 
   printBanner();
 
-  xTaskCreatePinnedToCore(control::task, "control", 6144, nullptr, 3, nullptr, 1);
-  xTaskCreatePinnedToCore(led::task, "led", 3072, nullptr, 1, nullptr, 1);
-  xTaskCreatePinnedToCore(net::task, "net", 12288, nullptr, 2, nullptr, 0);  // TLS needs stack
-  xTaskCreatePinnedToCore(web::task, "web", 8192, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(control::task, "control", STACK_CONTROL, nullptr, 3, &sys::taskHandles[0], 1);
+  xTaskCreatePinnedToCore(led::task, "led", STACK_LED, nullptr, 1, &sys::taskHandles[1], 1);
+  xTaskCreatePinnedToCore(net::task, "net", STACK_NET, nullptr, 2, &sys::taskHandles[2], 0);  // TLS needs stack
+  xTaskCreatePinnedToCore(web::task, "web", STACK_WEB, nullptr, 1, &sys::taskHandles[3], 0);
 }
 
 void loop() {
@@ -96,6 +97,7 @@ void loop() {
     pressedMs = 0;
   }
   sys::checkHeartbeats();
+  sys::checkStacks();
 
   // Serial command "info" prints the banner again.
   static String line;
