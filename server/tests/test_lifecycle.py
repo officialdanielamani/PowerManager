@@ -186,3 +186,16 @@ def test_meter_info_is_stored(app):
         ingest.handle(FakeConn(), d, {"t": "info", "ip": "192.168.1.57", "heap": 180000, "bat_v": "4.05",
                                       "bat_pct": 83, "hw_info": "PZEM-004T 1Chn", "evil": "x"})
         assert d.last_info["ip"] == "192.168.1.57" and "evil" not in d.last_info and d.last_info_at
+
+
+def test_telegram_token_is_write_only(app, admin):
+    from app.services import settings
+    page = admin.get("/settings/?tab=notifications").get_data(as_text=True)
+    admin.post("/settings/notifications", data={"telegram_enabled": "on", "telegram_bot_token": "123:SECRET"})
+    assert settings.get("telegram_bot_token") == "123:SECRET"
+    page = admin.get("/settings/?tab=notifications").get_data(as_text=True)
+    assert "123:SECRET" not in page and "saved" in page
+    admin.post("/settings/notifications", data={"telegram_enabled": "on", "telegram_bot_token": ""})
+    assert settings.get("telegram_bot_token") == "123:SECRET"  # empty = keep
+    admin.post("/settings/notifications", data={"telegram_bot_token": "", "telegram_clear": "on"})
+    assert settings.get("telegram_bot_token") == ""

@@ -11,6 +11,7 @@ class Sensor {
   virtual uint8_t channels() const = 0;
   virtual const char *type() const = 0;
   virtual bool read(uint8_t ch, Reading &out) = 0;  // false = no reply / bad reply
+  virtual uint8_t lastError() const { return 0; }     // SensorErr of the last read()
 };
 
 class PzemSensor : public Sensor {
@@ -21,11 +22,13 @@ class PzemSensor : public Sensor {
   uint8_t channels() const override { return 1; }
   const char *type() const override { return "pzem004t"; }
   bool read(uint8_t ch, Reading &out) override;
+  uint8_t lastError() const override { return err_; }
 
  private:
   HardwareSerial &port_;
   int rx_, tx_;
   uint8_t addr_;
+  uint8_t err_ = 0;
 };
 
 uint16_t modbusCrc(const uint8_t *buf, size_t len);

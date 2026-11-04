@@ -84,6 +84,8 @@ def meter_summary(d, show_price=None):
         "sess_mode": (d.cfg or {}).get("sess_mode", "none"),
         "server_time": now(),
         "reading_ts": reading.get("ts"),
+        "reading_err": reading.get("err"),  # no channel data in the latest telemetry: no_reply / bad / no_ac
+        "reading_ok_at": settings.fmt_ts(reading.get("last_ok_ts")) if reading.get("last_ok_ts") else None,
         "sess_ended": bool(sess_end) or sess.get("status") in ("expired", "ended") or bool(sess.get("ended")),
         "block": relays[0].get("block") if relays else None,
         "disabled": bool(d.disabled_at),

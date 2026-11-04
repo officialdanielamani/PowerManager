@@ -272,7 +272,7 @@ def action(pk):
             return jsonify(ok=False, error="not_disabled", message="This meter is not disabled."), 409
         getattr(lifecycle, act)(device, current_user)
         msgs = {"disable": "Meter disabled: session ended, relay off, history is read-only.",
-                "enable": "Meter enabled: a new session starts.",
+                "enable": "Meter enabled. No session is running: press Renew Now to start one.",
                 "unsync": "Meter unsynced: it will factory reset. History is kept.",
                 "remove": "Meter removed: it will factory reset and all its data was deleted."}
         flash(msgs[act], "success")
@@ -350,6 +350,13 @@ def incident_detail_text(inc):
     if inc.type == "voltage":
         if d.get("v") is not None:
             parts.append(f"{d.get('v')} V ({'low' if d.get('dir') == 'low' else 'high'}), range {d.get('range', '?')}")
+        if d.get("action"):
+            parts.append({"end": "session ended", "hold": "relay off", "run": "power kept on"}.get(d["action"], d["action"]))
+    if inc.type == "sensor":
+        if d.get("kind"):
+            parts.append({"bad": "garbled replies", "no_reply": "no reply"}.get(d["kind"], d["kind"]))
+        if d.get("after_s"):
+            parts.append(f"after {d['after_s']} s")
         if d.get("action"):
             parts.append({"end": "session ended", "hold": "relay off", "run": "power kept on"}.get(d["action"], d["action"]))
     if inc.type == "tamper" and d.get("action"):
@@ -556,6 +563,7 @@ BULK_GROUPS = {
     "offline": "Relay off when offline",
     "voltage": "Operating Voltage Range",
     "tamper": "Tamper Protection",
+    "sensor": "Sensor Timeout",
     "viewers": "Linked users",
 }
 
@@ -576,6 +584,8 @@ def _bulk_apply(cfg, new, groups):
             out[k] = new[k]
     if "tamper" in groups:
         out["tamper_protect"], out["tamper_action"] = new["tamper_protect"], new["tamper_action"]
+    if "sensor" in groups:
+        out["sensor_to_s"], out["sensor_action"] = new["sensor_to_s"], new["sensor_action"]
     for c in out["ch"]:  # the same limits for every channel of every selected meter
         if "kwh" in groups:
             c["kwh_max"], c["kwh_action"] = new["ch"][0]["kwh_max"], new["ch"][0]["kwh_action"]
@@ -643,6 +653,7 @@ def bulk_configure():
         "offline": _differs(devices, lambda c: (c.get("offline_off"), c.get("offline_off_min"))),
         "voltage": _differs(devices, lambda c: (c.get("volt_min", 0), c.get("volt_max", 0), c.get("volt_action", "hold"))),
         "tamper": _differs(devices, lambda c: (bool(c.get("tamper_protect")), c.get("tamper_action", "hold"))),
+        "sensor": _differs(devices, lambda c: (c.get("sensor_to_s", 10), c.get("sensor_action", "hold"))),
     }
     return render_template("meters/bulk.html", devices=devices, ids=",".join(str(d.id) for d in devices),
                            cfg=cfg, ch0=ch0, dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,

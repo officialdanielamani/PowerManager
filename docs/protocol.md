@@ -129,7 +129,7 @@ Commands (`cmd.c`):
 | `get_state` | – | Reply with `state` |
 | `remove` | – | Reply `cmd_ack`, close, then **factory reset**: wipe local admin, Wi-Fi, pairing, config, session, trip latch and buffer (AP password kept) → reboot into first-boot AP mode |
 | `disable` | – | Server disabled the meter: end the session (reason `disabled`), relay OFF, refuse Relay ON (also locally), no new sessions. Persisted across reboots |
-| `enable` | – | Undo `disable`: start a new session |
+| `enable` | – | Undo `disable`. No new session starts; the relay stays off until `renew` |
 | `get_info` | – | Reply with an `info` message (below) |
 | `set_default` | – | Not a device command: the server makes a new default config and sends it as `cfg` |
 
@@ -157,7 +157,8 @@ Commands for an offline device are **queued** on the server and sent on reconnec
 | `s` | Session progress: `{"sid": 17, "kwh": 1.2345, "kwh_t": 1.2001}` (`kwh_t` = tared, only when a tare is set; that is the value the kWh limit uses with `tare.limits`) (kWh used in the current session). Keeps the server's "session used" current; `state` is only sent on changes. |
 | `tv` | 1 = clock was valid. 0 = the device had no valid time; then `ts` holds **uptime seconds** and the item also has `boot`. The server fixes the time using the `hello` (`up` + `ts` of that boot) when possible, otherwise marks the item `time_estimated`. |
 | `v` V, `a` A, `w` W, `pf` 0–1, `hz` Hz, `e` kWh | PZEM values. `e` is the PZEM's total energy register. |
-| channel missing / `null` values | Sensor not responding (e.g. AC lost: the PZEM measurement side is powered from AC) |
+| channel missing / `null` values | No reading (e.g. AC lost: the PZEM measurement side is powered from AC) |
+| `se` | Only when the item has no reading: `no_reply` (the sensor did not answer: sensor/wiring fault or no AC) or `bad` (garbled reply / CRC error). The server then shows "no current reading" instead of the old values; no `se` and no channel = no AC |
 
 **Ordering rule:** telemetry items and events share **one ordered queue** on the device (the offline buffer). Nothing bypasses it, not even a live event, so `seq` arrives in increasing order and an `ack` with `last_seq` safely confirms everything up to it.
 
@@ -176,6 +177,7 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `session_end` | Session ended (`reason`: quota/expired/manual). Sent **once** per session: renewing a session that a limit already ended does not send another |
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch. With Tamper Protection on, `tamper_open` carries `action` |
+| `sensor_error` / `sensor_ok` | No valid reading for `sensor.timeout_s`: `{"kind": "no_reply"\|"bad", "after_s": 10, "action": "hold"}`; `sensor_ok` = first valid reading again |
 | `voltage_out` / `voltage_ok` | Voltage left / returned to the operating range: `v`, `min`, `max`, `dir` (`low`/`high`), `action` |
 | `ac_lost` / `ac_restored` | V < 50 V or PZEM not responding for 3 reads / back to normal |
 | `trip_reset` | Over-current latch cleared (`src`: server/local, `by`: username) |
@@ -200,7 +202,7 @@ Disconnect / reconnect notifications are produced **by the server** (from the WS
 }
 ```
 
-`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_action: warn` (power still on). `sess.ended: true` = `session_end` already sent for this session. `status: ended` + `sess.end_reason` (`voltage`/`tamper`) = ended early by a protection (relay OFF until renewed). `block` can also be `ended`, `voltage`, `tamper`, `disabled`. `disabled: true` = disabled by the server. `volt_out: true` = voltage currently out of range.
+`block` ∈ `null | tripped | quota | expired | offline | ac_lost`. `status` ∈ `active | quota | expired`. `sess.over: true` = kWh limit passed with `kwh_action: warn` (power still on). `sess.ended: true` = `session_end` already sent for this session. `status: ended` + `sess.end_reason` (`voltage`/`tamper`/`sensor`/`disabled`) = ended early by a protection (relay OFF until renewed). `block` can also be `ended`, `voltage`, `tamper`, `disabled`. `disabled: true` = disabled by the server. `volt_out: true` = voltage currently out of range. `block: sensor` = relay OFF by the sensor timeout (`hold`); the state then also has `"sensor_err": "no_reply"|"bad"` (only while there is one).
 
 ## 3. Config document
 
@@ -221,6 +223,7 @@ The server sends the whole config every time (no partial updates).
     "volt": {"min":200, "max":250, "action":"hold"},
     "tare": {"a":0.012, "w":1.6, "limits":true},
     "tamper": {"protect":true, "action":"end"},
+    "sensor": {"timeout_s":10, "action":"hold"},
     "ch": [ {"i":0, "kwh_max":2.0, "kwh_action":"end", "kwh_end":true, "amp_max":10.2} ]
   }
 }
@@ -243,6 +246,8 @@ The server sends the whole config every time (no partial updates).
 | `tare.limits` | bool | true | Use tared values for the kWh limit (session kWh − tare W × time with readings) and max current (A − tare A). Voltage is never tared |
 | `tamper.protect` | bool | false | Off: panel open/close is only reported |
 | `tamper.action` | `run` / `hold` / `end` | `hold` | With protection on, when the panel opens: **run** = event only; **hold** = relay OFF while open; **end** = end the session (reason `tamper`) |
+| `sensor.timeout_s` | 0, 3–3600 s | 10 | No valid reading for this long = sensor error (`sensor_error` event); 0 = off. A power cut also stops the PZEM from answering |
+| `sensor.action` | `run` / `hold` / `end` | `hold` | **run** = event only; **hold** = relay OFF until readings return (`sensor_ok`); **end** = end the session (reason `sensor`) |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |
 
 The device checks every value. If anything is out of range it rejects the **whole** config (`cfg_ack ok:false err:"<field>"`) and keeps the old one.

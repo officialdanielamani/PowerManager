@@ -268,10 +268,14 @@ def users():
 @admin_required
 def notifications():
     f = request.form
-    settings.set_many({
-        "telegram_enabled": "1" if f.get("telegram_enabled") == "on" else "0",
-        "telegram_bot_token": (f.get("telegram_bot_token") or "").strip(),
-    })
+    values = {"telegram_enabled": "1" if f.get("telegram_enabled") == "on" else "0"}
+    # The token is treated like a password: never sent back to the browser. Empty = keep the saved one.
+    token = (f.get("telegram_bot_token") or "").strip()
+    if f.get("telegram_clear") == "on":
+        values["telegram_bot_token"] = ""
+    elif token:
+        values["telegram_bot_token"] = token
+    settings.set_many(values)
     return _back("notifications", "Notification settings saved.")
 
 

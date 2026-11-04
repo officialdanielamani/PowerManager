@@ -18,6 +18,7 @@ static uint32_t u32(const uint8_t *p) {
 }
 
 bool PzemSensor::read(uint8_t ch, Reading &out) {
+  err_ = SENS_BAD;
   if (ch != 0) return false;
   // Read 10 input registers starting at 0x0000.
   uint8_t req[8] = {addr_, 0x04, 0x00, 0x00, 0x00, 0x0A, 0, 0};
@@ -38,6 +39,10 @@ bool PzemSensor::read(uint8_t ch, Reading &out) {
       vTaskDelay(pdMS_TO_TICKS(2));  // yield, never busy-wait
     }
   }
+  if (got == 0) {
+    err_ = SENS_NO_REPLY;
+    return false;
+  }
   if (got != sizeof(resp) || resp[1] != 0x04 || resp[2] != 20) return false;
   uint16_t rc = modbusCrc(resp, 23);
   if (resp[23] != (rc & 0xFF) || resp[24] != (rc >> 8)) return false;
@@ -51,5 +56,6 @@ bool PzemSensor::read(uint8_t ch, Reading &out) {
   out.pf = ((uint16_t)d[16] << 8 | d[17]) * 0.01f;
   out.ok = true;
   out.atMs = millis();
+  err_ = SENS_OK;
   return true;
 }

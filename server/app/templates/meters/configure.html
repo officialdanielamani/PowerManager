@@ -118,6 +118,16 @@
         <label class="form-check-label" for="tamper_protect">Enable Tamper Protection</label>
         <div class="form-text">Off: panel open/close is only recorded and notified.</div></div>
       <div id="tamperOpts">{{ action_radios('tamper_action', val('tamper_action', cfg.get('tamper_action', 'hold')), protect_actions, 'hold', 'If tamper detected') }}</div>
+      <hr>
+
+      {# 6. sensor timeout #}
+      <label class="form-label fw-semibold mb-1">Sensor Timeout</label>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span>If the sensor does not respond or errors for</span>
+        <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="0" max="3600" name="sensor_to_s" value="{{ val('sensor_to_s', cfg.get('sensor_to_s', 10)) }}"><span class="input-group-text">s</span></div>
+      </div>
+      <div class="form-text">0 = off. The PZEM is powered from the AC side, so a power cut also looks like "no response". Readings coming back clear it.</div>
+      {{ action_radios('sensor_action', val('sensor_action', cfg.get('sensor_action', 'hold')), protect_actions, 'hold', 'Then') }}
     </div></div>
   </div>
 

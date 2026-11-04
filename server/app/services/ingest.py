@@ -215,7 +215,13 @@ def h_tel(conn, device, msg):
         if newest is None or ts >= newest["ts"]:
             newest = {"ts": ts, "est": est, "ch": [
                 {"i": r["ch"], **{f: r[f] for f in FIELDS}} for r in rows]}
-    if newest is not None and newest["ch"] and newest["ts"] >= (device.last_reading or {}).get("ts", 0):
+            if not rows:  # no channel data: sensor error, or no AC
+                newest["err"] = str(item.get("se") or "no_ac")[:10]
+    prev = device.last_reading or {}
+    if newest is not None and newest["ts"] >= prev.get("ts", 0):
+        if not newest["ch"]:
+            # Show that there is no current reading (not the old values), and keep when the last good one was.
+            newest["last_ok_ts"] = prev.get("ts") if prev.get("ch") else prev.get("last_ok_ts")
         device.last_reading = newest
     _session_progress(device, items)
     conn.send({"t": "ack", "last_seq": device.last_seq, "time": now()})
@@ -312,8 +318,11 @@ HANDLERS = {
 # ---------------------------------------------------------------- state / events
 
 def _apply_state(device, state):
-    clean = {k: state[k] for k in ("relay", "tripped", "tamper", "ac", "sess", "volt_out") if k in state}
+    clean = {k: state[k] for k in ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err") if k in state}
     merged = dict(device.last_state or {})
+    if "relay" in state:  # a full state: flags that are only sent while true are cleared when missing
+        for k in ("volt_out", "sensor_err"):
+            merged.pop(k, None)
     merged.update(clean)
     merged["at"] = now()
     device.last_state = merged
@@ -345,6 +354,8 @@ def _reconcile_incidents(device, state):
         checks.append(("power", state["ac"] is False))
     if "tripped" in state:
         checks.append(("trip", bool(state["tripped"])))
+    if "relay" in state:  # full state message: sensor_err is only sent while there is one
+        checks.append(("sensor", bool(state.get("sensor_err"))))
     for itype, active in checks:
         open_inc = incidents.find_open(device.id, itype)
         if active and open_inc is None:
@@ -382,6 +393,16 @@ def process_event(device, ev):
         notify.notify(device, "voltage_range",
                       f"Voltage {'too low' if d.get('dir') == 'low' else 'too high'}: {d.get('v')} V "
                       f"(range {lim}): {what}")
+    elif e == "sensor_error":
+        kind = d.get("kind")
+        incidents.open_incident(device.id, "sensor", ev.ts, event=ev, estimated=est,
+                                detail={"kind": kind, "after_s": d.get("after_s"), "action": d.get("action")})
+        why = ("garbled replies (wiring / noise)" if kind == "bad"
+               else "sensor not responding (sensor or wiring fault, or no AC power)")
+        what = {"end": "session ended", "hold": "relay off until readings return"}.get(d.get("action"), "power kept on")
+        notify.notify(device, "sensor_error", f"Sensor error: no valid reading for {d.get('after_s', '?')} s, {why}: {what}")
+    elif e == "sensor_ok":
+        incidents.close_incident(device.id, "sensor", ev.ts, event=ev, estimated=est)
     elif e == "voltage_ok":
         incidents.close_incident(device.id, "voltage", ev.ts, event=ev, estimated=est, detail={"v_back": d.get("v")})
     elif e == "ac_lost":

@@ -8,6 +8,7 @@ TYPES = {
     "trip": "Power trip",
     "tamper": "Tamper",
     "voltage": "Voltage out of range",
+    "sensor": "Sensor error",
 }
 
 

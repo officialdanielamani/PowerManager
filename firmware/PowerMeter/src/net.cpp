@@ -241,6 +241,14 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   JsonObject t = c["tamper"];
   m.tamper_protect = t["protect"] | false;
   m.tamper_action = action(t["action"] | "hold");
+  JsonObject se = c["sensor"];
+  int sto = se["timeout_s"] | 10;
+  if (sto < 0 || sto > 3600) {
+    err = "sensor.timeout_s";
+    return false;
+  }
+  m.sensor_to_s = sto;
+  m.sensor_action = action(se["action"] | "hold");
   const char *act = ch["kwh_action"] | "";
   if (!strcmp(act, "hold")) m.kwh_action = KWH_HOLD;
   else if (!strcmp(act, "warn")) m.kwh_action = KWH_WARN;

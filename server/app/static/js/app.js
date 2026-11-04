@@ -55,12 +55,13 @@ var PM = (function () {
   var STATUS = {active: ['success', 'Active'], quota: ['warning', 'kWh limit reached'], expired: ['warning', 'Session ended'],
                 tripped: ['danger', 'Over-current trip'], unknown: ['secondary', 'No data yet'],
                 over: ['warning', 'Over kWh limit (power on)'], ended_voltage: ['danger', 'Session ended (voltage)'],
-                ended_tamper: ['danger', 'Session ended (tamper)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
+                ended_tamper: ['danger', 'Session ended (tamper)'], ended_sensor: ['danger', 'Session ended (sensor error)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
                 disabled: ['dark', 'Disabled']};
   var INCIDENT = {power: '<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>',
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
-                  voltage: '<span class="badge pm-bg-orange"><i class="bi bi-activity"></i> Voltage</span>'};
+                  voltage: '<span class="badge pm-bg-orange"><i class="bi bi-activity"></i> Voltage</span>',
+                  sensor: '<span class="badge text-bg-danger"><i class="bi bi-cpu"></i> Sensor</span>'};
 
   function set(root, field, fn) {
     root.querySelectorAll('[data-field="' + field + '"]').forEach(fn);
@@ -78,7 +79,7 @@ var PM = (function () {
     set(root, 'online', function (el) { el.className = 'pm-dot ' + (m.online ? 'on' : 'off'); el.title = m.online ? 'Online' : 'Offline'; });
     set(root, 'w', function (el) { el.textContent = m.w == null ? '–' : m.w; });
     var WHY = {disabled: 'disabled', tripped: 'trip', quota: 'kWh limit', expired: 'session ended', ended: 'session ended', offline: 'offline',
-               voltage: 'voltage', tamper: 'tamper'};
+               voltage: 'voltage', tamper: 'tamper', sensor: 'sensor error'};
     set(root, 'relay', function (el) {
       el.className = 'badge rounded-pill ' + (m.relay_on ? 'text-bg-success' : 'text-bg-secondary');
       el.textContent = 'Relay ' + (m.relay_on ? 'ON' : 'OFF' + (m.relay_block && WHY[m.relay_block] ? ' · ' + WHY[m.relay_block] : ''));
@@ -179,8 +180,15 @@ var PM = (function () {
 
   function renderLatest(m) {
     var box = document.getElementById('latest');
-    if (!m.reading || !m.reading.length) { box.innerHTML = '<div class="text-body-secondary">No readings yet.</div>'; return; }
     var html = '';
+    if (m.reading_err) {
+      var ERR = {no_reply: 'Sensor error: the sensor does not respond (sensor or wiring fault, or no AC power).',
+                 bad: 'Sensor error: garbled replies from the sensor (wiring, noise or wrong address).',
+                 no_ac: 'No AC power: nothing to measure.'};
+      html += '<div class="alert alert-' + (m.reading_err === 'no_ac' ? 'warning' : 'danger') + ' py-2 mb-2"><i class="bi bi-exclamation-triangle me-1"></i>' +
+        esc(ERR[m.reading_err] || 'No reading from the sensor.') + ' <span class="small">(' + esc(m.reading_at) + ')' +
+        (m.reading_ok_at ? ' · last good reading ' + esc(m.reading_ok_at) : '') + '</span></div>';
+    } else if (!m.reading || !m.reading.length) { box.innerHTML = '<div class="text-body-secondary">No readings yet.</div>'; return; }
     m.reading.forEach(function (c) {
       if (m.reading.length > 1) html += '<div class="fw-semibold small mb-1">Channel ' + (c.i + 1) + '</div>';
       html += '<div class="row g-2 mb-2">' +
@@ -469,6 +477,25 @@ var PM = (function () {
         bar.style.width = (s * 20) + '%';
         bar.className = 'progress-bar ' + (s < 3 ? 'bg-danger' : s < 4 ? 'bg-warning' : 'bg-success');
       });
+    });
+    // Eye button on every password field: show / hide what was typed.
+    document.querySelectorAll('input[type=password]:not([data-no-eye])').forEach(function (inp) {
+      var grp = document.createElement('div');
+      grp.className = 'input-group' + (inp.classList.contains('form-control-sm') ? ' input-group-sm' : '');
+      inp.parentNode.insertBefore(grp, inp);
+      grp.appendChild(inp);
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn btn-outline-secondary'; b.tabIndex = -1;
+      b.title = 'Show password'; b.setAttribute('aria-label', 'Show password');
+      b.innerHTML = '<i class="bi bi-eye"></i>';
+      b.addEventListener('click', function () {
+        var show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        b.innerHTML = '<i class="bi ' + (show ? 'bi-eye-slash' : 'bi-eye') + '"></i>';
+        b.title = show ? 'Hide password' : 'Show password';
+        b.setAttribute('aria-label', b.title);
+      });
+      grp.appendChild(b);
     });
   });
 

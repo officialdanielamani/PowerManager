@@ -318,6 +318,8 @@ static void hState() {
   d["last_sync"] = g.lastSyncEpoch;
   JsonObject r = d["reading"].to<JsonObject>();
   r["ok"] = g.reading.ok;
+  static const char *SE[] = {"", "no_reply", "bad"};
+  if (g.sensorErr) r["err"] = SE[g.sensorErr % 3];
   if (g.reading.ok) {
     r["v"] = g.reading.v;
     r["a"] = g.reading.a;
@@ -344,6 +346,8 @@ static void hState() {
   c["volt_action"] = PA[g.cfg.volt_action % 3];
   c["tamper_protect"] = g.cfg.tamper_protect;
   c["tamper_action"] = PA[g.cfg.tamper_action % 3];
+  c["sensor_to_s"] = g.cfg.sensor_to_s;
+  c["sensor_action"] = PA[g.cfg.sensor_action % 3];
   sendJson(200, d);
 }
 

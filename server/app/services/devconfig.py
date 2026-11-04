@@ -12,6 +12,7 @@ NOTIFY_TYPES = [
     ("max_amp", "Max amp (trip)"),
     ("panel_open", "Panel open"),
     ("no_voltage", "No voltage"),
+    ("sensor_error", "Sensor error (no reading)"),
     ("disconnected", "Device disconnected for"),
     ("reconnected", "Device reconnected"),
 ]
@@ -38,6 +39,7 @@ PROTECT_ACTIONS = {
 DEFAULT_KWH_ACTION = "hold"
 DEFAULT_PROTECT_ACTION = "hold"
 VOLT_MIN, VOLT_MAX = 0, 400
+SENSOR_TIMEOUT_DEFAULT, SENSOR_TIMEOUT_MAX = 10, 3600
 
 
 def kwh_action(ch_cfg):
@@ -84,6 +86,8 @@ def default_cfg(n_channels=1):
         "tare_a": 0.0,             # own consumption (ESP32 + SSR) on the measured line
         "tare_w": 0.0,
         "tare_limits": True,       # the meter uses tared values for the kWh limit and max current
+        "sensor_to_s": SENSOR_TIMEOUT_DEFAULT,  # no valid reading for this long = sensor error; 0 = off
+        "sensor_action": DEFAULT_PROTECT_ACTION,
     }
 
 
@@ -147,6 +151,12 @@ def parse_form(form, device):
     cfg["tamper_protect"] = form.get("tamper_protect") == "on"
     a = form.get("tamper_action", DEFAULT_PROTECT_ACTION)
     cfg["tamper_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
+    cfg["sensor_to_s"] = _num(form, "sensor_to_s", int, 0, SENSOR_TIMEOUT_MAX, "Sensor timeout (s)", errors,
+                              SENSOR_TIMEOUT_DEFAULT)
+    if 0 < cfg["sensor_to_s"] < 3:
+        errors.append("Sensor timeout: at least 3 s (or 0 = off)")
+    a = form.get("sensor_action", DEFAULT_PROTECT_ACTION)
+    cfg["sensor_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
     return cfg, errors
 
 
@@ -169,6 +179,8 @@ def to_device(cfg, ver):
                      "limits": bool(cfg.get("tare_limits", True))},
             "tamper": {"protect": bool(cfg.get("tamper_protect")),
                        "action": cfg.get("tamper_action", DEFAULT_PROTECT_ACTION)},
+            "sensor": {"timeout_s": int(cfg.get("sensor_to_s", SENSOR_TIMEOUT_DEFAULT)),
+                       "action": cfg.get("sensor_action", DEFAULT_PROTECT_ACTION)},
             "ch": [
                 {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_action": kwh_action(c),
                  # for meters on firmware 0.1.x that only know kwh_end ("hold" acts like "end" there)

@@ -435,9 +435,7 @@ class Meter:
         elif c in ("disable", "enable"):
             self.st["disabled"] = c == "disable"
             if c == "disable":
-                self.stop_session("disabled")
-            elif self.session_status() != "active":
-                self.new_session(auto=False, reason=None)
+                self.stop_session("disabled")  # enable starts no session: renew does
         elif c == "get_info":
             self.send({"t": "info", "ip": "192.168.1.57", "ssid": "HomeNet", "rssi": -55, "mac": "AA:BB:CC:DD:EE:FF",
                        "heap": 182000, "heap_min": 150000, "psram": 0, "fw": "sim-0.5", "hw": "simulator",

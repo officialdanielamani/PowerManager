@@ -39,7 +39,7 @@ def enable(device, user):
     (Command.query.filter_by(device_fk=device.id, c="disable", sent_at=None).update({"cancelled": True}))
     ingest.server_event(device, "enabled", {"by": user.username})
     db.session.commit()
-    commands.issue(device, "enable", {}, user)  # the meter starts a new session
+    commands.issue(device, "enable", {}, user)  # no new session: the admin renews when ready
 
 
 def _detach(device, why, user):

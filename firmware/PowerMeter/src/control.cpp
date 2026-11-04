@@ -19,6 +19,7 @@ static uint32_t lastReportMs_ = 0;
 static bool offlineEventSent_ = false;
 
 static void bump() { stateVer_++; }
+static const char *SENS_NAME[] = {"ok", "no_reply", "bad"};
 static bool hasTare() { return g.cfg.tare_a > 0 || g.cfg.tare_w > 0; }
 uint32_t stateVersion() { return stateVer_; }
 
@@ -64,6 +65,7 @@ static void pushTelemetry() {
     se["sid"] = g.sess.sid;
     se["kwh"] = serialized(String(skwh, 4));
     if (hasTare()) se["kwh_t"] = serialized(String(sessionKwhTared(), 4));
+    if (!g.reading.ok) doc["se"] = SENS_NAME[(g.lastReadErr ? g.lastReadErr : SENS_NO_REPLY) % 3];
     if (g.reading.ok && g.ac) {
       JsonObject c = ch.add<JsonObject>();
       c["i"] = 0;
@@ -178,11 +180,15 @@ void renew(const char *reason, bool autoRenew) {
   startSession(autoRenew);
 }
 
-// Voltage / tamper protection with action "end": end the session now (relay off until renewed).
+static const char *stopReasonName(uint8_t why) {
+  return why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : why == STOP_SENSOR ? "sensor" : "disabled";
+}
+
+// Voltage / tamper / sensor protection with action "end": end the session now (relay off until renewed).
 static void stopSession(StopReason why) {
   // caller holds StateLock
   if (!g.sess.sid || g.sess.status == SESS_ENDED || g.sess.status == SESS_EXPIRED) return;
-  endSession(why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : "disabled");
+  endSession(stopReasonName(why));
   g.sess.status = SESS_ENDED;
   g.sess.stopReason = why;
   store::saveSession(g.sess);
@@ -196,11 +202,8 @@ void setDisabled(bool disabled) {
   if (g.disabled == disabled) return;
   g.disabled = disabled;
   store::saveDisabled(disabled);
-  if (disabled) {
-    stopSession(STOP_DISABLED);  // session ends, relay off below ("disabled" block)
-  } else if (g.sess.sid == 0 || g.sess.status != SESS_ACTIVE) {
-    startSession(false);         // enabled again: start fresh
-  }
+  if (disabled) stopSession(STOP_DISABLED);  // session ends, relay off below ("disabled" block)
+  // Enabled again: no new session. The ended session keeps the relay off until Renew.
   bump();
 }
 
@@ -288,9 +291,10 @@ void stateJson(JsonObject o) {
   if (g.sess.over) s["over"] = true;
   s["ended"] = g.sess.ended;
   if (g.sess.status == SESS_ENDED)
-    s["end_reason"] = g.sess.stopReason == STOP_VOLTAGE ? "voltage" : g.sess.stopReason == STOP_TAMPER ? "tamper" : "disabled";
+    s["end_reason"] = stopReasonName(g.sess.stopReason);
   if (g.disabled) o["disabled"] = true;
   if (g.voltOut) o["volt_out"] = true;
+  if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
   if (nr) s["next_reset"] = nr;
 }
 
@@ -354,10 +358,45 @@ static void checkVoltage(bool ok, float v) {
   }
 }
 
+// Sensor timeout: no valid reading for cfg.sensor_to_s seconds = sensor error (once), with the
+// configured action; the first valid reading clears it.
+static void checkSensor(bool ok, uint8_t err) {
+  // caller holds StateLock
+  static uint32_t lastGoodMs = 0;
+  uint32_t now = millis();
+  if (!lastGoodMs) lastGoodMs = now;  // boot: the timeout counts from start-up
+  if (ok) {
+    lastGoodMs = now;
+    if (g.sensorErr) {
+      g.sensorErr = SENS_OK;
+      emitEvent("sensor_ok");
+      bump();
+    }
+    return;
+  }
+  if (g.cfg.sensor_to_s == 0 || g.sensorErr || now - lastGoodMs < g.cfg.sensor_to_s * 1000UL) return;
+  g.sensorErr = err ? err : SENS_NO_REPLY;
+  struct Ctx {
+    const char *kind, *action;
+    uint16_t after;
+  } ctx = {SENS_NAME[g.sensorErr % 3], ACTION_NAME[g.cfg.sensor_action % 3], g.cfg.sensor_to_s};
+  emitEvent("sensor_error", [](JsonObject o, void *p) {
+    Ctx *c = (Ctx *)p;
+    o["kind"] = c->kind;
+    o["after_s"] = c->after;
+    o["action"] = c->action;
+  }, &ctx);
+  if (g.cfg.sensor_action == ACT_END) stopSession(STOP_SENSOR);
+  bump();
+}
+
 static void readSensor() {
   Reading r;
   bool ok = sensor_->read(0, r);
+  uint8_t err = sensor_->lastError();
   StateLock l;
+  g.lastReadErr = ok ? SENS_OK : (err ? err : SENS_NO_REPLY);
+  checkSensor(ok, g.lastReadErr);
   if (ok) {
     g.reading = r;
     g.lastE = r.e;
@@ -488,6 +527,7 @@ static void checkRules(bool firstPass) {
   else if (g.sess.status == SESS_ENDED) block = "ended";
   else if (g.cfg.tamper_protect && g.cfg.tamper_action == ACT_HOLD && g.tamper) block = "tamper";
   else if (g.cfg.volt_action == ACT_HOLD && g.voltOut) block = "voltage";
+  else if (g.cfg.sensor_action == ACT_HOLD && g.sensorErr) block = "sensor";
   else if (g.paired && g.cfg.offline_off_min && g.offlineSinceMs &&
            millis() - g.offlineSinceMs >= g.cfg.offline_off_min * 60000UL)
     block = "offline";

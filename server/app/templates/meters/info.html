@@ -9,7 +9,7 @@
   <span><i class="bi bi-slash-circle me-1"></i><strong>Disabled</strong> since {{ d.disabled_at|dt }}: relay off, no session, read-only. Data is kept.</span>
   {% if current_user.is_admin %}
   <span class="ms-auto d-flex gap-2">
-    <button class="btn btn-sm btn-success" data-action="enable" data-confirm="Enable {{ d.name }}? A new session starts and the relay follows its normal rules again."><i class="bi bi-play-circle me-1"></i>Enable</button>
+    <button class="btn btn-sm btn-success" data-action="enable" data-confirm="Enable {{ d.name }}? No new session starts: press Renew Now when you want to start one."><i class="bi bi-play-circle me-1"></i>Enable</button>
     <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#lifecycleModal">Unsync / Remove</button>
   </span>
   {% endif %}
@@ -165,7 +165,7 @@
             {% set kt = tare_kwh(s) %}
             <td><span class="v-raw">{{ '%.3f'|format(s.kwh_used) }}</span>{% if kt is not none %}<span class="v-tared">{{ '%.3f'|format(kt) }}</span>{% endif %}</td>
             {% if price[1] is not none %}{% set pp = s.price_per_kwh if s.price_per_kwh is not none else price[1] %}<td><span class="v-raw">{{ money(s.cost(price[1]), s.currency if s.price_per_kwh is not none else price[0]) }}</span>{% if kt is not none %}<span class="v-tared">{{ money(kt * pp, s.currency if s.price_per_kwh is not none else price[0]) }}</span>{% endif %}{% if s.price_per_kwh is not none %} <span class="small text-body-secondary">@ {{ '%g'|format(s.price_per_kwh) }}</span>{% endif %}</td>{% endif %}<td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
-            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now', 'voltage': 'Voltage out of range', 'tamper': 'Tamper'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
+            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now', 'voltage': 'Voltage out of range', 'tamper': 'Tamper', 'sensor': 'Sensor error', 'disabled': 'Disabled'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
             <td class="text-end text-nowrap">{% if s.started_at %}
               {% set s_end = s.ended_at or now %}
               <button type="button" class="btn btn-sm btn-outline-primary py-0" data-hist-from="{{ s.started_at }}" data-hist-to="{{ s_end }}"

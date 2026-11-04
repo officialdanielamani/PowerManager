@@ -10,7 +10,10 @@ enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
 enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, SESS_ENDED = 3 };
 // Voltage / tamper protection: run as usual, relay off while the problem lasts, or end the session.
 enum ProtectAction : uint8_t { ACT_RUN = 0, ACT_HOLD = 1, ACT_END = 2 };
-enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3 };
+enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3, STOP_SENSOR = 4 };
+// Sensor problem: no reply at all (sensor, wiring, or no AC: the PZEM is powered from the AC side) or
+// replies that are garbled / fail the CRC (wiring, noise, wrong address).
+enum SensorErr : uint8_t { SENS_OK = 0, SENS_NO_REPLY = 1, SENS_BAD = 2 };
 enum NetStatus : uint8_t {
   NET_SETUP_AP = 0,      // no Wi-Fi configured
   NET_WIFI_CONNECTING,   // Wi-Fi configured, not connected
@@ -42,6 +45,8 @@ struct MeterConfig {
   bool tare_limits = true;  // use tared values for the kWh limit and max current
   bool tamper_protect = false;
   uint8_t tamper_action = ACT_HOLD;
+  uint16_t sensor_to_s = 10;  // no valid reading for this long = sensor error; 0 = off
+  uint8_t sensor_action = ACT_HOLD;
 };
 
 struct Reading {
@@ -77,6 +82,8 @@ struct AppState {
   bool ac = true;
   bool sensorEverOk = false;
   bool voltOut = false;        // voltage outside the operating range (debounced)
+  uint8_t sensorErr = SENS_OK; // set after cfg.sensor_to_s without a valid reading
+  uint8_t lastReadErr = SENS_OK; // result of the latest read (for telemetry)
   NetStatus net = NET_SETUP_AP;
   bool paired = false;
   bool unauthorized = false;   // server rejected our credentials

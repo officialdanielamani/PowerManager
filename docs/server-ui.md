@@ -48,7 +48,7 @@ Shows a **Synced / Pending sync** badge.
 | Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · **[Disable / Unsync / Remove]** (dialog explaining each option, "I understand" tick, Device ID typed for Remove) |
 | Tare (self-consumption) | Current [A] + Power [W] offsets, **[Tare now]** (fills both from the latest reading; relay must be OFF, reading < 2 min old), Clear. Server-only; limits on the meter keep using raw values |
 | Data clean-up | [ ] Automatically delete data if session more than [120] days ago · [ ] Automatically delete Historical Events more than [120] days ago |
-| Set Limit | In this order: **Max kWh per session** + *When the kWh limit is reached*: ( ) Session run as usual · (•) Off relay, but session continue (default) · ( ) End session — **Session time limit** (none / duration D-H-M / daily HH:MM), Auto renew, Relay off when offline — **Max Amp** (0 = off; latched until Reset Trip) — **Operating Voltage Range** Min–Max V + *If out of range* (same 3 choices) — **Tamper Protection** [ ] enable + *If tamper detected* (same 3 choices) |
+| Set Limit | In this order: **Max kWh per session** + *When the kWh limit is reached*: ( ) Session run as usual · (•) Off relay, but session continue (default) · ( ) End session — **Session time limit** (none / duration D-H-M / daily HH:MM), Auto renew, Relay off when offline — **Max Amp** (0 = off; latched until Reset Trip) — **Operating Voltage Range** Min–Max V + *If out of range* (same 3 choices) — **Tamper Protection** [ ] enable + *If tamper detected* (same 3 choices) — **Sensor Timeout**: if the sensor does not respond or errors for [10] s (0 = off) + the same 3 choices (default: Off relay, but session continue) |
 | Link this meter to users | Checkbox per view-only user (server-only, never sent to the meter) |
 
 Notification options are **not** here any more: see *Notification Options* below.
@@ -64,7 +64,7 @@ Each meter has three tabs: **Info** (everyone with access), **Notification Optio
 The Configuration page shows: *This hardware was used before as "Dryer A" and was unsynced* → **[Continue as "Dryer A"]** / **[Make it a new meter]**.
 
 ### Disabled meter
-Info page banner: *Disabled since … relay off, no session, read-only* with **[Enable]** and **[Unsync / Remove]** (admin). Configuration is blocked; dashboard card is greyed with a *Disabled* badge.
+Info page banner: *Disabled since … relay off, no session, read-only* with **[Enable]** and **[Unsync / Remove]** (admin). **Enable** does not start a session: press **Renew Now** when ready. Configuration is blocked; dashboard card is greyed with a *Disabled* badge.
 
 ### Notifications page
 Own notifications only: select (checkbox, select all) → **Delete selected**, or **Delete all**; *Mark all read*. Settings → Account → *My notifications*: [ ] Automatically delete notifications more than [30] days ago.
@@ -104,7 +104,11 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 | Account | Change username, password, phone, email (current password required) · My Telegram chat ID + [Send test] |
 | Server (admin) | Public address, port, TLS · Display timezone (IANA list, shows its UTC offset) · Raw data retention · **Electricity price**: [Currency][Price] / kWh (e.g. MYR 0.21) |
 | Users (admin) | View-only accounts (per user: **Enable download .csv**, **Show price**, both off by default; enforced on the server): select + Enable/Disable/Unlock selected, Enable all / Disable all · per user: meters they can see (or *View all meters*), reset password (also unlocks), enable/disable, delete · Add account (with meters) · Login protection (max failed logins, lock minutes) |
-| Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID) |
+| Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID). The token is write-only like a password: after saving the field is empty with a `••••` placeholder; leave it empty to keep the saved token, or tick *Remove the saved token* |
 
 ### Firmware (admin)
 Placeholder page for future OTA updates. The meter's own page has a greyed-out **Check OTA Update** button.
+
+## Password fields
+
+Every password field (server and the meter's own page) has an **eye** button to show / hide what was typed.
