@@ -18,6 +18,7 @@ static uint32_t lastReportMs_ = 0;
 static bool offlineEventSent_ = false;
 
 static void bump() { stateVer_++; }
+static bool hasTare() { return g.cfg.tare_a > 0 || g.cfg.tare_w > 0; }
 uint32_t stateVersion() { return stateVer_; }
 
 // ------------------------------------------------------------------ outbox helpers
@@ -61,6 +62,7 @@ static void pushTelemetry() {
     JsonObject se = doc["s"].to<JsonObject>();
     se["sid"] = g.sess.sid;
     se["kwh"] = serialized(String(skwh, 4));
+    if (hasTare()) se["kwh_t"] = serialized(String(sessionKwhTared(), 4));
     if (g.reading.ok && g.ac) {
       JsonObject c = ch.add<JsonObject>();
       c["i"] = 0;
@@ -81,8 +83,19 @@ static void pushTelemetry() {
 
 double sessionKwh() {
   StateLock l;
-  double kwh = g.lastE - g.sess.e0;
+  double kwh = sessionKwhLimit();
   return kwh > 0 ? kwh : 0;
+}
+
+double sessionKwhTared() {
+  StateLock l;
+  double kwh = sessionKwh() - g.sess.tareKwh;
+  return kwh > 0 ? kwh : 0;
+}
+
+double sessionKwhLimit() {
+  StateLock l;
+  return g.cfg.tare_limits ? sessionKwhTared() : sessionKwh();
 }
 
 uint32_t nextReset() {
@@ -113,6 +126,8 @@ struct EndCtx {
   uint32_t sid;
   const char *reason;
   double kwh;
+  double kwhT;
+  bool tared;
 };
 
 static void startSession(bool autoRenew) {
@@ -120,6 +135,7 @@ static void startSession(bool autoRenew) {
   g.sess.sid += 1;
   g.sess.start = timekeep::valid() ? timekeep::now() : 0;
   g.sess.startMs = millis();
+  g.sess.tareKwh = 0;
   g.sess.e0 = g.lastE;
   g.sess.status = SESS_ACTIVE;
   g.sess.over = false;
@@ -144,12 +160,13 @@ static void endSession(const char *reason) {
   // caller holds StateLock. Sends session_end once per session.
   if (g.sess.ended) return;
   g.sess.ended = true;
-  EndCtx ctx = {g.sess.sid, reason, g.lastE - g.sess.e0};
+  EndCtx ctx = {g.sess.sid, reason, g.lastE - g.sess.e0, sessionKwhTared(), hasTare()};
   emitEvent("session_end", [](JsonObject o, void *p) {
     EndCtx *c = (EndCtx *)p;
     o["sid"] = c->sid;
     o["reason"] = c->reason;
     o["kwh"] = serialized(String(c->kwh > 0 ? c->kwh : 0, 4));
+    if (c->tared) o["kwh_t"] = serialized(String(c->kwhT, 4));
   }, &ctx);
 }
 
@@ -264,6 +281,7 @@ void stateJson(JsonObject o) {
   s["sid"] = g.sess.sid;
   if (g.sess.start) s["start"] = g.sess.start;
   s["kwh"] = serialized(String(kwh, 4));
+  if (hasTare()) s["kwh_t"] = serialized(String(sessionKwhTared(), 4));
   s["max"] = g.cfg.kwh_max;
   s["status"] = sessStatusName(g.sess.status);
   if (g.sess.over) s["over"] = true;
@@ -342,6 +360,20 @@ static void readSensor() {
   if (ok) {
     g.reading = r;
     g.lastE = r.e;
+    // Own consumption: tare W over the time with readings (no AC = PZEM measures nothing).
+    static uint32_t lastOkMs = 0;
+    static uint32_t lastTareSaveMs = 0;
+    uint32_t nowMs = millis();
+    if (lastOkMs && g.sess.sid && g.cfg.tare_w > 0) {
+      uint32_t dt = nowMs - lastOkMs;
+      if (dt > 5000) dt = 5000;  // gap in readings: do not count it
+      g.sess.tareKwh += (double)g.cfg.tare_w * dt / 3.6e9;
+      if (nowMs - lastTareSaveMs > 600000UL) {  // keep it across reboots (every 10 min)
+        lastTareSaveMs = nowMs;
+        store::saveSession(g.sess);
+      }
+    }
+    lastOkMs = nowMs;
     g.sensorEverOk = true;
     failReads_ = 0;
     // PZEM energy counter was reset or replaced: re-base the session.
@@ -369,13 +401,14 @@ static void checkRules(bool firstPass) {
   if (g.sess.sid == 0 && !g.disabled && (g.sensorEverOk || millis() > 15000)) startSession(false);
 
   // Over-current (latched until reset).
-  if (!g.tripped && g.cfg.amp_max > 0 && g.reading.ok && g.reading.a > g.cfg.amp_max) {
+  float ampNow = g.reading.a - (g.cfg.tare_limits ? g.cfg.tare_a : 0.0f);
+  if (!g.tripped && g.cfg.amp_max > 0 && g.reading.ok && ampNow > g.cfg.amp_max) {
     if (++overReads_ >= TRIP_CONFIRM_READS) {
       g.tripped = true;
       store::saveFlags(g.wantOn, g.tripped);
       struct Ctx {
         float a, limit;
-      } ctx = {g.reading.a, g.cfg.amp_max};
+      } ctx = {ampNow, g.cfg.amp_max};  // tared current when tare_limits is on
       emitEvent("overcurrent", [](JsonObject o, void *p) {
         Ctx *c = (Ctx *)p;
         o["ch"] = 0;

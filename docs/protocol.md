@@ -154,7 +154,7 @@ Commands for an offline device are **queued** on the server and sent on reconnec
 |-------|----------------|
 | `seq` | Strictly increasing per device, survives reboot (kept in NVS, stored in blocks so it is not written every time). The server stores each `seq` once → resending is safe. After a factory reset `seq` starts again at 1; the server handles this because every (re)pairing starts a new *pairing generation*. |
 | `ts` | Time of the reading |
-| `s` | Session progress: `{"sid": 17, "kwh": 1.2345}` (kWh used in the current session). Keeps the server's "session used" current; `state` is only sent on changes. |
+| `s` | Session progress: `{"sid": 17, "kwh": 1.2345, "kwh_t": 1.2001}` (`kwh_t` = tared, only when a tare is set; that is the value the kWh limit uses with `tare.limits`) (kWh used in the current session). Keeps the server's "session used" current; `state` is only sent on changes. |
 | `tv` | 1 = clock was valid. 0 = the device had no valid time; then `ts` holds **uptime seconds** and the item also has `boot`. The server fixes the time using the `hello` (`up` + `ts` of that boot) when possible, otherwise marks the item `time_estimated`. |
 | `v` V, `a` A, `w` W, `pf` 0–1, `hz` Hz, `e` kWh | PZEM values. `e` is the PZEM's total energy register. |
 | channel missing / `null` values | Sensor not responding (e.g. AC lost: the PZEM measurement side is powered from AC) |
@@ -219,6 +219,7 @@ The server sends the whole config every time (no partial updates).
       "auto": true
     },
     "volt": {"min":200, "max":250, "action":"hold"},
+    "tare": {"a":0.012, "w":1.6, "limits":true},
     "tamper": {"protect":true, "action":"end"},
     "ch": [ {"i":0, "kwh_max":2.0, "kwh_action":"end", "kwh_end":true, "amp_max":10.2} ]
   }
@@ -238,6 +239,8 @@ The server sends the whole config every time (no partial updates).
 | `ch[].kwh_end` | bool | true | Only for firmware 0.1.x, which predates `kwh_action`: `false` = warn, otherwise end. New firmware uses `kwh_action` when present. |
 | `volt.min`, `volt.max` | 0–400 V | 0 | Operating voltage range; 0 = no limit on that side; min < max |
 | `volt.action` | `run` / `hold` / `end` | `hold` | Out of range (3 readings in a row): **run** = event only; **hold** = relay OFF until back in range (10 readings in a row); **end** = end the session (`session_end` reason `voltage`) |
+| `tare.a`, `tare.w` | 0–5 A, 0–500 W | 0 | The meter's own consumption on the measured line |
+| `tare.limits` | bool | true | Use tared values for the kWh limit (session kWh − tare W × time with readings) and max current (A − tare A). Voltage is never tared |
 | `tamper.protect` | bool | false | Off: panel open/close is only reported |
 | `tamper.action` | `run` / `hold` / `end` | `hold` | With protection on, when the panel opens: **run** = event only; **hold** = relay OFF while open; **end** = end the session (reason `tamper`) |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |

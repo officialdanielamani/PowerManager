@@ -146,6 +146,15 @@ class Meter:
     def session_kwh(self):
         return self.st.get("e_total", 0.0) - self.sess.get("e0", 0.0)
 
+    def tare(self):
+        return self.cfg().get("tare") or {}
+
+    def session_kwh_tared(self):
+        return max(0.0, self.session_kwh() - self.sess.get("tare_kwh", 0.0))
+
+    def session_kwh_limit(self):  # like the firmware: tared when "limits" is on
+        return self.session_kwh_tared() if self.tare().get("limits", True) else self.session_kwh()
+
     def blocked(self):
         if self.st.get("disabled"):
             return "disabled"
@@ -178,6 +187,7 @@ class Meter:
                 "tripped": self.tripped, "tamper": self.tamper, "ac": self.ac,
                 **({"volt_out": True} if self.volt_out else {}),
                 "sess": {"sid": self.sess["sid"], "start": self.sess["start"], "kwh": round(self.session_kwh(), 4),
+                         **({"kwh_t": round(self.session_kwh_tared(), 4)} if self.tare().get("w") or self.tare().get("a") else {}),
                          "max": self.ch_cfg().get("kwh_max", 0), "status": self.session_status(),
                          **({"over": True} if self.sess.get("over") else {}),
                          "ended": bool(self.sess.get("ended")),
@@ -191,6 +201,9 @@ class Meter:
             time.sleep(1 * self.args.speed)
             if self.ac:
                 w = self.load_w * random.uniform(0.95, 1.05) if self.relay_on() else 0.0
+                w += self.args.self_w  # the meter's own supply on the measured line
+                if self.tare().get("w"):
+                    self.sess["tare_kwh"] = self.sess.get("tare_kwh", 0.0) + self.tare()["w"] / 1000 / 3600 * self.args.energy_x
                 v = self.volt_override or random.uniform(228, 234)
                 a = w / v if v else 0
                 # energy: speed factor makes simulated time pass faster for testing quotas
@@ -198,6 +211,8 @@ class Meter:
                 self.reading = {"i": 0, "v": round(v, 1), "a": round(a, 3), "w": round(w, 1), "pf": 0.97,
                                 "hz": 50.0, "e": round(self.st["e_total"], 4)}
                 amp_max = self.ch_cfg().get("amp_max", 0)
+                if self.tare().get("limits", True):
+                    a = max(0.0, a - self.tare().get("a", 0))
                 if amp_max and a > amp_max and not self.tripped:
                     self.tripped = True
                     self.st["tripped"] = True
@@ -206,7 +221,7 @@ class Meter:
                 self.reading = None
             self.check_voltage()
             kmax = self.ch_cfg().get("kwh_max", 0)
-            if kmax and self.session_status() == "active" and self.session_kwh() >= kmax:
+            if kmax and self.session_status() == "active" and self.session_kwh_limit() >= kmax:
                 ch = self.ch_cfg()
                 action = ch.get("kwh_action") or ("end" if ch.get("kwh_end", True) else "warn")
                 if action == "warn":
@@ -214,7 +229,7 @@ class Meter:
                         self.sess["over"] = True
                         self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), action="warn", end=False)
                 else:
-                    self.event("quota", ch=0, kwh=round(self.session_kwh(), 4), action=action, end=True)
+                    self.event("quota", ch=0, kwh=round(self.session_kwh_limit(), 4), action=action, end=True)
                     if action == "end":
                         self.end_session("quota")
                     self.sess["status"] = "quota"
@@ -268,7 +283,8 @@ class Meter:
         self.last_report = time.time()
         item = {"seq": self.next_seq(), "ts": int(time.time()), "tv": 1,
                 "ch": [self.reading] if self.reading else [],
-                "s": {"sid": self.sess["sid"], "kwh": round(self.session_kwh(), 4)}}
+                "s": {"sid": self.sess["sid"], "kwh": round(self.session_kwh(), 4),
+                      **({"kwh_t": round(self.session_kwh_tared(), 4)} if self.tare().get("w") or self.tare().get("a") else {})}}
         with self.lock:
             self.buffer.append({"t": "tel", "items": [item]})
             # keep at most N buffered entries (oldest dropped), like the device ring buffer
@@ -513,6 +529,7 @@ def main():
     b.add_argument("--speed", type=float, default=1.0, help="<1 makes loop/report faster")
     b.add_argument("--energy-x", type=float, default=1.0, help="multiply energy accumulation (test quotas)")
     b.add_argument("--buffer", type=int, default=500, help="offline buffer size")
+    b.add_argument("--self-w", type=float, default=0.0, help="the meter's own consumption added to readings (W)")
     args = p.parse_args()
     if args.cmd == "pair":
         cmd_pair(args)

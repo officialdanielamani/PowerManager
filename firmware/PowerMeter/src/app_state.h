@@ -37,6 +37,9 @@ struct MeterConfig {
   float volt_min = 0;  // operating voltage range; 0 = no limit on that side
   float volt_max = 0;
   uint8_t volt_action = ACT_HOLD;
+  float tare_a = 0;    // own consumption on the measured line (ESP32 + SSR)
+  float tare_w = 0;
+  bool tare_limits = true;  // use tared values for the kWh limit and max current
   bool tamper_protect = false;
   uint8_t tamper_action = ACT_HOLD;
 };
@@ -57,6 +60,7 @@ struct SessionState {
   bool over = false;      // kWh limit passed with KWH_WARN (warned once, power stays on)
   bool ended = false;     // session_end already sent (kWh limit with KWH_END, or time limit)
   uint8_t stopReason = STOP_NONE;  // why status is SESS_ENDED
+  double tareKwh = 0;     // own consumption counted this session (tare W x time with readings)
 };
 
 struct AppState {

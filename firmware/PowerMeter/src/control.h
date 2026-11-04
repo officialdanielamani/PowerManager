@@ -23,7 +23,9 @@ void reportNow();
 void emitEvent(const char *e, void (*fill)(JsonObject, void *) = nullptr, void *ctx = nullptr);
 
 uint32_t nextReset();      // epoch of the next session reset, 0 = none / unknown
-double sessionKwh();
+double sessionKwh();       // raw (as measured)
+double sessionKwhTared();  // minus own consumption (= sessionKwh when no tare)
+double sessionKwhLimit();  // the value the kWh limit uses (tared if "tare_limits")
 void stateJson(JsonObject o);   // protocol "state" body
 uint32_t stateVersion();        // changes whenever the state changes
 

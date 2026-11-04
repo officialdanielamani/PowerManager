@@ -1,13 +1,16 @@
 """Tare: subtract the meter's own consumption (ESP32 power supply + SSR on the measured line).
 
 Raw values are always stored as measured; tared values are computed when displayed or exported.
-Limits on the meter (kWh quota, max current, voltage) keep using raw values.
+The offsets are part of the meter config, so with "tare_limits" (default) the meter itself
+uses tared values for its kWh limit and max current (firmware 0.3+). Voltage is never tared.
 """
 
 
 def offsets(device):
     """(amps, watts) or None when no tare is set."""
-    a, w = float(device.tare_a or 0), float(device.tare_w or 0)
+    cfg = device.cfg or {}
+    a = float(cfg.get("tare_a", device.tare_a or 0) or 0)
+    w = float(cfg.get("tare_w", device.tare_w or 0) or 0)
     return (a, w) if (a or w) else None
 
 

@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.3.0"
 #define HW_NAME "esp32s3-supermini"
 #define HW_INFO "PZEM-004T 1Chn"   // free text shown in "Get meter info" on the server
 #define PROTO_VERSION 1

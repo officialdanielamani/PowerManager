@@ -50,7 +50,9 @@ def meter_summary(d, show_price=None):
     chans_t = [tare_svc.reading(c, tare) for c in chans]
     w_t = sum((c.get("w") or 0) for c in chans_t) if chans_t else None
     kwh_t = None
-    if kwh_now is not None:
+    if tare and sess.get("kwh_t") is not None:
+        kwh_t = round(float(sess["kwh_t"]), 4)  # the meter's own tared value (firmware 0.3+), used for its limit
+    elif kwh_now is not None:
         secs = ((sess_end or now()) - sess_start) if sess_start else 0
         kwh_t = round(tare_svc.kwh(float(kwh_now), secs, tare), 4)
     cost_t = round(kwh_t * price, 4) if show_price and price is not None and kwh_t is not None else None

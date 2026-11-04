@@ -276,6 +276,7 @@ static void hState() {
   d["outbox"] = net::outboxCount();
   d["next_reset"] = control::nextReset();
   d["kwh"] = serialized(String(control::sessionKwh(), 4));
+  d["kwh_limit"] = serialized(String(control::sessionKwhLimit(), 4));  // what the kWh limit compares
   d["hw_info"] = HW_INFO;
   d["heap"] = ESP.getFreeHeap();
   if (battery::enabled()) {
@@ -310,6 +311,9 @@ static void hState() {
   c["mode"] = g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
   c["offline_off_min"] = g.cfg.offline_off_min;
   static const char *PA[] = {"run", "hold", "end"};
+  c["tare_a"] = g.cfg.tare_a;
+  c["tare_w"] = g.cfg.tare_w;
+  c["tare_limits"] = g.cfg.tare_limits;
   c["volt_min"] = g.cfg.volt_min;
   c["volt_max"] = g.cfg.volt_max;
   c["volt_action"] = PA[g.cfg.volt_action % 3];

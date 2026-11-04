@@ -179,5 +179,5 @@ When an *Offline* and a *No power* incident are both ongoing and started within 
 
 ## Tare
 
-Raw readings are stored unchanged. Tared values are computed for display/export only:
+The offsets are part of the meter config (`tare_a`, `tare_w`, `tare_limits`), so the meter can use them for its limits (firmware 0.3+). Raw readings are stored unchanged. The meter reports its own tared session kWh (`kwh_t`), which the server shows; elsewhere tared values are computed for display/export:
 `A' = max(0, A − tare_a)`, `W' = max(0, W − tare_w)`, `kWh' = max(0, kWh − tare_w × hours)` (hours = the session's duration, or the time covered by the history range/bucket). CSV exports of raw data get extra `A_tared` / `W_tared` columns when a tare is set.

@@ -206,6 +206,15 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   m.volt_min = vmin;
   m.volt_max = vmax;
   m.volt_action = action(v["action"] | "hold");
+  JsonObject ta = c["tare"];
+  float tA = ta["a"] | 0.0f, tW = ta["w"] | 0.0f;
+  if (tA < 0 || tA > 5 || tW < 0 || tW > 500) {
+    err = "tare";
+    return false;
+  }
+  m.tare_a = tA;
+  m.tare_w = tW;
+  m.tare_limits = ta["limits"] | true;
   JsonObject t = c["tamper"];
   m.tamper_protect = t["protect"] | false;
   m.tamper_action = action(t["action"] | "hold");

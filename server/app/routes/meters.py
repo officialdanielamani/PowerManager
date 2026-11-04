@@ -130,17 +130,8 @@ def configure(pk):
                 errors.append(f"{label} auto-delete: days must be 1–3650")
             else:
                 retention[key] = (form.get(f"{key}_autodel") == "on", int(raw))
-        tare_vals = {}
-        for key, label, hi in (("tare_a", "Tare current", 5.0), ("tare_w", "Tare power", 500.0)):
-            raw = (form.get(key) or "0").strip() or "0"
-            try:
-                tare_vals[key] = float(raw)
-                if not 0 <= tare_vals[key] <= hi:
-                    raise ValueError
-            except ValueError:
-                errors.append(f"{label} must be between 0 and {hi:g}")
         if not errors:
-            device.tare_a, device.tare_w = tare_vals["tare_a"], tare_vals["tare_w"]
+            device.tare_a, device.tare_w = cfg["tare_a"], cfg["tare_w"]  # mirror (tare is part of cfg)
             device.data_autodel, device.data_autodel_days = retention["data"]
             device.events_autodel, device.events_autodel_days = retention["events"]
             device.name, device.info = name, info

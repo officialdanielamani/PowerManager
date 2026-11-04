@@ -81,6 +81,9 @@ def default_cfg(n_channels=1):
         "volt_action": DEFAULT_PROTECT_ACTION,
         "tamper_protect": False,
         "tamper_action": DEFAULT_PROTECT_ACTION,
+        "tare_a": 0.0,             # own consumption (ESP32 + SSR) on the measured line
+        "tare_w": 0.0,
+        "tare_limits": True,       # the meter uses tared values for the kWh limit and max current
     }
 
 
@@ -138,6 +141,9 @@ def parse_form(form, device):
         errors.append("Operating voltage: Min must be lower than Max")
     a = form.get("volt_action", DEFAULT_PROTECT_ACTION)
     cfg["volt_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
+    cfg["tare_a"] = _num(form, "tare_a", float, 0, 5, "Tare current", errors, 0.0)
+    cfg["tare_w"] = _num(form, "tare_w", float, 0, 500, "Tare power", errors, 0.0)
+    cfg["tare_limits"] = form.get("tare_limits") == "on"
     cfg["tamper_protect"] = form.get("tamper_protect") == "on"
     a = form.get("tamper_action", DEFAULT_PROTECT_ACTION)
     cfg["tamper_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
@@ -159,6 +165,8 @@ def to_device(cfg, ver):
             "sess": sess,
             "volt": {"min": float(cfg.get("volt_min", 0) or 0), "max": float(cfg.get("volt_max", 0) or 0),
                      "action": cfg.get("volt_action", DEFAULT_PROTECT_ACTION)},
+            "tare": {"a": float(cfg.get("tare_a", 0) or 0), "w": float(cfg.get("tare_w", 0) or 0),
+                     "limits": bool(cfg.get("tare_limits", True))},
             "tamper": {"protect": bool(cfg.get("tamper_protect")),
                        "action": cfg.get("tamper_action", DEFAULT_PROTECT_ACTION)},
             "ch": [

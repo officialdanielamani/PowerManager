@@ -229,6 +229,8 @@ def _session_progress(device, items):
     if kwh is None or sess.get("sid") not in (None, latest["sid"]):
         return  # older session than the one we know: ignore
     sess["sid"], sess["kwh"] = latest["sid"], kwh
+    if latest.get("kwh_t") is not None:
+        sess["kwh_t"] = _f(latest.get("kwh_t"))
     st["sess"] = sess
     device.last_state = st
     s = Session.query.filter_by(device_fk=device.id, gen=device.pair_gen, sid=latest["sid"]).first()
@@ -393,8 +395,7 @@ def process_event(device, ev):
             if isinstance(sid, int):
                 s = _session(device, sid)
                 if s.ended_at is None:
-                    s.ended_at, s.end_reason = ev.ts, "quota"
-                    s.kwh_used = _f(kwh) or s.kwh_used
+                    s.ended_at, s.end_reason = ev.ts, "quota"  # kWh used: from session_end (raw)
             notify.notify(device, "kwh_exceeded", f"Session kWh limit reached ({kwh} kWh): power off, session ended")
         elif action == "hold":
             notify.notify(device, "kwh_exceeded",
@@ -421,7 +422,7 @@ def process_event(device, ev):
             if s.ended_at is None:  # keep the first end (e.g. the kWh limit), not a later Renew
                 s.ended_at = ev.ts
                 s.end_reason = str(d.get("reason", ""))[:10] or None
-            if d.get("kwh") is not None:
+            if d.get("kwh") is not None:  # always the raw kWh
                 s.kwh_used = _f(d.get("kwh")) or 0.0
     elif e == "server_back":
         last_off = (Incident.query
