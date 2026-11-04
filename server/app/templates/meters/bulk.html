@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Bulk Configuration · PowerManager{% endblock %}
+{% set f = form %}
+{% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
+{% macro chk(name, default) -%}{{ 'checked' if (f.get(name) == 'on' if f else default) }}{%- endmacro %}
+{% macro section(key, title) -%}
+<div class="card mb-3 pm-bulk" data-group="{{ key }}">
+  <div class="card-header d-flex align-items-center gap-2">
+    <div class="form-check form-switch mb-0">
+      <input class="form-check-input" type="checkbox" role="switch" name="apply_{{ key }}" id="apply_{{ key }}" {{ 'checked' if f and f.get('apply_' ~ key) == 'on' }}>
+      <label class="form-check-label fw-semibold" for="apply_{{ key }}">{{ title }}</label>
+    </div>
+    {% if differs.get(key) %}<span class="badge text-bg-warning" title="The selected meters do not all have the same value. Shown: {{ devices[0].name }}">values differ</span>{% endif %}
+    <span class="ms-auto small text-body-secondary pm-bulk-hint">unchanged</span>
+  </div>
+  <fieldset class="card-body" disabled>{{ caller() }}</fieldset>
+</div>
+{%- endmacro %}
+{% block content %}
+<div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+  <h1 class="h4 mb-0">Bulk Configuration</h1>
+  <span class="badge text-bg-secondary">{{ devices|length }} meter{{ '' if devices|length == 1 else 's' }}</span>
+  <a href="{{ url_for('main.dashboard') }}" class="btn btn-sm btn-outline-secondary ms-auto">Back to dashboard</a>
+</div>
+
+{% if results %}
+<div class="card mb-3 border-success">
+  <div class="card-header fw-semibold">Applied</div>
+  <div class="table-responsive px-3"><table class="table table-sm align-middle mb-0">
+    <thead><tr><th>Meter</th><th>Device ID</th><th>Config</th></tr></thead>
+    <tbody>
+    {% for r in results %}
+      <tr data-sync="{{ url_for('meters.sync_status', pk=r.id) if r.changed else '' }}">
+        <td><a href="{{ url_for('meters.info', pk=r.id) }}">{{ r.name }}</a></td><td><code>{{ r.device_id }}</code></td>
+        <td class="pm-sync">{% if r.changed %}<span class="spinner-border spinner-border-sm"></span> sending…{% else %}<span class="text-body-secondary">no change</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
+{% for e in errors %}<div class="alert alert-danger py-2">{{ e }}</div>{% endfor %}
+
+<form method="post" id="bulkForm">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="ids" value="{{ ids }}">
+
+<div class="card mb-3">
+  <div class="card-header fw-semibold">Device ID</div>
+  <div class="card-body d-flex flex-wrap gap-2">
+    {% for d in devices %}
+    <span class="badge rounded-pill text-bg-light border fw-normal fs-6"><span class="pm-dot {{ 'on' if d.online else 'off' }} me-1"></span>{{ d.name }} <code class="ms-1">{{ d.device_id }}</code></span>
+    {% endfor %}
+  </div>
+  <div class="card-footer small text-body-secondary">Switch on only the sections you want to change. Everything else (and each meter's name and info) stays as it is on every meter.</div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-6">
+    {% call section('report', groups.report) %}
+      <div class="input-group" style="max-width:260px"><input class="form-control" type="number" name="report_s" min="10" max="3600" value="{{ val('report_s', cfg.report_s) }}"><span class="input-group-text">seconds</span></div>
+      <div class="form-text">10 s – 1 h.</div>
+    {% endcall %}
+
+    {% call section('kwh', groups.kwh) %}
+      <label class="form-label">Max kWh per session</label>
+      <div class="input-group" style="max-width:260px"><input class="form-control" type="number" step="0.001" min="0" max="100000" name="kwh_max_0" value="{{ val('kwh_max_0', ch0.kwh_max) }}"><span class="input-group-text">kWh</span></div>
+      <div class="form-text mb-2">0 = unlimited. Applied to every channel of each meter.</div>
+      {% set ka = val('kwh_action_0', ch0.get('kwh_action') or ('end' if ch0.get('kwh_end', true) else 'warn')) %}
+      <div class="small fw-semibold">When the kWh limit is reached</div>
+      {% for key, label in kwh_actions.items() %}
+      <div class="form-check"><input class="form-check-input" type="radio" name="kwh_action_0" id="ka{{ key }}" value="{{ key }}" {{ 'checked' if ka == key }}>
+        <label class="form-check-label small" for="ka{{ key }}">{{ label }}{% if key == 'end' %} <span class="text-body-secondary">(default)</span>{% endif %}</label></div>
+      {% endfor %}
+    {% endcall %}
+
+    {% call section('amp', groups.amp) %}
+      <div class="input-group" style="max-width:260px"><input class="form-control" type="number" step="0.1" min="0" max="{{ amp_rating }}" name="amp_max_0" value="{{ val('amp_max_0', ch0.amp_max) }}"><span class="input-group-text">A</span></div>
+      <div class="form-text">0 = off. Max {{ amp_rating }} A (lowest rating among the selected meters).</div>
+    {% endcall %}
+  </div>
+
+  <div class="col-12 col-xl-6">
+    {% call section('session', groups.session) %}
+      {% set mode = val('sess_mode', cfg.sess_mode) %}
+      <div class="mb-2">
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_none" value="none" {{ 'checked' if mode == 'none' }}><label class="form-check-label" for="m_none">None</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_dur" value="duration" {{ 'checked' if mode == 'duration' }}><label class="form-check-label" for="m_dur">Duration</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_daily" value="daily" {{ 'checked' if mode == 'daily' }}><label class="form-check-label" for="m_daily">Every day at</label></div>
+      </div>
+      <div class="row g-2 mb-2" data-mode="duration">
+        <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="365" name="dur_d" value="{{ val('dur_d', dur_d) }}"><span class="input-group-text">days</span></div></div>
+        <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="23" name="dur_h" value="{{ val('dur_h', dur_h) }}"><span class="input-group-text">h</span></div></div>
+        <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="59" name="dur_m" value="{{ val('dur_m', dur_m) }}"><span class="input-group-text">min</span></div></div>
+      </div>
+      <div class="mb-2" data-mode="daily">
+        <div class="input-group input-group-sm" style="max-width:240px"><input class="form-control" type="time" name="daily_at" value="{{ val('daily_at', cfg.daily_at) }}"><span class="input-group-text">{{ tz_label() }}</span></div>
+      </div>
+      <div class="form-check"><input class="form-check-input" type="checkbox" name="auto" id="auto" {{ chk('auto', cfg.auto) }}><label class="form-check-label" for="auto">Auto renew session</label></div>
+    {% endcall %}
+
+    {% call section('offline', groups.offline) %}
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="offline_off" id="offline_off" {{ chk('offline_off', cfg.offline_off) }}>
+          <label class="form-check-label" for="offline_off">Relay off if device offline for</label></div>
+        <div class="input-group input-group-sm" style="width:150px"><input class="form-control" type="number" min="1" max="1440" name="offline_off_min" value="{{ val('offline_off_min', cfg.offline_off_min) }}"><span class="input-group-text">min</span></div>
+      </div>
+    {% endcall %}
+
+    {% call section('viewers', groups.viewers) %}
+      {% if viewers %}
+      <div class="mb-2">
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="viewer_mode" id="vm_add" value="add" checked><label class="form-check-label" for="vm_add">Add these users</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="viewer_mode" id="vm_rm" value="remove"><label class="form-check-label" for="vm_rm">Remove these users</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="viewer_mode" id="vm_set" value="replace"><label class="form-check-label" for="vm_set">Replace with exactly these</label></div>
+      </div>
+      {% for v in viewers %}
+      <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" name="viewers" value="{{ v.id }}" id="v{{ v.id }}"><label class="form-check-label" for="v{{ v.id }}">{{ v.username }}</label></div>
+      {% endfor %}
+      {% else %}
+      <div class="small text-body-secondary">No view-only users yet.</div>
+      {% endif %}
+    {% endcall %}
+  </div>
+</div>
+
+<div class="d-flex gap-2 align-items-center">
+  <button class="btn btn-primary" id="applyBtn"><i class="bi bi-check2-all me-1"></i>Apply to {{ devices|length }} meter{{ '' if devices|length == 1 else 's' }}</button>
+  <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+  <span class="small text-body-secondary" id="applySummary"></span>
+</div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  function syncGroups() {
+    var on = [];
+    document.querySelectorAll('.pm-bulk').forEach(function (card) {
+      var sw = card.querySelector('[name^=apply_]');
+      card.querySelector('fieldset').disabled = !sw.checked;
+      card.querySelector('.pm-bulk-hint').textContent = sw.checked ? 'will be changed' : 'unchanged';
+      card.classList.toggle('border-primary', sw.checked);
+      if (sw.checked) on.push(card.querySelector('label').textContent.trim());
+    });
+    document.getElementById('applyBtn').disabled = on.length === 0;
+    document.getElementById('applySummary').textContent = on.length ? 'Changes: ' + on.join(', ') : 'Switch on a section to change it.';
+  }
+  document.querySelectorAll('[name^=apply_]').forEach(function (s) { s.addEventListener('change', syncGroups); });
+  function syncMode() {
+    var r = document.querySelector('input[name=sess_mode]:checked');
+    document.querySelectorAll('[data-mode]').forEach(function (el) { el.style.display = r && el.dataset.mode === r.value ? '' : 'none'; });
+  }
+  document.querySelectorAll('input[name=sess_mode]').forEach(function (r) { r.addEventListener('change', syncMode); });
+  syncGroups(); syncMode();
+
+  // After applying: follow each meter's confirmation.
+  document.querySelectorAll('tr[data-sync]').forEach(function (row) {
+    var url = row.dataset.sync, cell = row.querySelector('.pm-sync'), started = Date.now();
+    if (!url) return;
+    var stop = PM.poll(url, 1500, function (s) {
+      if (s.synced) { stop(); cell.innerHTML = '<span class="badge text-bg-success">Confirmed by meter</span>'; }
+      else if (s.error) { stop(); cell.innerHTML = '<span class="badge text-bg-danger">Rejected: ' + PM.esc(s.error) + '</span>'; }
+      else if (!s.online || Date.now() - started > 15000) { stop(); cell.innerHTML = '<span class="badge text-bg-info">Pending sync</span> <span class="small text-body-secondary">' + (s.online ? 'not confirmed yet' : 'meter offline, applies on reconnect') + '</span>'; }
+    });
+  });
+})();
+</script>
+{% endblock %}

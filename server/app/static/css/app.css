@@ -26,3 +26,7 @@ body { min-height: 100vh; background: var(--bs-tertiary-bg); }
 .pm-stat { background: var(--bs-tertiary-bg); border-radius: .5rem; padding: .5rem .75rem; }
 .pm-big { font-size: 1.6rem; font-weight: 600; line-height: 1.1; }
 [data-copy] { cursor: pointer; }
+.pm-meter-row { margin-bottom: .5rem; }
+.pm-meter-row .progress { margin-top: 2px; }
+.pm-selbar { position: sticky; top: .5rem; z-index: 1010; }
+.meter-card.pm-selected { outline: 2px solid var(--bs-primary); }

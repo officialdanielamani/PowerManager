@@ -19,10 +19,22 @@ Login: rate limited to 5 tries per minute per IP; view-only accounts also lock a
 Username, Password, Confirm Password, Phone, Email (all required) + Setup token if `SETUP_TOKEN` is set → creates the admin → goes to the dashboard.
 
 ### Dashboard `/`
-- A grid of **meter cards**: name, info, online dot, relay state, live W, session kWh used / max (progress bar), session status (active / quota / expired / tripped), last seen.
-- Cards update live (the browser gets updates over a UI WebSocket or SSE).
+- A grid of **meter cards**: name, info, online dot, relay state, live W, then two labeled bars:
+  - **Energy**: session kWh used / limit (yellow once the limit is reached)
+  - **Time** (only when the session has a time limit): time left, e.g. "1 h 29 min left (auto renew)", counting down every second; grey "Session ended" / "Ended, renews in …" after the end
+  - **Session cost** (if a price is set), status, ongoing incidents, *Pending sync*, last seen.
+- Cards update live (polling every 5 s; the time bar ticks every second using the server's clock).
+- **Admin:** a checkbox on each card. When meters are selected, a bar appears: *N selected · Select all · Clear · **[Renew Now]** · **[Bulk Configuration]***.
+  - **Renew Now** starts a new session on every selected meter (offline meters renew when they reconnect).
+  - **Bulk Configuration** opens the page below.
 - Left nav: Dashboard, **[Add New Meter]** (admin), Notifications, **Firmware** (admin; placeholder for OTA updates), Settings, Logout.
-- View-only users see only the meters linked to them (or all, if *View all meters* is set).
+- View-only users see only the meters linked to them (or all, if *View all meters* is set), without checkboxes.
+
+### Bulk Configuration (admin) `/meters/bulk/configure?ids=…`
+- **Device ID**: the selected meters (name, ID, online dot).
+- Sections, each with a **Change** switch. Only switched-on sections are written, so other settings (and each meter's name/info) stay as they are on every meter. A *values differ* badge shows when the selected meters currently disagree (the form shows the first meter's values):
+  Send data every · kWh limit (+ what happens at the limit) · Max current (max = lowest rating among the selected meters) · Session time limit & auto renew · Relay off when offline · Linked users (*add* / *remove* / *replace with exactly these*).
+- Applying pushes a new config version to each changed meter and lists each meter's result live: *Confirmed by meter* / *Pending sync (offline)* / *Rejected*.
 
 ### Add New Meter (admin)
 QR + Server address + Port + Secure + Pairing code + 10-min countdown + [Regenerate]. Redirects to Configure when paired. Shows a warning if *Settings → Server* is not set yet.

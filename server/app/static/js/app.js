@@ -80,6 +80,81 @@ var PM = (function () {
     set(root, 'next_reset', function (el) { el.textContent = m.next_reset || ''; });
   }
 
+  // ------------------------------------------------------------ session time helpers
+  function dur(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    if (d) return d + ' d ' + h + ' h ' + m + ' min';
+    if (h) return h + ' h ' + m + ' min ' + s + ' sec';
+    return m + ' min ' + s + ' sec';
+  }
+  // {pct, text, cls}: how much of the session time is used, and what is left
+  function sessionTime(m, now) {
+    if (m.sess_mode === 'none') return null;
+    if (m.sess_ended) return {pct: 100, text: m.auto && m.next_reset_ts ? 'Ended, renews in ' + dur(m.next_reset_ts - now) : 'Session ended', cls: 'bg-secondary'};
+    if (!m.next_reset_ts || !m.sess_start_ts) return {pct: 0, text: '–', cls: 'bg-info'};
+    var total = m.next_reset_ts - m.sess_start_ts, used = now - m.sess_start_ts;
+    var pct = total > 0 ? Math.min(100, Math.max(0, used / total * 100)) : 0;
+    var label = m.auto ? ' left (auto renew)' : ' left';
+    return {pct: pct, text: dur(m.next_reset_ts - now) + label, cls: pct >= 90 ? 'bg-warning' : 'bg-info'};
+  }
+
+  // ------------------------------------------------------------ dashboard
+  function dashboard(opt) {
+    var meters = {}, offset = 0;
+    function store(list, serverTime) {
+      list.forEach(function (m) { meters[m.id] = m; if (m.server_time) offset = m.server_time - Date.now() / 1000; });
+    }
+    function tick() {
+      var now = Date.now() / 1000 + offset;
+      Object.keys(meters).forEach(function (id) {
+        var card = document.querySelector('[data-meter="' + id + '"]');
+        if (!card) return;
+        var t = sessionTime(meters[id], now);
+        set(card, 'time-row', function (el) { el.classList.toggle('d-none', !t); });
+        if (!t) return;
+        set(card, 'time-left', function (el) { el.textContent = t.text; });
+        set(card, 'time-bar', function (el) { el.style.width = t.pct + '%'; el.className = 'progress-bar ' + t.cls; });
+      });
+    }
+    store(opt.data);
+    tick();
+    setInterval(tick, 1000);
+    poll(opt.poll, 5000, function (data) {
+      store(data.meters);
+      data.meters.forEach(function (m) {
+        var card = document.querySelector('[data-meter="' + m.id + '"]');
+        if (card) updateMeterCard(card, m);
+      });
+      tick();
+    });
+
+    // selection (admin)
+    var bar = document.getElementById('selBar');
+    if (!bar) return;
+    function selected() { return Array.prototype.map.call(document.querySelectorAll('.pm-sel:checked'), function (c) { return +c.value; }); }
+    function refresh() {
+      var ids = selected();
+      bar.classList.toggle('d-none', ids.length === 0);
+      document.getElementById('selCount').textContent = ids.length;
+      document.querySelectorAll('.pm-sel').forEach(function (c) { c.closest('.meter-card').classList.toggle('pm-selected', c.checked); });
+    }
+    document.querySelectorAll('.pm-sel').forEach(function (c) { c.addEventListener('change', refresh); });
+    document.getElementById('selAll').onclick = function () { document.querySelectorAll('.pm-sel').forEach(function (c) { c.checked = true; }); refresh(); };
+    document.getElementById('selNone').onclick = function () { document.querySelectorAll('.pm-sel').forEach(function (c) { c.checked = false; }); refresh(); };
+    document.getElementById('bulkRenew').onclick = function () {
+      var ids = selected();
+      if (!ids.length || !confirm('Start a new session now on ' + ids.length + ' meter(s)?')) return;
+      post(opt.renew, {ids: ids}).then(function (r) {
+        toast(r.message || r.error, r.ok ? 'success' : 'danger');
+      });
+    };
+    document.getElementById('bulkCfg').onclick = function () {
+      var ids = selected();
+      if (ids.length) location.href = opt.configure + '?ids=' + ids.join(',');
+    };
+  }
+
   // ------------------------------------------------------------ meter info page
   function fmt(v, d) { return v == null ? '–' : Number(v).toFixed(d); }
 
@@ -278,5 +353,6 @@ var PM = (function () {
     });
   });
 
-  return {post: post, poll: poll, toast: toast, esc: esc, bindActions: bindActions, updateMeterCard: updateMeterCard, meterInfo: meterInfo};
+  return {post: post, poll: poll, toast: toast, esc: esc, bindActions: bindActions, updateMeterCard: updateMeterCard, meterInfo: meterInfo,
+          dashboard: dashboard, sessionTime: sessionTime, dur: dur};
 })();

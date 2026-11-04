@@ -1,5 +1,6 @@
 import csv
 import io
+import logging
 import json
 import secrets
 
@@ -19,6 +20,7 @@ from .device_api import ensure_device_defaults
 from .main import meter_summary
 
 bp = Blueprint("meters", __name__, url_prefix="/meters")
+log = logging.getLogger(__name__)
 
 PAIRING_TTL_S = 600
 CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
@@ -399,3 +401,129 @@ def incidents_csv(pk):
     hdr = ["type", "started_utc", "started_local", "ended_utc", "ended_local", "duration_s",
            "time_estimated", "details"]
     return _csv_response(f"{device.device_id}_events.csv", hdr, rows)
+
+
+# ------------------------------------------------------------------ bulk actions (dashboard)
+
+def _bulk_devices(ids):
+    devices = [d for d in (db.session.get(Device, i) for i in ids) if d is not None and not d.removed_at]
+    return sorted(devices, key=lambda d: d.name.lower())
+
+
+def _ids_arg(raw):
+    return sorted({int(x) for x in str(raw or "").split(",") if x.strip().isdigit()})[:500]
+
+
+@bp.post("/bulk/renew")
+@admin_required
+def bulk_renew():
+    body = request.get_json(silent=True) or {}
+    devices = _bulk_devices([int(i) for i in body.get("ids", []) if str(i).isdigit()])
+    if not devices:
+        return jsonify(ok=False, error="No meters selected"), 400
+    sent = queued = 0
+    for d in devices:
+        cmd, err = commands.issue(d, "renew", {}, current_user)
+        if cmd is not None and cmd.sent_at:
+            sent += 1
+        elif cmd is not None:
+            queued += 1
+    msg = f"Renew sent to {sent} meter(s)"
+    if queued:
+        msg += f"; {queued} offline meter(s) will renew when they reconnect"
+    return jsonify(ok=True, message=msg, sent=sent, queued=queued)
+
+
+# Settings that Bulk Configuration can change, each applied only when its "Change" switch is on.
+BULK_GROUPS = {
+    "report": "Send data every",
+    "kwh": "kWh limit",
+    "amp": "Max current",
+    "session": "Session time limit & auto renew",
+    "offline": "Relay off when offline",
+    "viewers": "Linked users",
+}
+
+
+def _bulk_apply(cfg, new, groups):
+    """Copy only the chosen groups of `new` into a meter's existing `cfg`."""
+    out = dict(cfg)
+    out["ch"] = [dict(c) for c in cfg.get("ch", [])]
+    if "report" in groups:
+        out["report_s"] = new["report_s"]
+    if "session" in groups:
+        for k in ("sess_mode", "dur_min", "daily_at", "auto"):
+            out[k] = new[k]
+    if "offline" in groups:
+        out["offline_off"], out["offline_off_min"] = new["offline_off"], new["offline_off_min"]
+    for c in out["ch"]:  # the same limits for every channel of every selected meter
+        if "kwh" in groups:
+            c["kwh_max"], c["kwh_action"] = new["ch"][0]["kwh_max"], new["ch"][0]["kwh_action"]
+            c.pop("kwh_end", None)
+        if "amp" in groups:
+            c["amp_max"] = new["ch"][0]["amp_max"]
+    return out
+
+
+def _differs(devices, fn):
+    vals = {repr(fn(d.cfg or {})) for d in devices}
+    return len(vals) > 1
+
+
+@bp.route("/bulk/configure", methods=["GET", "POST"])
+@admin_required
+def bulk_configure():
+    devices = _bulk_devices(_ids_arg(request.values.get("ids")))
+    if not devices:
+        flash("Select at least one meter on the dashboard first.", "warning")
+        return redirect(url_for("main.dashboard"))
+    first = devices[0]
+    rating = min(devconfig.amp_rating(d) for d in devices)
+    errors, results = [], None
+    if request.method == "POST":
+        form = request.form
+        groups = {g for g in BULK_GROUPS if form.get(f"apply_{g}") == "on"}
+        if not groups:
+            errors.append("Switch on at least one section to change.")
+        # Validate with a one-channel stand-in limited to the lowest current rating.
+        probe = Device(device_id="BULK", name="bulk", caps={"channels": 1, "amp_rating": rating}, cfg={})
+        new, cfg_errors = devconfig.parse_form(form, probe)
+        errors += [e.replace("CH1 ", "") for e in cfg_errors]
+        if not errors:
+            viewer_mode = form.get("viewer_mode", "add")
+            viewer_ids = {int(x) for x in form.getlist("viewers") if x.isdigit()}
+            results = []
+            for d in devices:
+                cfg = _bulk_apply(d.cfg or devconfig.default_cfg(devconfig.channel_count(d)), new, groups)
+                changed = cfg != d.cfg
+                if changed:
+                    d.cfg = cfg
+                    d.cfg_ver_wanted += 1
+                    d.cfg_error = None
+                if "viewers" in groups:
+                    current = {v.user_fk for v in MeterViewer.query.filter_by(device_fk=d.id)}
+                    target = (current | viewer_ids if viewer_mode == "add" else
+                              current - viewer_ids if viewer_mode == "remove" else viewer_ids)
+                    _set_viewers(d, target)
+                db.session.commit()
+                if changed:
+                    _push_config(d)
+                results.append({"id": d.id, "name": d.name, "device_id": d.device_id, "changed": changed})
+            group_names = ", ".join(sorted(BULK_GROUPS[g] for g in groups))
+            log.info("Bulk configuration (%s) applied to %d meter(s) by %s", group_names, len(devices),
+                     current_user.username)
+    cfg = first.cfg or devconfig.default_cfg(devconfig.channel_count(first))
+    dur = int(cfg.get("dur_min", 1440))
+    ch0 = (cfg.get("ch") or [{}])[0]
+    differs = {
+        "report": _differs(devices, lambda c: c.get("report_s")),
+        "kwh": _differs(devices, lambda c: [(x.get("kwh_max"), devconfig.kwh_action(x)) for x in c.get("ch", [])]),
+        "amp": _differs(devices, lambda c: [x.get("amp_max") for x in c.get("ch", [])]),
+        "session": _differs(devices, lambda c: (c.get("sess_mode"), c.get("dur_min"), c.get("daily_at"), c.get("auto"))),
+        "offline": _differs(devices, lambda c: (c.get("offline_off"), c.get("offline_off_min"))),
+    }
+    return render_template("meters/bulk.html", devices=devices, ids=",".join(str(d.id) for d in devices),
+                           cfg=cfg, ch0=ch0, dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
+                           amp_rating=rating, kwh_actions=devconfig.KWH_ACTIONS, groups=BULK_GROUPS,
+                           differs=differs, errors=errors, results=results, viewers=_viewers(),
+                           form=request.form if errors else None)

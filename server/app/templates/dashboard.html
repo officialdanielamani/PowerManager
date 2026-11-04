@@ -20,14 +20,31 @@
 </div>
 {% endif %}
 
+{% if current_user.is_admin and meters %}
+<div class="pm-selbar card shadow-sm mb-3 d-none" id="selBar">
+  <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
+    <span class="fw-semibold"><span id="selCount">0</span> selected</span>
+    <button class="btn btn-sm btn-link" id="selAll">Select all</button>
+    <button class="btn btn-sm btn-link" id="selNone">Clear</button>
+    <span class="ms-auto d-flex gap-2">
+      <button class="btn btn-sm btn-outline-primary" id="bulkRenew"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
+      <button class="btn btn-sm btn-primary" id="bulkCfg"><i class="bi bi-sliders me-1"></i>Bulk Configuration</button>
+    </span>
+  </div>
+</div>
+{% endif %}
+
 <div class="row g-3" id="meterGrid">
   {% for m in meters %}
   <div class="col-12 col-sm-6 col-xl-4 col-xxl-3">
-    <a href="{{ url_for('meters.info', pk=m.id) }}" class="card meter-card h-100 text-decoration-none" data-meter="{{ m.id }}">
+    <div class="card meter-card h-100 position-relative" data-meter="{{ m.id }}">
       <div class="card-body">
-        <div class="d-flex align-items-start mb-2">
+        <div class="d-flex align-items-start gap-2 mb-2">
+          {% if current_user.is_admin %}
+          <input class="form-check-input pm-sel mt-1 position-relative" type="checkbox" value="{{ m.id }}" aria-label="Select {{ m.name }}" style="z-index:2">
+          {% endif %}
           <div class="me-auto">
-            <div class="fw-semibold text-body">{{ m.name }}</div>
+            <a href="{{ url_for('meters.info', pk=m.id) }}" class="fw-semibold text-body text-decoration-none stretched-link">{{ m.name }}</a>
             <div class="small text-body-secondary">{{ m.info or m.device_id }}</div>
           </div>
           <span class="pm-dot {{ 'on' if m.online else 'off' }}" data-field="online" title="{{ 'Online' if m.online else 'Offline' }}"></span>
@@ -36,17 +53,26 @@
           <span class="display-6 fw-semibold text-body" data-field="w">{{ m.w if m.w is not none else '–' }}</span><span class="text-body-secondary">W</span>
           <span class="ms-auto badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span>
         </div>
-        <div class="small text-body-secondary d-flex justify-content-between">
-          <span>Session</span>
-          <span data-field="kwh">{{ '%.3f'|format(m.kwh) if m.kwh is not none else '–' }} / {{ m.kwh_max if m.kwh_max else '∞' }} kWh</span>
+
+        <div class="pm-meter-row">
+          <div class="d-flex justify-content-between small"><span class="text-body-secondary"><i class="bi bi-lightning-charge me-1"></i>Energy</span>
+            <span data-field="kwh">{{ '%.3f'|format(m.kwh) if m.kwh is not none else '–' }} / {{ m.kwh_max if m.kwh_max else '∞' }} kWh</span></div>
+          <div class="progress" style="height:6px" title="kWh used of this session's limit">
+            {% set pct = ((m.kwh or 0) / m.kwh_max * 100) if m.kwh_max else 0 %}
+            <div class="progress-bar {{ 'bg-warning' if pct >= 100 else '' }}" data-field="kwh-bar" style="width: {{ [pct, 100]|min }}%"></div>
+          </div>
         </div>
-        <div class="small text-body-secondary d-flex justify-content-between {{ '' if m.cost else 'd-none' }}" data-field="cost-row">
-          <span>Cost</span><span data-field="cost">{{ m.cost or '' }}</span>
+        <div class="pm-meter-row {{ 'd-none' if m.sess_mode == 'none' }}" data-field="time-row">
+          <div class="d-flex justify-content-between small"><span class="text-body-secondary"><i class="bi bi-clock me-1"></i>Time</span>
+            <span data-field="time-left">–</span></div>
+          <div class="progress" style="height:6px" title="Session time used">
+            <div class="progress-bar bg-info" data-field="time-bar" style="width:0%"></div>
+          </div>
         </div>
-        <div class="progress mb-2" style="height:6px">
-          {% set pct = ((m.kwh or 0) / m.kwh_max * 100) if m.kwh_max else 0 %}
-          <div class="progress-bar {{ 'bg-warning' if pct >= 100 else '' }}" data-field="kwh-bar" style="width: {{ [pct, 100]|min }}%"></div>
+        <div class="d-flex justify-content-between small mb-2 {{ '' if m.cost else 'd-none' }}" data-field="cost-row">
+          <span class="text-body-secondary"><i class="bi bi-cash-coin me-1"></i>Session cost</span><span class="fw-semibold" data-field="cost">{{ m.cost or '' }}</span>
         </div>
+
         <div class="d-flex flex-wrap gap-1 align-items-center">
           <span data-field="status">{{ status_badge(m.status) }}</span>
           <span data-field="ongoing">
@@ -56,7 +82,7 @@
         </div>
       </div>
       <div class="card-footer small text-body-secondary">Last seen <span data-field="last_seen">{{ m.last_seen }}</span></div>
-    </a>
+    </div>
   </div>
   {% endfor %}
 </div>
@@ -75,11 +101,11 @@
 {% endblock %}
 {% block scripts %}
 <script>
-PM.poll("{{ url_for('main.meters_json') }}", 5000, function (data) {
-  data.meters.forEach(function (m) {
-    var card = document.querySelector('[data-meter="' + m.id + '"]');
-    if (card) PM.updateMeterCard(card, m);
-  });
+PM.dashboard({
+  data: {{ meters|tojson }},
+  poll: "{{ url_for('main.meters_json') }}",
+  renew: "{{ url_for('meters.bulk_renew') }}",
+  configure: "{{ url_for('meters.bulk_configure') }}"
 });
 </script>
 {% endblock %}
