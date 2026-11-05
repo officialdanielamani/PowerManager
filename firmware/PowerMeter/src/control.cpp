@@ -1,6 +1,7 @@
 #include "control.h"
 
 #include <atomic>
+#include <driver/gpio.h>
 
 #include "../config.h"
 #include "outbox.h"
@@ -314,6 +315,8 @@ void begin(Sensor *sensor) {
   sensor_ = sensor;
   sensor_->begin();
   pinMode(PIN_RELAY, OUTPUT);
+  // Strongest output drive: an SSR input needs ~3 V and the 3.3 V rail dips when Wi-Fi transmits.
+  gpio_set_drive_capability((gpio_num_t)PIN_RELAY, GPIO_DRIVE_CAP_3);
   digitalWrite(PIN_RELAY, RELAY_ACTIVE_HIGH ? LOW : HIGH);  // start OFF
   pinMode(PIN_TAMPER, INPUT_PULLUP);
   StateLock l;
@@ -445,6 +448,33 @@ static void readSensor() {
   checkVoltage(ok, r.v);
 }
 
+// Counts relay changes; warns once (serial + "relay_chatter" event) when it switches too often.
+static uint32_t relaySwitches_ = 0;
+uint32_t relaySwitches() { return relaySwitches_; }
+static void noteRelaySwitch(const char *block) {
+  // caller holds StateLock
+  static uint32_t windowStart = 0, inWindow = 0, lastWarnMs = 0;
+  relaySwitches_++;
+  uint32_t now = millis();
+  if (now - windowStart > 60000) {
+    windowStart = now;
+    inWindow = 0;
+  }
+  if (++inWindow > RELAY_CHATTER_SWITCHES && (!lastWarnMs || now - lastWarnMs > 600000)) {
+    lastWarnMs = now;
+    Serial.printf("[relay] WARNING: %lu changes within a minute (last reason: %s)\n", (unsigned long)inWindow,
+                  block ? block : "user");
+    struct Ctx {
+      uint32_t n;
+      const char *why;
+    } ctx = {inWindow, block ? block : "user"};
+    emitEvent("relay_chatter", [](JsonObject o, void *p) {
+      o["n"] = ((Ctx *)p)->n;
+      o["reason"] = ((Ctx *)p)->why;
+    }, &ctx);
+  }
+}
+
 static void checkRules(bool firstPass) {
   StateLock l;
   // First session after pairing / factory reset starts with the first reading.
@@ -548,7 +578,20 @@ static void checkRules(bool firstPass) {
   if (!block || strcmp(block, "offline") != 0) offlineEventSent_ = false;
 
   bool on = g.wantOn && block == nullptr;
+  // Anti-chatter: OFF is immediate, but ON again only after RELAY_MIN_OFF_MS off. A condition that
+  // flips quickly (noisy tamper wire, value on the edge of a limit) then cannot pulse the SSR
+  // (a lamp would flicker / glow brighter and dimmer).
+  static uint32_t offSinceMs = 0;
+  if (on && !g.relayOn && !firstPass && offSinceMs && millis() - offSinceMs < RELAY_MIN_OFF_MS) {
+    on = false;
+    if (!block) block = g.block;  // keep showing why it was off meanwhile
+  }
   if (on != g.relayOn || block != g.block || firstPass) {
+    if (on != g.relayOn || firstPass) {
+      Serial.printf("[relay] %s%s%s\n", on ? "ON" : "OFF", block ? " - " : "", block ? block : "");
+      if (!on) offSinceMs = millis();
+      noteRelaySwitch(block);
+    }
     g.relayOn = on;
     g.block = block;
     digitalWrite(PIN_RELAY, (on == (bool)RELAY_ACTIVE_HIGH) ? HIGH : LOW);
@@ -564,7 +607,7 @@ static void checkTamper() {
     same = 0;
     return;
   }
-  if (++same < 2) return;  // debounce: 2 ticks (~500 ms)
+  if (++same < TAMPER_DEBOUNCE_TICKS) return;  // debounce (~1 s): a long tamper wire picks up noise
   same = 0;
   g.tamper = open;
   if (open && g.cfg.tamper_protect) {

@@ -526,6 +526,7 @@ static void sendInfo() {
   int64_t rtc = timekeep::rtcNow();
   if (rtc >= 0) doc["rtc"] = (uint32_t)rtc;  // DS3231 fitted: its own time (0 = not readable)
   doc["stack"] = sys::stackReport();
+  doc["relay_sw"] = control::relaySwitches();
   doc["reset"] = String(sys::resetReason()) + (sys::safeMode ? " - SAFE MODE (mesh + DS3231 off)" : "");
   if (battery::enabled()) {
     float v = battery::volts();

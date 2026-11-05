@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.6.1"
+#define FW_VERSION "0.6.2"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -80,6 +80,10 @@
 #define STACK_LED 3072
 #define CONTROL_TICK_MS 250       // tamper/relay loop; sensor read every 4th tick (1 s)
 #define TRIP_CONFIRM_READS 2      // over-current must be seen this many reads in a row
+#define RELAY_MIN_OFF_MS 2000     // anti-chatter: after switching OFF, stay OFF at least this long
+                                  // (OFF is always immediate; only the next ON waits)
+#define RELAY_CHATTER_SWITCHES 6  // more relay changes than this within 60 s = warning on serial + event
+#define TAMPER_DEBOUNCE_TICKS 4   // tamper input must be stable this many ticks (x 250 ms) to count
 #define VOLT_OUT_READS 3          // operating voltage: out of range for 3 reads (~3 s) to trigger
 #define VOLT_OK_READS 10          // ...and back in range for 10 reads (~10 s) to clear
 #define WS_PING_INTERVAL_MS 30000

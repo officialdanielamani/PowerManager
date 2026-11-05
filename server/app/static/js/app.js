@@ -281,7 +281,7 @@ var PM = (function () {
         ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
         ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],
         ['Sensor', i.sensor || null], ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
-        ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Last reset', i.reset], ['Meter clock', i.clock_local ? i.clock_local + (i.time_src ? ' (from ' + i.time_src + ')' : '') : (i.clock === 0 ? 'not set' : null)],
+        ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Relay switches since boot', i.relay_sw], ['Last reset', i.reset], ['Meter clock', i.clock_local ? i.clock_local + (i.time_src ? ' (from ' + i.time_src + ')' : '') : (i.clock === 0 ? 'not set' : null)],
         ['RTC (DS3231)', i.clock == null ? null : (i.rtc == null ? 'not fitted' : (i.rtc_local || 'not readable'))], ['Waiting to send', i.outbox != null ? i.outbox + ' item(s)' : null], ['Memory', i.stack]];
       return '<table class="table table-sm mb-2">' + rows.filter(function (r) { return r[1] != null && r[1] !== ''; })
         .map(function (r) { return '<tr><th class="text-body-secondary fw-normal">' + r[0] + '</th><td>' + esc(r[1]) + '</td></tr>'; }).join('') +

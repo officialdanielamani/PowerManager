@@ -29,5 +29,6 @@ double sessionKwhTared();  // minus own consumption (= sessionKwh when no tare)
 double sessionKwhLimit();  // the value the kWh limit uses (tared if "tare_limits")
 void stateJson(JsonObject o);   // protocol "state" body
 uint32_t stateVersion();        // changes whenever the state changes
+uint32_t relaySwitches();       // relay output changes since boot (diagnostics)
 
 }  // namespace control

@@ -50,6 +50,8 @@ Battery: wire `battery+ — R1 — ADC pin — R2 — GND` and set `BATTERY_DIVI
 
 Power the PZEM's TTL side from **3.3 V** (ESP32 pins are not 5 V tolerant). The SSR is not a safety device: keep a proper breaker.
 
+**SSR drive:** a GPIO gives 3.3 V, and many SSRs (e.g. "SSR-25DA", input 3–32 V DC) are at their limit there; when Wi-Fi transmits, the 3.3 V rail dips and the SSR can miss AC half-cycles (a lamp then flickers / glows brighter and dimmer). Best: drive the SSR from **5 V through a small NPN transistor or logic MOSFET** (e.g. 2N2222 / BC547 with 1 k base resistor, or AO3400), and put a 100–470 µF capacitor on the ESP's supply. Use a **zero-cross ("DA") SSR** for AC loads. The firmware already uses the strongest pin drive and waits at least 2 s before switching ON again after an OFF (`RELAY_MIN_OFF_MS`), and prints `[relay] ON/OFF - reason` on serial for every change.
+
 ## 4. First start
 
 Open the Serial Monitor (115200). It shows the device ID and the **setup Wi-Fi name + password**:
