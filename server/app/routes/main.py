@@ -39,7 +39,7 @@ def meter_summary(d, show_price=None):
     sess_start = sess.get("start") or (cur.started_at if cur else None)
     if show_price is None:
         show_price = access.can_price(current_user)
-    currency, price = settings.price()
+    currency, price = settings.price(d.kind)
     kwh_now = sess.get("kwh")
     if cur is not None and cur.price_per_kwh is not None:
         currency, price = cur.currency or "", cur.price_per_kwh
@@ -64,6 +64,8 @@ def meter_summary(d, show_price=None):
         "cost_tared": settings.money(cost_t, currency) if cost_t is not None else None,
         "id": d.id,
         "device_id": d.device_id,
+        "kind": d.kind,                 # "ac" / "dc"
+        "sensor": d.sensor_name,
         "name": d.name,
         "info": d.info,
         "online": hub.is_online(d.id),

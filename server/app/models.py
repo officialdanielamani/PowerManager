@@ -121,6 +121,15 @@ class Device(db.Model):
                                order_by="Channel.idx")
 
     @property
+    def kind(self):
+        """"ac" or "dc": reported by the meter firmware (caps.kind) when pairing and on every connect."""
+        return "dc" if (self.caps or {}).get("kind") == "dc" else "ac"
+
+    @property
+    def sensor_name(self):
+        return "DC Power Sensor" if self.kind == "dc" else "AC Power Sensor"
+
+    @property
     def synced(self):
         return self.cfg_ver_applied >= self.cfg_ver_wanted
 

@@ -198,6 +198,9 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   int report = c["report_s"] | 60;
   if (report < 10 || report > 3600) { err = "report_s"; return false; }
   m.report_s = report;
+  int readS = c["read_s"] | report;  // older servers: one reading per send
+  if (readS < 5 || readS > report) { err = "read_s"; return false; }
+  m.read_s = readS;
   int off = c["offline_off_min"] | 0;
   if (off < 0 || off > 1440) { err = "offline_off_min"; return false; }
   m.offline_off_min = off;
@@ -297,7 +300,8 @@ static String pairBody(const PairRequest &r) {
   body["hw"] = HW_NAME;
   body["proto"] = PROTO_VERSION;
   JsonObject caps = body["caps"].to<JsonObject>();
-  caps["sensor"] = "pzem004t";
+  caps["kind"] = METER_KIND;  // "ac" / "dc": the server sets the meter type from this
+  caps["sensor"] = METER_DC ? "pzem017" : "pzem004t";
   caps["channels"] = SENSOR_CHANNELS;
   caps["relays"] = 1;
   caps["inputs"].to<JsonArray>().add("tamper");
@@ -412,8 +416,16 @@ static void doPair(PairRequest r) {
 
 // ------------------------------------------------------------------ outbox flush
 
+// Readings are buffered and sent in a batch every report_s (control asks with takeSendRequest).
+// Once a round starts it continues, batch after batch, until the buffer is empty.
+static bool sendRound = true;  // true at start-up / reconnect: send any backlog right away
 static void flushOutbox() {
-  if (!outbox::count()) return;
+  if (control::takeSendRequest()) sendRound = true;
+  if (!outbox::count()) {
+    sendRound = false;
+    return;
+  }
+  if (!sendRound) return;
   if (awaitingAck && millis() - sentAtMs < ACK_TIMEOUT_MS) return;
   std::vector<outbox::Item> items;
   outbox::nextBatch(items, leafMode ? MESH_BATCH_MAX : OUTBOX_BATCH_MAX);
@@ -450,8 +462,10 @@ static void sendHello() {
     doc["cfg_ver"] = g.cfg.ver;
   }
   JsonObject caps = doc["caps"].to<JsonObject>();
+  caps["kind"] = METER_KIND;
   caps["channels"] = SENSOR_CHANNELS;
   caps["rtc"] = (bool)HAS_DS3231;
+  caps["amp_rating"] = SENSOR_AMP_RATING;
   control::stateJson(doc["state"].to<JsonObject>());
   sendJson(doc);
   lastStateVer = control::stateVersion();
@@ -499,6 +513,8 @@ static void sendInfo() {
   doc["fw"] = FW_VERSION;
   doc["hw"] = HW_NAME;
   doc["hw_info"] = HW_INFO;
+  doc["sensor"] = SENSOR_NAME;
+  doc["kind"] = METER_KIND;
   doc["chip"] = ESP.getChipModel();
   doc["flash"] = ESP.getFlashChipSize();
   doc["core"] = ESP.getSdkVersion();
@@ -526,6 +542,7 @@ static void cmdAck(uint32_t ref, bool ok, const char *err) {
 }
 
 static void goOnline() {
+  sendRound = true;  // backlog from the offline time goes out now
   {
     StateLock l;
     g.net = NET_ONLINE;

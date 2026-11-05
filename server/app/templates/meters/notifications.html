@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_macros.html" import kind_badge %}
 {% block title %}Notifications · {{ d.name }} · PowerManager{% endblock %}
 {% block content %}
-<h1 class="h4 mb-1">{{ d.name }}</h1>
+<h1 class="h4 mb-1">{{ d.name }} {{ kind_badge(d.kind) }}</h1>
 <div class="text-body-secondary small mb-3">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
 {% set active = 'notifications' %}{% include "meters/_tabs.html" %}
 <form method="post" class="card" style="max-width:720px">

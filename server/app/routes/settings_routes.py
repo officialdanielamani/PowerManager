@@ -125,25 +125,28 @@ def server():
     retention = (f.get("raw_retention_days") or "90").strip()
     if not retention.isdigit() or not 7 <= int(retention) <= 3650:
         errs.append("Raw data retention must be 7–3650 days")
-    currency = (f.get("currency") or "").strip().upper()
-    if len(currency) > 8 or any(c in currency for c in "<>\"'&"):
-        errs.append("Currency: up to 8 characters, e.g. MYR")
-    price = (f.get("price_per_kwh") or "").strip()
-    if price:
-        try:
-            pv = float(price)
-            if not 0 <= pv <= 1000:
-                raise ValueError
-            price = f"{pv:.4f}".rstrip("0").rstrip(".")  # 0.2100 -> 0.21
-        except ValueError:
-            errs.append("Price per kWh must be a number between 0 and 1000, e.g. 0.21")
+    prices = {}
+    for pre, label in (("", "AC"), ("dc_", "DC")):
+        currency = (f.get(pre + "currency") or "").strip().upper()
+        if len(currency) > 8 or any(c in currency for c in "<>\"'&"):
+            errs.append(f"{label} currency: up to 8 characters, e.g. MYR")
+        price = (f.get(pre + "price_per_kwh") or "").strip()
+        if price:
+            try:
+                pv = float(price)
+                if not 0 <= pv <= 1000:
+                    raise ValueError
+                price = f"{pv:.4f}".rstrip("0").rstrip(".")  # 0.2100 -> 0.21
+            except ValueError:
+                errs.append(f"{label} price per kWh must be a number between 0 and 1000, e.g. 0.21")
+        prices[pre + "currency"], prices[pre + "price_per_kwh"] = currency, price
     if errs:
         return _errors("server", errs)
     old_zone = settings.get("timezone")
     settings.set_many({"server_address": address, "server_port": port,
                        "server_tls": "1" if f.get("server_tls") == "on" else "0",
                        "timezone": zone, "raw_retention_days": retention,
-                       "currency": currency, "price_per_kwh": price})
+                       **prices})
     if zone != old_zone:
         _repush_daily_configs()
     return _back("server", "Server settings saved.")

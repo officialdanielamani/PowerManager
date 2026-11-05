@@ -22,13 +22,18 @@
 #include "src/timekeep.h"
 #include "src/web.h"
 
+#if METER_DC
+static Pzem017Sensor pzem(Serial1, PIN_PZEM_RX, PIN_PZEM_TX, PZEM_ADDRESS, PIN_RS485_DE, PZEM017_SHUNT_A);
+#else
 static PzemSensor pzem(Serial1, PIN_PZEM_RX, PIN_PZEM_TX, PZEM_ADDRESS);
+#endif
 
 static void loadState() {
   StateLock l;
   if (!store::loadConfig(g.cfg)) {
     g.cfg = MeterConfig();
     g.cfg.report_s = DEFAULT_REPORT_S;
+    g.cfg.read_s = DEFAULT_READ_S;
   }
   store::loadSession(g.sess);
   store::loadFlags(g.wantOn, g.tripped);
@@ -45,7 +50,7 @@ static void printBanner() {
   }
   Serial.println();
   Serial.println("==============================================");
-  Serial.printf(" PowerMeter %s   Device ID: %s\n", FW_VERSION, store::deviceId().c_str());
+  Serial.printf(" PowerMeter %s (%s)   Device ID: %s\n", FW_VERSION, SENSOR_NAME, store::deviceId().c_str());
   Serial.printf(" Setup Wi-Fi: %s   password: %s   (%s)\n", net::apSsid().c_str(),
                 store::apPassword().c_str(), ap ? "ON now, open http://192.168.4.1" : "off");
   String ip = net::ipAddress();

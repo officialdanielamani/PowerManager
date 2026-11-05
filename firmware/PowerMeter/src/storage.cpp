@@ -128,13 +128,13 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 6) return false;  // older layout: use defaults, the server re-sends the config
+  if (b.version != 7) return false;  // older layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 6;
+  b.version = 7;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }

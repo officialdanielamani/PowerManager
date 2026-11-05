@@ -380,7 +380,7 @@ def info(pk):
                            f_from=request.args.get("from", ""), f_to=request.args.get("to", ""),
                            detail_text=incident_detail_text, sessions=sessions, now=now(),
                            cfg=device.cfg or {}, channels=device.channels,
-                           price=settings.price() if access.can_price(current_user) else (None, None),
+                           price=settings.price(device.kind) if access.can_price(current_user) else (None, None),
                            money=settings.money, can_csv=access.can_csv(current_user),
                            tare_kwh=lambda sess: (round(tare_svc.kwh(sess.kwh_used or 0, (sess.ended_at or now()) - sess.started_at,
                                                                      tare_svc.offsets(device)), 4)
@@ -435,7 +435,7 @@ def history_json(pk):
     data["start_local"] = settings.fmt_ts(start, False)
     data["end_local"] = settings.fmt_ts(end, False)
     data["tz_offset_s"] = _tz_offset_s()
-    currency, price = settings.price()
+    currency, price = settings.price(device.kind)
     kwh = data["stats"].get("kwh")
     data["cost"] = (settings.money(kwh * price, currency)
                     if access.can_price(current_user) and price is not None and kwh is not None else None)
@@ -477,6 +477,14 @@ def _fname_ts(ts):
     return settings.fmt_ts(ts, False).replace(" ", "_").replace(":", "")
 
 
+def _csv_kind(device, header, rows):
+    """DC meters have no power factor / frequency: leave those (always empty) columns out."""
+    if device.kind != "dc":
+        return header, rows
+    keep = [i for i, h in enumerate(header) if not h.startswith(("PF", "Hz"))]
+    return [header[i] for i in keep], [(ts, [vals[i] for i in keep]) for ts, vals in rows]
+
+
 @bp.get("/<int:pk>/export.csv")
 @login_required
 def export_csv(pk):
@@ -492,12 +500,14 @@ def export_csv(pk):
         start, end = sess.started_at, sess.ended_at or now()
         source, header, rows = history.csv_rows(device.id, ch, start, end)
         header, rows = _csv_tare(device, source, header, rows)
+        header, rows = _csv_kind(device, header, rows)
         out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals] for ts, vals in rows]
         hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
         return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
     start, end = _range_args(device)
     source, header, rows = history.csv_rows(device.id, ch, start, end)
     header, rows = _csv_tare(device, source, header, rows)
+    header, rows = _csv_kind(device, header, rows)
     out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals]
            for ts, vals in rows]
     hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
@@ -556,7 +566,7 @@ def bulk_renew():
 
 # Settings that Bulk Configuration can change, each applied only when its "Change" switch is on.
 BULK_GROUPS = {
-    "report": "Send data every",
+    "report": "Read / send data",
     "kwh": "kWh limit",
     "amp": "Max current",
     "session": "Session time limit & auto renew",
@@ -573,7 +583,7 @@ def _bulk_apply(cfg, new, groups):
     out = dict(cfg)
     out["ch"] = [dict(c) for c in cfg.get("ch", [])]
     if "report" in groups:
-        out["report_s"] = new["report_s"]
+        out["report_s"], out["read_s"] = new["report_s"], new["read_s"]
     if "session" in groups:
         for k in ("sess_mode", "dur_min", "daily_at", "auto"):
             out[k] = new[k]
@@ -646,7 +656,7 @@ def bulk_configure():
     dur = int(cfg.get("dur_min", 1440))
     ch0 = (cfg.get("ch") or [{}])[0]
     differs = {
-        "report": _differs(devices, lambda c: c.get("report_s")),
+        "report": _differs(devices, lambda c: (c.get("read_s", c.get("report_s")), c.get("report_s"))),
         "kwh": _differs(devices, lambda c: [(x.get("kwh_max"), devconfig.kwh_action(x)) for x in c.get("ch", [])]),
         "amp": _differs(devices, lambda c: [x.get("amp_max") for x in c.get("ch", [])]),
         "session": _differs(devices, lambda c: (c.get("sess_mode"), c.get("dur_min"), c.get("daily_at"), c.get("auto"))),

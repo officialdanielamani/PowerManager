@@ -13,6 +13,8 @@ namespace control {
 static Sensor *sensor_ = nullptr;
 static std::atomic<uint32_t> stateVer_{1};
 static std::atomic<bool> reportNow_{false};
+static std::atomic<bool> sendReq_{false};  // time to send (report_s passed, event, Get Data Now)
+static uint32_t lastSendReqMs_ = 0;
 static uint8_t failReads_ = 0;
 static uint8_t overReads_ = 0;
 static uint32_t lastReportMs_ = 0;
@@ -47,6 +49,7 @@ void emitEvent(const char *e, void (*fill)(JsonObject, void *), void *ctx) {
   String s;
   serializeJson(doc, s);
   outbox::push(outbox::EVT, seq, s);
+  sendReq_ = true;  // events go out right away (with any readings queued before them)
   Serial.printf("[event] %s\n", s.c_str());
 }
 
@@ -69,11 +72,17 @@ static void pushTelemetry() {
     if (g.reading.ok && g.ac) {
       JsonObject c = ch.add<JsonObject>();
       c["i"] = 0;
+#if METER_DC
+      c["v"] = serialized(String(g.reading.v, 2));  // PZEM-017: 0.01 V / 0.01 A, no PF / Hz
+      c["a"] = serialized(String(g.reading.a, 2));
+      c["w"] = serialized(String(g.reading.w, 1));
+#else
       c["v"] = serialized(String(g.reading.v, 1));
       c["a"] = serialized(String(g.reading.a, 3));
       c["w"] = serialized(String(g.reading.w, 1));
       c["pf"] = serialized(String(g.reading.pf, 2));
       c["hz"] = serialized(String(g.reading.hz, 1));
+#endif
       c["e"] = serialized(String(g.reading.e, 3));
     }
   }
@@ -264,6 +273,7 @@ void applyConfig(const MeterConfig &c) {
 }
 
 void reportNow() { reportNow_ = true; }
+bool takeSendRequest() { return sendReq_.exchange(false); }
 
 // ------------------------------------------------------------------ state
 
@@ -312,7 +322,7 @@ void begin(Sensor *sensor) {
 }
 
 // Operating voltage range. Out = VOLT_OUT_READS bad readings in a row; back = VOLT_OK_READS good
-// ones. "No AC" (below AC_LOST_VOLTAGE / no reply) is not a range problem: it keeps the state.
+// ones. "No AC" (below SUPPLY_LOST_VOLTAGE / no reply) is not a range problem: it keeps the state.
 static void checkVoltage(bool ok, float v) {
   // caller holds StateLock
   static uint8_t bad = 0, good = 0;
@@ -326,7 +336,7 @@ static void checkVoltage(bool ok, float v) {
     }
     return;
   }
-  if (!ok || v < AC_LOST_VOLTAGE) return;
+  if (!ok || v < SUPPLY_LOST_VOLTAGE) return;
   bool out = (g.cfg.volt_min > 0 && v < g.cfg.volt_min) || (g.cfg.volt_max > 0 && v > g.cfg.volt_max);
   struct Ctx {
     float v, min, max;
@@ -426,7 +436,7 @@ static void readSensor() {
     g.reading.ok = false;
     if (failReads_ < 255) failReads_++;
   }
-  bool acNow = ok ? r.v >= AC_LOST_VOLTAGE : (failReads_ < 3 && g.ac);
+  bool acNow = ok ? r.v >= SUPPLY_LOST_VOLTAGE : (failReads_ < 3 && g.ac);
   if (acNow != g.ac) {
     g.ac = acNow;
     emitEvent(acNow ? "ac_restored" : "ac_lost");
@@ -585,16 +595,22 @@ void task(void *) {
     checkRules(first);
     first = false;
 
-    uint32_t reportMs;
+    // Record a reading every read_s; send the buffered readings every report_s.
+    uint32_t readMs, sendMs;
     {
       StateLock l;
-      reportMs = (uint32_t)g.cfg.report_s * 1000UL;
+      sendMs = (uint32_t)g.cfg.report_s * 1000UL;
+      readMs = (uint32_t)(g.cfg.read_s ? g.cfg.read_s : g.cfg.report_s) * 1000UL;
     }
-    if (reportNow_ || millis() - lastReportMs_ >= reportMs) {
-      reportNow_ = false;
+    bool now = reportNow_.exchange(false);
+    if (now || millis() - lastReportMs_ >= readMs) {
       lastReportMs_ = millis();
       sys::crumb(sys::CR_CONTROL, "telemetry");
       pushTelemetry();
+    }
+    if (now || millis() - lastSendReqMs_ >= sendMs) {
+      lastSendReqMs_ = millis();
+      sendReq_ = true;
     }
     tick++;
     vTaskDelayUntil(&last, pdMS_TO_TICKS(CONTROL_TICK_MS));

@@ -43,6 +43,7 @@ Manual entry on the device uses the same four fields: **Server address**, **Port
   "hw": "esp32s3-supermini",
   "proto": 1,
   "caps": {
+    "kind": "ac",
     "sensor": "pzem004t",
     "channels": 1,
     "relays": 1,
@@ -51,6 +52,8 @@ Manual entry on the device uses the same four fields: **Server address**, **Port
   }
 }
 ```
+
+`caps.kind` is the meter type: `"ac"` (PZEM-004T, sends `v a w pf hz e`) or `"dc"` (PZEM-017, sends `v a w e`: no power factor / frequency; V and A with 0.01 resolution). It is also sent in every `hello`, and the server sets the meter type from it (AC/DC badge, AC or DC price, DC display without PF/Hz). Missing = AC.
 
 Responses:
 
@@ -213,6 +216,7 @@ The server sends the whole config every time (no partial updates).
   "ver": 7,
   "cfg": {
     "report_s": 60,
+    "read_s": 60,
     "offline_off_min": 3,
     "sess": {
       "mode": "daily",
@@ -231,7 +235,8 @@ The server sends the whole config every time (no partial updates).
 
 | Field | Range | Default | Notes |
 |-------|-------|---------|-------|
-| `report_s` | 10–3600 | 60 | |
+| `report_s` | 10–3600 | 60 | Send buffered readings to the server every … s (events go right away) |
+| `read_s` | 5–`report_s` | = `report_s` | Record a reading every … s. Example: `read_s` 10 + `report_s` 60 = 6 readings sent together once a minute. Missing (older server) = one reading per send |
 | `offline_off_min` | 0–1440 | 0 | 0 = disabled |
 | `sess.mode` | `daily` / `duration` / `none` | `none` | `none` = no time limit |
 | `sess.daily_utc_min` | 0–1439 | – | Local reset time converted to UTC by the server. Example: 01:00 at UTC+08:00 → 17:00 UTC → `1020` |

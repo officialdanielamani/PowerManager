@@ -45,8 +45,10 @@ def cmd_pair(args):
     st = load_state(args.state)
     st.setdefault("device_id", args.device_id or "SIM" + "".join(random.choice("ABCDEFGHJKMNPQRSTUVWXYZ23456789") for _ in range(5)))
     body = {"code": args.code, "device_id": st["device_id"], "fw": "sim-0.1", "hw": "simulator", "proto": 1,
-            "caps": {"sensor": "pzem004t", "channels": 1, "relays": 1, "inputs": ["tamper"], "rtc": False,
+            "caps": {"kind": "dc" if args.dc else "ac", "sensor": "pzem017" if args.dc else "pzem004t",
+                     "channels": 1, "relays": 1, "inputs": ["tamper"], "rtc": False,
                      "amp_rating": 100}}
+    st["dc"] = bool(args.dc)
     req = urllib.request.Request(args.server.rstrip("/") + "/api/v1/pair", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     try:
@@ -207,12 +209,17 @@ class Meter:
                 w += self.args.self_w  # the meter's own supply on the measured line
                 if self.tare().get("w"):
                     self.sess["tare_kwh"] = self.sess.get("tare_kwh", 0.0) + self.tare()["w"] / 1000 / 3600 * self.args.energy_x
-                v = self.volt_override or random.uniform(228, 234)
+                dc = self.st.get("dc")
+                v = self.volt_override or (random.uniform(47.5, 48.5) if dc else random.uniform(228, 234))
                 a = w / v if v else 0
                 # energy: speed factor makes simulated time pass faster for testing quotas
                 self.st["e_total"] = self.st.get("e_total", 0.0) + w / 1000 / 3600 * self.args.energy_x
-                self.reading = {"i": 0, "v": round(v, 1), "a": round(a, 3), "w": round(w, 1), "pf": 0.97,
-                                "hz": 50.0, "e": round(self.st["e_total"], 4)}
+                if dc:  # PZEM-017: no power factor / frequency
+                    self.reading = {"i": 0, "v": round(v, 2), "a": round(a, 2), "w": round(w, 1),
+                                    "e": round(self.st["e_total"], 4)}
+                else:
+                    self.reading = {"i": 0, "v": round(v, 1), "a": round(a, 3), "w": round(w, 1), "pf": 0.97,
+                                    "hz": 50.0, "e": round(self.st["e_total"], 4)}
                 amp_max = self.ch_cfg().get("amp_max", 0)
                 if self.tare().get("limits", True):
                     a = max(0.0, a - self.tare().get("a", 0))
@@ -327,7 +334,7 @@ class Meter:
                 self.log("MESH: gateway", self.gateway.st["device_id"], "reachable, hello")
                 self.send({"t": "hello", "fw": "sim-0.4", "proto": 1, "boot": self.st["boot"],
                            "up": int(time.time() - self.boot_t), "tv": 1, "ts": int(time.time()),
-                           "cfg_ver": self.st.get("cfg_ver", 0), "caps": {"channels": 1}, "state": self.state_msg()})
+                           "cfg_ver": self.st.get("cfg_ver", 0), "caps": {"channels": 1, "kind": "dc" if self.st.get("dc") else "ac"}, "state": self.state_msg()})
                 last_ping = time.time()
             was_up = up
             if up:
@@ -474,7 +481,7 @@ class Meter:
                 self.log("CONNECTED")
                 self.send({"t": "hello", "fw": "sim-0.1", "proto": 1, "boot": self.st["boot"],
                            "up": int(time.time() - self.boot_t), "tv": 1, "ts": int(time.time()),
-                           "cfg_ver": self.st.get("cfg_ver", 0), "caps": {"channels": 1}, "state": self.state_msg()})
+                           "cfg_ver": self.st.get("cfg_ver", 0), "caps": {"channels": 1, "kind": "dc" if self.st.get("dc") else "ac"}, "state": self.state_msg()})
                 last_ping = time.time()
                 while self.running:
                     self.flush()
@@ -584,6 +591,7 @@ def main():
     a.add_argument("--server", required=True, help="e.g. http://localhost:5000")
     a.add_argument("--code", required=True)
     a.add_argument("--device-id")
+    a.add_argument("--dc", action="store_true", help="pair as a DC meter (PZEM-017)")
     b = sub.add_parser("run")
     b.add_argument("--load", type=float, default=800, help="load in W while relay is ON")
     b.add_argument("--script", help='timed actions, e.g. "20:trip,40:tamper_open"')

@@ -1,6 +1,6 @@
 # Meter Firmware (ESP32-S3 Super Mini)
 
-Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. The folder is laid out so it can move to PlatformIO later without code changes.
+Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. One source builds the **AC meter** (`METER_DC 0`, PZEM-004T, TTL 9600 8N1, registers 0x0000–0x0009) or the **DC meter** (`METER_DC 1`, PZEM-017, RS485 9600 8N2 via an RS485-TTL module, registers 0x0000–0x0007: V 0.01 V, A 0.01 A, W 0.1 W, Wh; shunt range written to holding register 0x0003 at start-up). Both share one Modbus transport (`sensor_pzem.cpp`); the rest of the firmware is identical. **Readings:** recorded every `read_s` into the offline buffer and sent as a batch every `report_s`; events and *Get Data Now* trigger an immediate send. The folder is laid out so it can move to PlatformIO later without code changes.
 
 ## 1. Hardware
 

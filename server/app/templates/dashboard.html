@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_badge %}
+{% from "_macros.html" import status_badge, kind_badge %}
 {% block title %}Dashboard · PowerManager{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3">
@@ -44,7 +44,7 @@
           <input class="form-check-input pm-sel mt-1 position-relative" type="checkbox" value="{{ m.id }}" aria-label="Select {{ m.name }}" style="z-index:2">
           {% endif %}
           <div class="me-auto">
-            <a href="{{ url_for('meters.info', pk=m.id) }}" class="fw-semibold text-body text-decoration-none stretched-link">{{ m.name }}</a>
+            <a href="{{ url_for('meters.info', pk=m.id) }}" class="fw-semibold text-body text-decoration-none stretched-link">{{ m.name }}</a> {{ kind_badge(m.kind) }}
             <div class="small text-body-secondary">{{ m.info or m.device_id }}</div>
           </div>
           <span class="pm-dot {{ 'on' if m.online else 'off' }}" data-field="online" title="{{ 'Online' if m.online else 'Offline' }}"></span>

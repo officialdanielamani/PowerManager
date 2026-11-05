@@ -1,14 +1,30 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.5.2"
+#define FW_VERSION "0.6.0"
 #define HW_NAME "esp32s3-supermini"
-#define HW_INFO "PZEM-004T 1Chn"   // free text shown in "Get meter info" on the server
 #define PROTO_VERSION 1
 
+// ---------------------------------------------------------------- meter type
+// One source, two firmwares: build with 0 for the AC meter, 1 for the DC meter.
+//   AC meter: PZEM-004T v3 (TTL, 9600 8N1), V / A / W / kWh / PF / Hz
+//   DC meter: PZEM-017 (RS485, 9600 8N2) through an RS485-TTL module, V / A / W / kWh
+// The meter tells the server its type when pairing; the server picks it up automatically.
+#define METER_DC 0
+
+#if METER_DC
+#define METER_KIND "dc"
+#define SENSOR_NAME "DC Power Sensor"
+#else
+#define METER_KIND "ac"
+#define SENSOR_NAME "AC Power Sensor"
+#endif
+#define HW_INFO SENSOR_NAME " 1Chn"  // free text shown in "Get meter info" on the server
+
 // ---------------------------------------------------------------- pins (check your board)
-#define PIN_PZEM_RX 5       // ESP32 RX  <- PZEM TX
-#define PIN_PZEM_TX 6       // ESP32 TX  -> PZEM RX
+#define PIN_PZEM_RX 5       // ESP32 RX  <- PZEM TX (DC: RS485 module RO / RXD)
+#define PIN_PZEM_TX 6       // ESP32 TX  -> PZEM RX (DC: RS485 module DI / TXD)
+#define PIN_RS485_DE -1     // DC only: MAX485 DE+RE pin; -1 = module with automatic direction
 #define PIN_RELAY 7         // SSR control, active HIGH
 #define PIN_TAMPER 4        // NC switch to GND; open = panel open (INPUT_PULLUP)
 #define PIN_LED 48          // WS2812 RGB LED (onboard on most Super Mini boards)
@@ -44,8 +60,15 @@
 #define PZEM_ADDRESS 0xF8         // general address, works with a single PZEM on the bus
 #define PZEM_TIMEOUT_MS 250
 #define SENSOR_CHANNELS 1
+#if METER_DC
+// PZEM-017 shunt: 50, 100, 200 or 300 (A). Written to the PZEM at start-up; 0 = leave as it is.
+#define PZEM017_SHUNT_A 100
+#define SENSOR_AMP_RATING (PZEM017_SHUNT_A ? (float)PZEM017_SHUNT_A : 300.0f)
+#define SUPPLY_LOST_VOLTAGE 5.0f  // below this (or no reply x3) = no DC supply (PZEM-017 needs >= 7 V)
+#else
 #define SENSOR_AMP_RATING 100.0f  // PZEM-004T 100 A version (with CT)
-#define AC_LOST_VOLTAGE 50.0f     // below this (or no reply x3) = AC lost
+#define SUPPLY_LOST_VOLTAGE 50.0f // below this (or no reply x3) = AC lost
+#endif
 
 // ---------------------------------------------------------------- LED
 #define LED_BRIGHTNESS 40         // 0-255, kept low on purpose
@@ -90,4 +113,5 @@
 #define OUTBOX_BATCH_MAX 50       // items per "tel" message
 
 // ---------------------------------------------------------------- defaults
-#define DEFAULT_REPORT_S 60
+#define DEFAULT_REPORT_S 60       // send to the server every ... s
+#define DEFAULT_READ_S 60         // record a reading every ... s (sent in batches every report_s)

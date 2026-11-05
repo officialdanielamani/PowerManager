@@ -1,6 +1,8 @@
 # PowerMeter firmware (ESP32-S3)
 
-Firmware for the PowerManager meter: ESP32-S3 Super Mini + PZEM-004T + solid-state relay + WS2812 LED + tamper switch. Design: [`../docs/firmware.md`](../docs/firmware.md), protocol: [`../docs/protocol.md`](../docs/protocol.md).
+Firmware for the PowerManager meter: ESP32-S3 Super Mini + power sensor + solid-state relay + WS2812 LED + tamper switch.
+
+**AC or DC meter:** one sketch, two firmwares. In `config.h` set `METER_DC 0` for the **AC meter** (PZEM-004T) or `METER_DC 1` for the **DC meter** (PZEM-017). Everything else (limits, sessions, mesh, offline buffer, local page) is the same. The meter tells the server its type when it pairs, so the server shows it as AC or DC automatically and uses the matching price. Design: [`../docs/firmware.md`](../docs/firmware.md), protocol: [`../docs/protocol.md`](../docs/protocol.md).
 
 ## 1. Arduino IDE setup (once)
 
@@ -31,15 +33,18 @@ If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** 
 
 | Function | GPIO |
 |----------|------|
-| PZEM TX → ESP RX | 5 |
-| PZEM RX ← ESP TX | 6 |
+| PZEM TX → ESP RX (DC: RS485 module RO/RXD) | 5 |
+| PZEM RX ← ESP TX (DC: RS485 module DI/TXD) | 6 |
+| DC only: MAX485 DE+RE (set `PIN_RS485_DE`; `-1` for auto-direction modules) | – |
 | SSR input (+) | 7 |
 | Tamper switch (NC, other side to GND) | 4 |
 | WS2812 data | 48 (onboard LED on most Super Mini boards) |
 | DS3231 SDA / SCL (optional, set `HAS_DS3231 1`) | 8 / 9 |
 | Battery sense (optional, set `BATTERY_ENABLE 1`) | 1, through a divider (see `config.h`) |
 
-`HW_INFO` in `config.h` is free text (default `"PZEM-004T 1Chn"`) shown by **Get meter info** on the server.
+`HW_INFO` in `config.h` is free text (default `"AC Power Sensor 1Chn"` / `"DC Power Sensor 1Chn"`) shown by **Get meter info** on the server.
+
+**DC meter (PZEM-017):** it talks RS485 (9600 baud, 8N2), so put an RS485-to-TTL module (3.3 V) between it and the ESP32: module A/B to PZEM A/B, module RO→GPIO5, DI←GPIO6. Modules with automatic direction need nothing else; a plain MAX485 board needs DE and RE tied together to a free GPIO set as `PIN_RS485_DE`. Set the shunt you use in `PZEM017_SHUNT_A` (50 / 100 / 200 / 300 A; the meter writes it to the PZEM at start-up; `0` = leave it). The PZEM-017 is powered from the measured DC line (7–300 V), so like the AC version it does not answer when the DC supply is off.
 
 Battery: wire `battery+ — R1 — ADC pin — R2 — GND` and set `BATTERY_DIVIDER = (R1+R2)/R2` plus the empty/full voltages (defaults: 1S Li-ion 3.30–4.20 V, 100 k + 100 k → 2.0). The percentage is a linear estimate.
 

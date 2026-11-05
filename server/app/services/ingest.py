@@ -13,7 +13,8 @@ MAX_FUTURE_S = 300
 FIELDS = ("v", "a", "w", "pf", "hz", "e")
 # Physically possible ranges; anything outside is stored as "no value" (bad sensor read or
 # a misbehaving client). Generous on purpose.
-LIMITS = {"v": (0, 400), "a": (0, 200), "w": (0, 80000), "pf": (0, 1.0001), "hz": (0, 70),
+# AC: PZEM-004T (up to 260 V / 100 A); DC: PZEM-017 (up to 300 V / 300 A shunt).
+LIMITS = {"v": (0, 400), "a": (0, 400), "w": (0, 150000), "pf": (0, 1.0001), "hz": (0, 70),
           "e": (0, 10_000_000)}
 
 
@@ -299,7 +300,7 @@ def h_info(conn, device, msg):
     """Answer to "Get meter info"."""
     keep = ("ip", "ssid", "rssi", "mac", "heap", "heap_min", "psram", "psram_free", "fw", "hw", "hw_info",
             "bat_v", "bat_pct", "uptime", "boot", "core", "chip", "flash", "outbox", "time_src",
-            "link", "gateway", "mesh_ch", "leaves", "stack", "reset")
+            "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind")
     device.last_info = {k: msg[k] for k in keep if k in msg}
     device.last_info_at = now()
 
@@ -403,7 +404,8 @@ def process_event(device, ev):
         incidents.open_incident(device.id, "sensor", ev.ts, event=ev, estimated=est,
                                 detail={"kind": kind, "after_s": d.get("after_s"), "action": d.get("action")})
         why = ("garbled replies (wiring / noise)" if kind == "bad"
-               else "sensor not responding (sensor or wiring fault, or no AC power)")
+               else "sensor not responding (sensor or wiring fault, or no "
+               + ("DC supply" if device.kind == "dc" else "AC power") + ")")
         what = {"end": "session ended", "hold": "relay off until readings return"}.get(d.get("action"), "power kept on")
         notify.notify(device, "sensor_error", f"Sensor error: no valid reading for {d.get('after_s', '?')} s, {why}: {what}")
     elif e == "sensor_ok":
@@ -413,7 +415,7 @@ def process_event(device, ev):
     elif e == "ac_lost":
         incidents.open_incident(device.id, "power", ev.ts, event=ev, estimated=est)
         merge_power_into_offline(device)
-        notify.notify(device, "no_voltage", "No voltage (AC power lost)")
+        notify.notify(device, "no_voltage", "No voltage (DC supply lost)" if device.kind == "dc" else "No voltage (AC power lost)")
     elif e == "ac_restored":
         incidents.close_incident(device.id, "power", ev.ts, event=ev, estimated=est)
     elif e == "quota":
@@ -441,7 +443,7 @@ def process_event(device, ev):
             s = _session(device, sid)
             s.started_at = ev.ts
             s.auto = bool(d.get("auto"))
-            cur, price = settings.price()
+            cur, price = settings.price(device.kind)
             if price is not None and s.price_per_kwh is None:
                 s.price_per_kwh, s.currency = price, cur
             s.kwh_max = _r4(_f(d.get("max"))) or s.kwh_max

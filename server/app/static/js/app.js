@@ -182,9 +182,9 @@ var PM = (function () {
     var box = document.getElementById('latest');
     var html = '';
     if (m.reading_err) {
-      var ERR = {no_reply: 'Sensor error: the sensor does not respond (sensor or wiring fault, or no AC power).',
+      var ERR = {no_reply: 'Sensor error: the sensor does not respond (sensor or wiring fault, or no ' + (m.kind === 'dc' ? 'DC supply' : 'AC power') + ').',
                  bad: 'Sensor error: garbled replies from the sensor (wiring, noise or wrong address).',
-                 no_ac: 'No AC power: nothing to measure.'};
+                 no_ac: m.kind === 'dc' ? 'No DC supply: nothing to measure.' : 'No AC power: nothing to measure.'};
       html += '<div class="alert alert-' + (m.reading_err === 'no_ac' ? 'warning' : 'danger') + ' py-2 mb-2"><i class="bi bi-exclamation-triangle me-1"></i>' +
         esc(ERR[m.reading_err] || 'No reading from the sensor.') + ' <span class="small">(' + esc(m.reading_at) + ')' +
         (m.reading_ok_at ? ' · last good reading ' + esc(m.reading_ok_at) : '') + '</span></div>';
@@ -192,8 +192,10 @@ var PM = (function () {
     m.reading.forEach(function (c) {
       if (m.reading.length > 1) html += '<div class="fw-semibold small mb-1">Channel ' + (c.i + 1) + '</div>';
       html += '<div class="row g-2 mb-2">' +
-        [['Voltage', fmt(c.v, 1), 'V'], ['Current', fmt(c.a, 3), 'A'], ['Power', fmt(c.w, 1), 'W'],
-         ['Power factor', fmt(c.pf, 2), ''], ['Frequency', fmt(c.hz, 1), 'Hz'], ['Energy total', fmt(c.e, 3), 'kWh']]
+        (m.kind === 'dc'  // DC: no power factor / frequency
+          ? [['Voltage', fmt(c.v, 2), 'V'], ['Current', fmt(c.a, 2), 'A'], ['Power', fmt(c.w, 1), 'W'], ['Energy total', fmt(c.e, 3), 'kWh']]
+          : [['Voltage', fmt(c.v, 1), 'V'], ['Current', fmt(c.a, 3), 'A'], ['Power', fmt(c.w, 1), 'W'],
+             ['Power factor', fmt(c.pf, 2), ''], ['Frequency', fmt(c.hz, 1), 'Hz'], ['Energy total', fmt(c.e, 3), 'kWh']])
         .map(function (x) { return '<div class="col-6 col-md-4"><div class="pm-stat"><div class="small text-body-secondary">' + x[0] + '</div><div class="pm-big">' + x[1] + ' <small class="fs-6 text-body-secondary">' + x[2] + '</small></div></div></div>'; }).join('') +
         '</div>';
     });
@@ -278,7 +280,7 @@ var PM = (function () {
         ['Battery', i.bat_v != null ? Number(i.bat_v).toFixed(2) + ' V' + (i.bat_pct != null ? ' · ~' + i.bat_pct + ' %' : '') : 'not enabled (config.h)'],
         ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
         ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],
-        ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
+        ['Sensor', i.sensor || null], ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
         ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Last reset', i.reset], ['Clock from', i.time_src], ['Waiting to send', i.outbox != null ? i.outbox + ' item(s)' : null], ['Memory', i.stack]];
       return '<table class="table table-sm mb-2">' + rows.filter(function (r) { return r[1] != null && r[1] !== ''; })
         .map(function (r) { return '<tr><th class="text-body-secondary fw-normal">' + r[0] + '</th><td>' + esc(r[1]) + '</td></tr>'; }).join('') +

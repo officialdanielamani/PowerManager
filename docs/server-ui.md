@@ -104,6 +104,7 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 | Account | Change username, password, phone, email (current password required) · My Telegram chat ID + [Send test] |
 | Server (admin) | Public address, port, TLS · Display timezone (IANA list, shows its UTC offset) · Raw data retention · **Electricity price**: [Currency][Price] / kWh (e.g. MYR 0.21) |
 | Users (admin) | View-only accounts (per user: **Enable download .csv**, **Show price**, both off by default; enforced on the server): select + Enable/Disable/Unlock selected, Enable all / Disable all · per user: meters they can see (or *View all meters*), reset password (also unlocks), enable/disable, delete · Add account (with meters) · Login protection (max failed logins, lock minutes) |
+| Server (admin): Electricity price | Two rates: **AC meters** [currency][price] / kWh and **DC meters** [currency][price] / kWh. Each meter uses the rate of its type |
 | Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID). The token is write-only like a password: after saving the field is empty with a `••••` placeholder; leave it empty to keep the saved token, or tick *Remove the saved token* |
 
 ### Firmware (admin)
@@ -112,3 +113,11 @@ Placeholder page for future OTA updates. The meter's own page has a greyed-out *
 ## Password fields
 
 Every password field (server and the meter's own page) has an **eye** button to show / hide what was typed.
+
+## AC and DC meters
+
+The meter type comes from the firmware when it pairs (no setting). Dashboard cards and the meter pages show an **AC** or **DC** badge; Get meter info shows *AC Power Sensor* / *DC Power Sensor* (sensor models are not shown). DC meters have no power factor / frequency: the Latest data box and CSV export leave them out, and V / A are shown with 2 decimals. Configuration is the same for both.
+
+## Read / send interval
+
+Configuration → General: **Read data every [X] s and send every [Y] s** (read 5 s – 1 h, send 10 s – 1 h, read ≤ send). The meter records a reading every X s and sends the buffered readings every Y s (Get Data Now and events go at once). Also in Bulk Configuration (*Read / send data*).

@@ -17,7 +17,8 @@ void renew(const char *reason, bool autoRenew);  // reason: "manual" / "expired"
 bool resetTrip(const char *src, const char *by);
 void applyConfig(const MeterConfig &c);
 void setDisabled(bool disabled);  // server "disable" / "enable"
-void reportNow();
+void reportNow();           // record a reading now and send everything now ("Get Data Now")
+bool takeSendRequest();     // net: true once when it is time to send the buffered items
 
 // Event into the outbox. `fill` adds extra fields.
 void emitEvent(const char *e, void (*fill)(JsonObject, void *) = nullptr, void *ctx = nullptr);

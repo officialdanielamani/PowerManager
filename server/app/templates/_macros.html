@@ -15,3 +15,8 @@
   {%- set s = map.get(status, ('secondary', status)) -%}
   <span class="badge text-bg-{{ s[0] }}" data-field="status-badge">{{ s[1] }}</span>
 {%- endmacro %}
+
+{# AC / DC meter type (from the meter firmware, set when it pairs) #}
+{% macro kind_badge(kind) -%}
+<span class="badge {{ 'text-bg-info' if kind == 'dc' else 'text-bg-secondary' }} align-middle" style="font-size:.65rem" title="{{ 'DC Power Sensor' if kind == 'dc' else 'AC Power Sensor' }}">{{ kind|upper }}</span>
+{%- endmacro %}

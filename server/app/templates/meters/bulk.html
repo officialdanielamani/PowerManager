@@ -65,8 +65,13 @@
 <div class="row g-3">
   <div class="col-12 col-xl-6">
     {% call section('report', groups.report) %}
-      <div class="input-group" style="max-width:260px"><input class="form-control" type="number" name="report_s" min="10" max="3600" value="{{ val('report_s', cfg.report_s) }}"><span class="input-group-text">seconds</span></div>
-      <div class="form-text">10 s – 1 h.</div>
+<div class="d-flex align-items-center flex-wrap gap-2">
+          <span>Read data every</span>
+          <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="read_s" min="5" max="3600" value="{{ val('read_s', cfg.get('read_s', cfg.report_s)) }}"><span class="input-group-text">s</span></div>
+          <span>and send every</span>
+          <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="report_s" min="10" max="3600" value="{{ val('report_s', cfg.report_s) }}"><span class="input-group-text">s</span></div>
+        </div>
+      <div class="form-text">Read: 5 s – 1 h, send: 10 s – 1 h (read ≤ send).</div>
     {% endcall %}
 
     {% call section('kwh', groups.kwh) %}

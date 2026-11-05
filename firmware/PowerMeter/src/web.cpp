@@ -157,6 +157,8 @@ static void hStatus() {  // public: tells the page which screen to show
   JsonDocument d;
   d["device_id"] = store::deviceId();
   d["fw"] = FW_VERSION;
+  d["kind"] = METER_KIND;
+  d["sensor"] = SENSOR_NAME;
   d["admin"] = store::hasAdmin();
   d["wifi"] = store::hasWifi() || store::meshOnly();
   d["auth"] = store::hasAdmin() && authed();
@@ -330,6 +332,7 @@ static void hState() {
   }
   JsonObject c = d["cfg"].to<JsonObject>();
   c["report_s"] = g.cfg.report_s;
+  c["read_s"] = g.cfg.read_s;
   c["kwh_max"] = num4(g.cfg.kwh_max);
   static const char *KA[] = {"end", "hold", "warn"};
   c["kwh_action"] = KA[g.cfg.kwh_action % 3];

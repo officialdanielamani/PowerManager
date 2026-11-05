@@ -24,7 +24,8 @@ enum NetStatus : uint8_t {
 
 struct MeterConfig {
   uint32_t ver = 0;
-  uint16_t report_s = 60;
+  uint16_t report_s = 60;  // send to the server every ... s
+  uint16_t read_s = 60;    // record a reading every ... s (<= report_s; sent in batches)
   uint16_t offline_off_min = 0;  // 0 = disabled
   SessMode sess_mode = SESS_NONE;
   uint16_t daily_utc_min = 0;

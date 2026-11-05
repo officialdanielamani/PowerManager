@@ -19,7 +19,8 @@ NOTIFY_TYPES = [
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
 
-REPORT_MIN, REPORT_MAX = 10, 3600
+REPORT_MIN, REPORT_MAX = 10, 3600   # send to the server every ... s
+READ_MIN = 5                        # record a reading every ... s (read <= send)
 
 # What a meter does when a limit / protection triggers. Same three choices everywhere.
 #   run  - session runs as usual (only an event + notification)
@@ -71,6 +72,7 @@ def amp_rating(device):
 def default_cfg(n_channels=1):
     return {
         "report_s": 60,
+        "read_s": 60,
         "offline_off": False,
         "offline_off_min": 3,
         "sess_mode": "none",
@@ -111,6 +113,9 @@ def parse_form(form, device):
     errors = []
     cfg = default_cfg(channel_count(device))
     cfg["report_s"] = _num(form, "report_s", int, REPORT_MIN, REPORT_MAX, "Send data every (s)", errors, 60)
+    cfg["read_s"] = _num(form, "read_s", int, READ_MIN, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
+    if cfg["read_s"] > cfg["report_s"]:
+        errors.append("Read data every: must not be longer than Send every")
     cfg["offline_off"] = form.get("offline_off") == "on"
     cfg["offline_off_min"] = _num(form, "offline_off_min", int, 1, 1440, "Offline minutes", errors, 3)
 
@@ -171,6 +176,7 @@ def to_device(cfg, ver):
         "ver": ver,
         "cfg": {
             "report_s": int(cfg.get("report_s", 60)),
+            "read_s": int(cfg.get("read_s", cfg.get("report_s", 60))),
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "sess": sess,
             "volt": {"min": float(cfg.get("volt_min", 0) or 0), "max": float(cfg.get("volt_max", 0) or 0),

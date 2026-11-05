@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import kind_badge %}
 {% block title %}Configure {{ d.name }} · PowerManager{% endblock %}
 {% set f = form %}
 {% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
@@ -11,7 +12,7 @@
   {% endfor %}
 {%- endmacro %}
 {% block content %}
-<h1 class="h4 mb-1">{{ d.name }}</h1>
+<h1 class="h4 mb-1">{{ d.name }} {{ kind_badge(d.kind) }}</h1>
 <div class="text-body-secondary small mb-3">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
 {% set active = 'configure' %}{% include "meters/_tabs.html" %}
 <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
@@ -45,9 +46,16 @@
         <input class="form-control" name="name" required maxlength="40" value="{{ val('name', d.name) }}"></div>
       <div class="mb-3"><label class="form-label">Info</label>
         <input class="form-control" name="info" maxlength="200" value="{{ val('info', d.info) }}" placeholder="e.g. Basement"></div>
-      <div class="mb-3"><label class="form-label">Send data every</label>
-        <div class="input-group"><input class="form-control" type="number" name="report_s" min="10" max="3600" required value="{{ val('report_s', cfg.report_s) }}"><span class="input-group-text">seconds</span></div>
-        <div class="form-text">10 s – 1 h. Limits are checked on the meter every second regardless.</div></div>
+      <div class="mb-3"><label class="form-label">Data</label>
+        <div class="d-flex align-items-center flex-wrap gap-2">
+          <span>Read data every</span>
+          <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="read_s" min="5" max="3600" required value="{{ val('read_s', cfg.get('read_s', cfg.report_s)) }}"><span class="input-group-text">s</span></div>
+          <span>and send every</span>
+          <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="report_s" min="10" max="3600" required value="{{ val('report_s', cfg.report_s) }}"><span class="input-group-text">s</span></div>
+        </div>
+        <div class="form-text">Read: 5 s – 1 h, send: 10 s – 1 h (read ≤ send). Example: read every 10 s and send every 60 s = 6 readings sent together once a minute.
+          Limits are checked on the meter every second regardless; events (trip, tamper, …) are sent right away.
+          Note: the meter buffers ~500 readings while offline, so shorter read intervals mean a shorter offline buffer (10 s ≈ 80 min).</div></div>
       <div class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
         <button type="button" class="btn btn-outline-secondary" data-action="set_default" data-confirm="Reset limits and send interval to defaults? Name, info, linked users, notification options and history are kept."><i class="bi bi-arrow-counterclockwise me-1"></i>Set to Default</button>
@@ -108,7 +116,7 @@
         <span class="input-group-text">Min</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_min" value="{{ val('volt_min', cfg.get('volt_min', 0)) }}">
         <span class="input-group-text">Max</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_max" value="{{ val('volt_max', cfg.get('volt_max', 0)) }}">
         <span class="input-group-text">V</span></div>
-      <div class="form-text">0 = no limit on that side. Out of range = 3 s in a row; back in range = 10 s in a row. No AC at all is reported as "No voltage", not here.</div>
+      <div class="form-text">0 = no limit on that side. Out of range = 3 s in a row; back in range = 10 s in a row. No {{ d.kind|upper }} supply at all is reported as "No voltage", not here.</div>
       {{ action_radios('volt_action', val('volt_action', cfg.get('volt_action', 'hold')), protect_actions, 'hold', 'If out of range') }}
       <hr>
 
@@ -126,14 +134,14 @@
         <span>If the sensor does not respond or errors for</span>
         <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="0" max="3600" name="sensor_to_s" value="{{ val('sensor_to_s', cfg.get('sensor_to_s', 10)) }}"><span class="input-group-text">s</span></div>
       </div>
-      <div class="form-text">0 = off. The PZEM is powered from the AC side, so a power cut also looks like "no response". Readings coming back clear it.</div>
+      <div class="form-text">0 = off. The sensor is powered from the {{ 'DC supply' if d.kind == 'dc' else 'AC side' }}, so a power cut also looks like "no response". Readings coming back clear it.</div>
       {{ action_radios('sensor_action', val('sensor_action', cfg.get('sensor_action', 'hold')), protect_actions, 'hold', 'Then') }}
     </div></div>
   </div>
 
   <div class="col-12">
     <div class="card"><div class="card-header fw-semibold">Tare (self-consumption)</div><div class="card-body">
-      <p class="small text-body-secondary mb-2">If the meter's own power supply (ESP32, SSR) is on the measured line, the PZEM also measures it.
+      <p class="small text-body-secondary mb-2">If the meter's own power supply (ESP32, SSR) is on the measured line, the power sensor also measures it.
         These offsets are subtracted when showing <strong>Tared</strong> values (Info page switch, dashboard, CSV extra columns) and, if ticked below, by the meter for its limits. Raw readings are always stored.</p>
       <div class="d-flex flex-wrap gap-2 align-items-center">
         <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Current</span><input class="form-control" type="number" step="0.001" min="0" max="5" name="tare_a" id="tare_a" value="{{ val('tare_a', cfg.get('tare_a', d.tare_a)) }}"><span class="input-group-text">A</span></div>
