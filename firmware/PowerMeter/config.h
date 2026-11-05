@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.5.0"
+#define FW_VERSION "0.5.1"
 #define HW_NAME "esp32s3-supermini"
 #define HW_INFO "PZEM-004T 1Chn"   // free text shown in "Get meter info" on the server
 #define PROTO_VERSION 1
@@ -73,7 +73,9 @@
 // One hop only. See docs/mesh.md.
 #define MESH_ENABLE 1                                 // 0 = no ESP-NOW at all (behaves like firmware 0.3)
 #define MESH_LEAF_AFTER_MS (90UL * 1000UL)            // Wi-Fi down this long -> leaf
-#define MESH_WIFI_RETRY_MS (10UL * 60UL * 1000UL)     // leaf: try Wi-Fi again this often
+#define MESH_WIFI_RETRY_MS (10UL * 60UL * 1000UL)     // leaf with a working mesh link: try Wi-Fi this often
+#define MESH_NOLINK_RETRY_MS (2UL * 60UL * 1000UL)    // leaf without a gateway this long -> try Wi-Fi
+#define MESH_WIFI_TRY_MS (30UL * 1000UL)              // Wi-Fi retry from leaf: back to mesh after this
 #define MESH_BEACON_MS 2000                            // gateway beacon interval
 #define MESH_GATEWAY_LOST_MS 10000                     // leaf: no beacon this long -> find another
 #define MESH_MAX_LEAVES 10                             // per gateway

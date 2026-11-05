@@ -12,7 +12,7 @@ Meters that cannot reach Wi-Fi talk to the server through a nearby meter that ca
 
 | Setting (meter page → Settings → Mesh) | Behaviour |
 |---|---|
-| **Auto** (default) | Wi-Fi first. While online, the meter is also a **gateway**: it sends a beacon every 2 s and relays for up to 10 leaves. If Wi-Fi is down for **90 s** it becomes a **leaf** and looks for a gateway; every **10 min** it tries Wi-Fi again. |
+| **Auto** (default) | Wi-Fi first. While online, the meter is also a **gateway**: it sends a beacon every 2 s and relays for up to 10 leaves. If Wi-Fi is down for **90 s** it becomes a **leaf** and looks for a gateway. It goes back to try Wi-Fi: every **10 min** while the mesh link works, or after **2 min** without a gateway. A Wi-Fi try from the mesh lasts **30 s**; if Wi-Fi is still down it returns to the mesh (the last gateway channel is tried first, so it relinks in seconds). It keeps alternating until Wi-Fi is back. |
 | **Wi-Fi only** | Never relays, never uses the mesh. |
 | **Mesh only** (setup: *Use mesh only (no Wi-Fi here)*) | Always a leaf. |
 

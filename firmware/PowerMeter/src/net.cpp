@@ -45,6 +45,8 @@ static uint32_t wifiDownSinceMs = 0, wifiUpSinceMs = 0, lastWifiRetryMs = 0;
 // mesh: leaf mode = no Wi-Fi, talk to the server through a gateway meter
 static bool leafMode = false;
 static uint32_t leafSinceMs = 0, helloSentMs = 0;
+static uint32_t noLinkSinceMs = 0;  // leaf: no gateway since (0 = linked)
+static bool wifiRetryFromLeaf = false; // short Wi-Fi attempt, then back to the mesh
 static bool linkWasUp = false;
 static PairRequest meshPairReq;
 static bool meshPairPending = false;
@@ -799,7 +801,7 @@ static void leafLoop() {
 static void enterLeaf() {
   Serial.println("[net] no Wi-Fi: switching to mesh (leaf)");
   leafMode = true;
-  leafSinceMs = millis();
+  leafSinceMs = noLinkSinceMs = millis();
   stopWs();
   helloDone = linkWasUp = false;
   WiFi.setAutoReconnect(false);
@@ -817,6 +819,7 @@ static void exitLeaf() {
   WiFi.setAutoReconnect(true);
   if (store::hasWifi()) WiFi.begin(store::wifiSsid().c_str(), store::wifiPass().c_str());
   wifiDownSinceMs = lastWifiRetryMs = millis();
+  wifiRetryFromLeaf = true;
 }
 
 static void modeLoop() {
@@ -829,12 +832,22 @@ static void modeLoop() {
   lastCheck = now;
   bool meshAllowed = store::meshRole() == 0;  // Auto
   if (!leafMode) {
+    if (WiFi.status() == WL_CONNECTED) wifiRetryFromLeaf = false;
+    // First loss: give Wi-Fi 90 s. A retry coming from the mesh: only a short try, then back.
+    uint32_t wait = wifiRetryFromLeaf ? MESH_WIFI_TRY_MS : MESH_LEAF_AFTER_MS;
     bool wifiGone = store::hasWifi() && WiFi.status() != WL_CONNECTED && wifiDownSinceMs &&
-                    now - wifiDownSinceMs > MESH_LEAF_AFTER_MS;
+                    now - wifiDownSinceMs > wait;
     bool configured = store::hasAdmin() && (store::meshOnly() || store::hasWifi());
     if (meshAllowed && configured && !testing && (store::meshOnly() || wifiGone)) enterLeaf();
-  } else if (!meshAllowed || (store::hasWifi() && !store::meshOnly() && now - leafSinceMs > MESH_WIFI_RETRY_MS)) {
-    exitLeaf();
+  } else {
+    // Leaf: with a working gateway link, try Wi-Fi only every 10 min (the mesh is fine meanwhile);
+    // without one for 2 min, try Wi-Fi sooner (the mesh is not helping).
+    if (mesh::leafLinked()) noLinkSinceMs = 0;
+    else if (!noLinkSinceMs) noLinkSinceMs = now;
+    bool canWifi = store::hasWifi() && !store::meshOnly();
+    bool retry = mesh::leafLinked() ? now - leafSinceMs > MESH_WIFI_RETRY_MS
+                                    : now - noLinkSinceMs > MESH_NOLINK_RETRY_MS;
+    if (!meshAllowed || (canWifi && retry)) exitLeaf();
   }
 }
 
