@@ -15,7 +15,10 @@ NOTIFY_TYPES = [
     ("sensor_error", "Sensor error (no reading)"),
     ("disconnected", "Device disconnected for"),
     ("reconnected", "Device reconnected"),
+    ("meter_status", "Meter status (disabled / enabled / unsynced / synced / removed)"),
 ]
+# Types that are on for every account until the account switches them off.
+NOTIFY_DEFAULT_ON = {"meter_status"}
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
 

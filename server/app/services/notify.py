@@ -20,8 +20,17 @@ COOLDOWN_TYPES = {"max_amp", "panel_open", "no_voltage"}
 
 
 def subscribers(device, ntype):
-    """(user, rule) pairs that want `ntype` for this meter and may still see it."""
+    """(user, rule) pairs that want `ntype` for this meter and may still see it. For default-on
+    types (devconfig.NOTIFY_DEFAULT_ON) an account without a saved choice counts as subscribed."""
+    from .devconfig import NOTIFY_DEFAULT_ON
     out = []
+    if ntype in NOTIFY_DEFAULT_ON:
+        rules = {r.user_fk: r for r in NotificationRule.query.filter_by(device_fk=device.id, type=ntype).all()}
+        for user in User.query.order_by(User.id).all():
+            r = rules.get(user.id)
+            if (r is None or r.enabled) and user.is_enabled and access.can_view(user, device):
+                out.append((user, r))
+        return out
     for r in NotificationRule.query.filter_by(device_fk=device.id, type=ntype, enabled=True).all():
         user = db.session.get(User, r.user_fk)
         if user is not None and user.is_enabled and access.can_view(user, device):
@@ -29,11 +38,12 @@ def subscribers(device, ntype):
     return out
 
 
-def notify(device, ntype, message, only_user=None):
-    """Create a notification for every account subscribed to `ntype` on this meter."""
+def notify(device, ntype, message, only_user=None, subs=None, name=None):
+    """Create a notification for every account subscribed to `ntype` on this meter.
+    `subs` / `name`: subscribers and meter name taken before the meter's data was removed."""
     created = []
-    text = f"[{device.name}] {message}"
-    for user, _rule in subscribers(device, ntype):
+    text = f"[{name or device.name}] {message}"
+    for user, _rule in (subs if subs is not None else subscribers(device, ntype)):
         if only_user is not None and user.id != only_user.id:
             continue
         if ntype in COOLDOWN_TYPES:

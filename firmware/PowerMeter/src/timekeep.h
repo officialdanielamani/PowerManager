@@ -13,4 +13,6 @@ void set(uint32_t epoch, TimeSource src);
 TimeSource source();
 const char *sourceName();
 String format(uint32_t epoch);  // "YYYY-MM-DD HH:MM:SS" UTC
+// DS3231 time (UTC epoch) read now: -1 = no DS3231 (HAS_DS3231 0 / safe mode), 0 = not readable.
+int64_t rtcNow();
 }  // namespace timekeep

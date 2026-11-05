@@ -199,3 +199,66 @@ def test_telegram_token_is_write_only(app, admin):
     assert settings.get("telegram_bot_token") == "123:SECRET"  # empty = keep
     admin.post("/settings/notifications", data={"telegram_bot_token": "", "telegram_clear": "on"})
     assert settings.get("telegram_bot_token") == ""
+
+
+def test_meter_status_notification_default_on(app, admin):
+    from app.models import Device, Notification, NotificationRule
+    from app.routes.device_api import ensure_device_defaults
+    from app.extensions import db
+    with app.app_context():
+        d = Device(device_id="STAT0001", name="Pump", caps={"channels": 1}, cfg={}, pair_gen=1)
+        db.session.add(d)
+        db.session.flush()
+        ensure_device_defaults(d, reset=True)
+        db.session.commit()
+        pk = d.id
+    # no saved choice: on by default
+    html = admin.get(f"/meters/{pk}/notifications").get_data(as_text=True)
+    assert 'name="notify_meter_status"' in html and "Meter status" in html
+    assert admin.post(f"/meters/{pk}/action", json={"action": "disable"}).get_json()["ok"]
+    assert admin.post(f"/meters/{pk}/action", json={"action": "enable"}).get_json()["ok"]
+    with app.app_context():
+        msgs = [n.message for n in Notification.query.filter_by(type="meter_status").order_by(Notification.id)]
+        assert len(msgs) == 2 and "disabled" in msgs[0] and "enabled" in msgs[1]
+        # switched off by the user: no more
+        db.session.add(NotificationRule(device_fk=pk, user_fk=1, type="meter_status", enabled=False))
+        db.session.commit()
+    admin.post(f"/meters/{pk}/action", json={"action": "disable"})
+    with app.app_context():
+        assert Notification.query.filter_by(type="meter_status").count() == 2
+
+
+def test_remove_keeps_meter_status_notification(app, admin):
+    from app.models import Device, Notification
+    from app.routes.device_api import ensure_device_defaults
+    from app.extensions import db
+    with app.app_context():
+        d = Device(device_id="STAT0002", name="Heater", caps={"channels": 1}, cfg={}, pair_gen=1)
+        db.session.add(d)
+        db.session.flush()
+        ensure_device_defaults(d, reset=True)
+        db.session.commit()
+        pk = d.id
+    r = admin.post(f"/meters/{pk}/action", json={"action": "remove", "confirm": "STAT0002"})
+    assert r.get_json()["ok"], r.get_json()
+    with app.app_context():
+        n = Notification.query.filter_by(type="meter_status").one()
+        assert n.message.startswith("[Heater]") and "removed" in n.message
+
+
+def test_sessions_delete_only_ended(app, admin):
+    from app.models import Device, Session
+    from app.extensions import db
+    with app.app_context():
+        d = Device(device_id="SES00001", name="S", caps={"channels": 1}, cfg={}, pair_gen=1)
+        db.session.add(d)
+        db.session.flush()
+        a = Session(device_fk=d.id, gen=1, sid=1, started_at=100, ended_at=200)
+        b = Session(device_fk=d.id, gen=1, sid=2, started_at=200)  # running
+        db.session.add_all([a, b])
+        db.session.commit()
+        pk, ids = d.id, [a.id, b.id]
+    r = admin.post(f"/meters/{pk}/sessions/delete", json={"ids": ids}).get_json()
+    assert r["ok"] and r["deleted"] == 1
+    with app.app_context():
+        assert [s.sid for s in Session.query.filter_by(device_fk=pk)] == [2]

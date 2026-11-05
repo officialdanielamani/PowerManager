@@ -17,10 +17,18 @@ static bool ntpStarted = false;
 
 #if HAS_DS3231
 static bool rtcOk = false;  // false in safe mode: the DS3231 is not used at all
+static SemaphoreHandle_t i2cLock = nullptr;  // the RTC is read from the net and web tasks
 static uint8_t bcd2dec(uint8_t v) { return (v >> 4) * 10 + (v & 0x0F); }
 static uint8_t dec2bcd(uint8_t v) { return ((v / 10) << 4) | (v % 10); }
 
+static uint32_t rtcReadRaw();
 static uint32_t rtcRead() {
+  if (i2cLock) xSemaphoreTake(i2cLock, portMAX_DELAY);
+  uint32_t e = rtcReadRaw();
+  if (i2cLock) xSemaphoreGive(i2cLock);
+  return e;
+}
+static uint32_t rtcReadRaw() {
   Wire.beginTransmission(0x68);
   Wire.write(0);
   if (Wire.endTransmission() != 0) return 0;
@@ -38,6 +46,7 @@ static uint32_t rtcRead() {
 }
 
 static void rtcWrite(uint32_t epoch) {
+  if (i2cLock) xSemaphoreTake(i2cLock, portMAX_DELAY);
   time_t e = epoch;
   struct tm t;
   gmtime_r(&e, &t);
@@ -51,6 +60,7 @@ static void rtcWrite(uint32_t epoch) {
   Wire.write(dec2bcd(t.tm_mon + 1));
   Wire.write(dec2bcd(t.tm_year % 100));
   Wire.endTransmission();
+  if (i2cLock) xSemaphoreGive(i2cLock);
 }
 #endif
 
@@ -60,6 +70,7 @@ void begin() {
 #if HAS_DS3231
   rtcOk = !sys::safeMode;
   if (!rtcOk) return;
+  i2cLock = xSemaphoreCreateMutex();
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   uint32_t e = rtcRead();
   if (e > MIN_VALID) set(e, TS_RTC);
@@ -106,6 +117,16 @@ void loop() {
     rtcWritePending = false;
     if (rtcOk) rtcWrite((uint32_t)time(nullptr));
   }
+#endif
+}
+
+int64_t rtcNow() {
+#if HAS_DS3231
+  if (!rtcOk) return -1;
+  uint32_t e = rtcRead();
+  return e > MIN_VALID ? (int64_t)e : 0;
+#else
+  return -1;
 #endif
 }
 

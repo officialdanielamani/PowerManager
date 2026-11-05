@@ -281,7 +281,8 @@ var PM = (function () {
         ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
         ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],
         ['Sensor', i.sensor || null], ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
-        ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Last reset', i.reset], ['Clock from', i.time_src], ['Waiting to send', i.outbox != null ? i.outbox + ' item(s)' : null], ['Memory', i.stack]];
+        ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Last reset', i.reset], ['Meter clock', i.clock_local ? i.clock_local + (i.time_src ? ' (from ' + i.time_src + ')' : '') : (i.clock === 0 ? 'not set' : null)],
+        ['RTC (DS3231)', i.clock == null ? null : (i.rtc == null ? 'not fitted' : (i.rtc_local || 'not readable'))], ['Waiting to send', i.outbox != null ? i.outbox + ' item(s)' : null], ['Memory', i.stack]];
       return '<table class="table table-sm mb-2">' + rows.filter(function (r) { return r[1] != null && r[1] !== ''; })
         .map(function (r) { return '<tr><th class="text-body-secondary fw-normal">' + r[0] + '</th><td>' + esc(r[1]) + '</td></tr>'; }).join('') +
         '</table><div class="small text-body-secondary">Received ' + esc(d.at_local) + '</div>';
@@ -308,21 +309,32 @@ var PM = (function () {
       });
     });
 
-    // ---- select + delete historical events (admin)
-    var incBar = document.getElementById('incBar');
-    if (incBar) {
-      var boxes = function () { return Array.prototype.slice.call(document.querySelectorAll('.pm-inc')); };
-      var refreshInc = function () {
+    // ---- select + delete historical events / sessions (admin)
+    function selectDelete(prefix, url, what, tab) {
+      var bar = document.getElementById(prefix + 'Bar');
+      if (!bar || !url) return;
+      var boxes = function () { return Array.prototype.slice.call(document.querySelectorAll('.pm-' + prefix)); };
+      var refresh = function () {
         var n = boxes().filter(function (c) { return c.checked; }).length;
-        incBar.classList.toggle('d-none', !n); document.getElementById('incCount').textContent = n;
+        bar.classList.toggle('d-none', !n); document.getElementById(prefix + 'Count').textContent = n;
       };
-      boxes().forEach(function (c) { c.addEventListener('change', refreshInc); });
-      document.getElementById('incAll').addEventListener('change', function (e) { boxes().forEach(function (c) { c.checked = e.target.checked; }); refreshInc(); });
-      document.getElementById('incDelete').addEventListener('click', function () {
+      boxes().forEach(function (c) { c.addEventListener('change', refresh); });
+      var all = document.getElementById(prefix + 'All');
+      if (all) all.addEventListener('change', function (e) { boxes().forEach(function (c) { c.checked = e.target.checked; }); refresh(); });
+      document.getElementById(prefix + 'Delete').addEventListener('click', function () {
         var ids = boxes().filter(function (c) { return c.checked; }).map(function (c) { return +c.value; });
-        if (!ids.length || !confirm('Delete ' + ids.length + ' historical event(s)? This cannot be undone.')) return;
-        post(opt.incDelete, {ids: ids}).then(function (r) { toast(r.message || r.error, r.ok ? 'success' : 'danger'); if (r.ok) setTimeout(function () { location.reload(); }, 600); });
+        if (!ids.length || !confirm('Delete ' + ids.length + ' ' + what + '? This cannot be undone.')) return;
+        post(url, {ids: ids}).then(function (r) {
+          toast(r.message || r.error, r.ok ? 'success' : 'danger');
+          if (r.ok) setTimeout(function () { if (tab) location.hash = tab; location.reload(); }, 600);
+        });
       });
+    }
+    selectDelete('inc', opt.incDelete, 'historical event(s)');
+    selectDelete('ses', opt.sesDelete, 'session record(s)', 'sessions');
+    if (location.hash === '#sessions') {  // back on the Sessions tab after a delete
+      var st = document.querySelector('[data-bs-target="#tabSessions"],[href="#tabSessions"]');
+      if (st && window.bootstrap) bootstrap.Tab.getOrCreateInstance(st).show();
     }
 
     // ---- Get Data Now: ask the meter for a reading and wait for it to arrive

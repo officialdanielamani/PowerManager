@@ -121,3 +121,27 @@ The meter type comes from the firmware when it pairs (no setting). Dashboard car
 ## Read / send interval
 
 Configuration → General: **Read data every [X] s and send every [Y] s** (read 5 s – 1 h, send 10 s – 1 h, read ≤ send). The meter records a reading every X s and sends the buffered readings every Y s (Get Data Now and events go at once). Also in Bulk Configuration (*Read / send data*).
+
+## Sessions tab: select and delete
+
+Admin: tick ended sessions (or the header box for all) → **Delete selected**. Only the session record is deleted (power readings stay); the running session has no checkbox. Session numbers are not renumbered.
+
+## Meter Status notification
+
+Meter → Notification Options → **Meter status** (disabled / enabled / unsynced / synced / removed). **On by default** for every account that can see the meter, until the account switches it off. *Synced* = hardware that was unsynced pairs again. A *removed* notice is kept after the meter's data is deleted.
+
+## Meter clock / RTC
+
+**Get meter info** shows the meter's clock (and where its time came from) and, with a DS3231 fitted, the RTC's own time, both in the display time zone. The meter's own page shows the same next to its date/time.
+
+## Telegram bot (interactive)
+
+With Telegram enabled (Settings → Notifications) the server also answers messages to the bot (long polling: no webhook or public URL needed). Only chats whose ID is saved in an account (Settings → Account → My Telegram) get answers; an unknown chat is told its chat ID. Each account sees only its meters.
+
+| Message | Answer |
+|---------|--------|
+| `/start` | Keyboard with **📋 List** and **⚡ Now Reading** |
+| 📋 List (`/list`) | Every meter: online dot, Device ID, nick name, AC/DC, power now |
+| ⚡ Now Reading | Buttons to pick a meter → *Get Data Now* on that meter, waits up to 12 s, then V / A / W (PF / Hz for AC), energy, session kWh (+ cost if the account may see prices) |
+| `/now <Device ID or nick name>` | Same, without the buttons |
+

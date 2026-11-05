@@ -2,7 +2,7 @@
 from ..extensions import db
 from ..models import (Channel, Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, PairingCode, Rollup, RollupDirty, Session, now)
-from . import commands, hub, incidents, ingest
+from . import commands, hub, incidents, ingest, notify
 
 HISTORY_MODELS = (Measurement, Rollup, RollupDirty, Session, Incident, Command, Notification,
                   NotificationRule, MeterViewer, Event)
@@ -30,6 +30,7 @@ def disable(device, user):
     close_ongoing_incidents(device, "disabled")
     (Command.query.filter_by(device_fk=device.id, sent_at=None, cancelled=False).update({"cancelled": True}))
     ingest.server_event(device, "disabled", {"by": user.username})
+    notify.notify(device, "meter_status", f"Meter disabled by {user.username}: relay off, session ended")
     db.session.commit()
     commands.issue(device, "disable", {}, user)  # sent now, or when the meter reconnects
 
@@ -38,6 +39,7 @@ def enable(device, user):
     device.disabled_at = None
     (Command.query.filter_by(device_fk=device.id, c="disable", sent_at=None).update({"cancelled": True}))
     ingest.server_event(device, "enabled", {"by": user.username})
+    notify.notify(device, "meter_status", f"Meter enabled by {user.username} (no session yet: Renew to start one)")
     db.session.commit()
     commands.issue(device, "enable", {}, user)  # no new session: the admin renews when ready
 
@@ -55,17 +57,23 @@ def _detach(device, why, user):
 
 def unsync(device, user):
     """Meter factory-resets; all history stays (listed under unsynced meters)."""
+    subs = notify.subscribers(device, "meter_status")  # before: viewers may lose access
     _detach(device, "unsynced", user)
     ingest.server_event(device, "unsynced", {"by": user.username})
+    notify.notify(device, "meter_status", f"Meter unsynced by {user.username}: it resets itself, history is kept",
+                  subs=subs)
     db.session.commit()
 
 
 def remove(device, user):
     """Meter factory-resets and every record of it is deleted. A small tombstone row stays so a
     meter that was offline still gets 'removed' (and resets) when it connects again."""
+    subs, name = notify.subscribers(device, "meter_status"), device.name  # before the data is gone
     _detach(device, "removed", user)
     for model in HISTORY_MODELS:
         model.query.filter_by(device_fk=device.id).delete(synchronize_session=False)
+    notify.notify(device, "meter_status", f"Meter removed by {user.username}: it resets itself, all its data was deleted",
+                  subs=subs, name=name)
     PairingCode.query.filter_by(device_fk=device.id).update({"device_fk": None})
     device.purged = True
     device.name = device.device_id

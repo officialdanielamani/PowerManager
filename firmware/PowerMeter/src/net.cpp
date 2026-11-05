@@ -522,6 +522,9 @@ static void sendInfo() {
   doc["boot"] = store::bootCount();
   doc["outbox"] = outbox::count();
   doc["time_src"] = timekeep::sourceName();
+  doc["clock"] = timekeep::valid() ? timekeep::now() : 0;  // the meter's clock
+  int64_t rtc = timekeep::rtcNow();
+  if (rtc >= 0) doc["rtc"] = (uint32_t)rtc;  // DS3231 fitted: its own time (0 = not readable)
   doc["stack"] = sys::stackReport();
   doc["reset"] = String(sys::resetReason()) + (sys::safeMode ? " - SAFE MODE (mesh + DS3231 off)" : "");
   if (battery::enabled()) {

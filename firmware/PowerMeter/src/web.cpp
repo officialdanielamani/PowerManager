@@ -290,6 +290,8 @@ static void hState() {
   d["fw"] = FW_VERSION;
   d["time"] = timekeep::valid() ? timekeep::now() : 0;
   d["time_src"] = timekeep::sourceName();
+  int64_t rtc = timekeep::rtcNow();
+  if (rtc >= 0) d["rtc"] = (uint32_t)rtc;  // DS3231 fitted: its own time (0 = not readable)
   d["uptime"] = millis() / 1000;
   d["ip"] = net::ipAddress();
   d["rssi"] = net::rssi();

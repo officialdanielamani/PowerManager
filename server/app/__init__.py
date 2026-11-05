@@ -112,8 +112,9 @@ def create_app(overrides=None):
         return render_template("errors/429.html"), 429
 
     if app.config.get("START_SCHEDULER") and not app.config["TESTING"]:
-        from .services import hub, scheduler
+        from .services import hub, scheduler, telegram_bot
         scheduler.start(app)
+        telegram_bot.start(app)  # interactive bot (idles until Telegram is enabled with a token)
         hub.install_signal_handler()
 
     return app

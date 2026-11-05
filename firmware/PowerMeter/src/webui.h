@@ -145,7 +145,7 @@ function load(){api('/api/state').then(function(d){if(d._s==401)return route();i
  var netMap={online:[d.link=='mesh'?'Online (mesh)':'Online','ok'],connecting:['Server offline','bad'],not_paired:['Not paired','warn'],wifi_connecting:['Wi-Fi connecting','warn'],setup:['Setup','warn']};
  var nm=netMap[d.net]||[d.net,''];$('dNet').innerHTML=pill(nm[0],nm[1]);$('curSsid').textContent=d.mesh_only?'(mesh only)':d.ssid;$('mrole').value=d.role||'auto';
  $('pairCard').classList.toggle('hide',d.paired);if(d.unauthorized)note('The server no longer accepts this meter. Pair it again.');
- $('dTime').textContent=(d.time?fmt(d.time):'Clock not set')+' · time from '+d.time_src;
+ $('dTime').textContent=(d.time?fmt(d.time):'Clock not set')+' · time from '+d.time_src+(d.rtc!=null?' · RTC (DS3231): '+(d.rtc?fmt(d.rtc):'not readable'):'');
  var block=st.disabled||st.tripped||ss.status=='quota'||ss.status=='expired'||ss.status=='ended';$('bOn').disabled=block;$('bOn').title=block?'Blocked until the session is renewed / trip is reset':'';
  $('bTrip').classList.toggle('hide',!st.tripped);
  var status=st.disabled?pill('Disabled by server','bad'):st.tripped?pill('Over-current trip','bad'):ss.status=='quota'?pill('kWh limit reached','warn'):ss.status=='expired'?pill('Session ended','warn'):ss.status=='ended'?pill('Session ended ('+(ss.end_reason||'')+')','bad'):ss.over?pill('Over kWh limit (power on)','warn'):pill('Active','ok');

@@ -84,7 +84,8 @@ def _rules(device, user):
     out = []
     for ntype, label in devconfig.NOTIFY_TYPES:
         r = rules.get(ntype)
-        out.append({"type": ntype, "label": label, "enabled": bool(r and r.enabled),
+        on = bool(r.enabled) if r else ntype in devconfig.NOTIFY_DEFAULT_ON
+        out.append({"type": ntype, "label": label, "enabled": on,
                     "param": (r.param if r and r.param else devconfig.DISCONNECTED_DEFAULT_MIN)})
     return out
 
@@ -216,7 +217,12 @@ def resync(pk):
 @admin_required
 def device_info(pk):
     d = _device(pk)
-    return jsonify(at=d.last_info_at, at_local=settings.fmt_ts(d.last_info_at), info=d.last_info or {},
+    info = dict(d.last_info or {})
+    # Meter clock / DS3231 time, shown in the server's display time zone.
+    for k in ("clock", "rtc"):
+        if isinstance(info.get(k), int):
+            info[k + "_local"] = settings.fmt_ts(info[k]) if info[k] else None
+    return jsonify(at=d.last_info_at, at_local=settings.fmt_ts(d.last_info_at), info=info,
                    online=hub.is_online(d.id))
 
 
@@ -230,6 +236,21 @@ def incidents_delete(pk):
          .delete(synchronize_session=False))
     db.session.commit()
     return jsonify(ok=True, deleted=n, message=f"Deleted {n} event(s)")
+
+
+@bp.post("/<int:pk>/sessions/delete")
+@admin_required
+def sessions_delete(pk):
+    """Delete selected session records (ended ones only). Session numbers are not renumbered and
+    the power readings are kept."""
+    device = _device(pk, allow_removed=True)
+    body = request.get_json(silent=True) or {}
+    ids = [int(i) for i in body.get("ids", []) if str(i).isdigit()]
+    n = (Session.query.filter(Session.device_fk == device.id, Session.id.in_(ids or [-1]),
+                              Session.ended_at.isnot(None))
+         .delete(synchronize_session=False))
+    db.session.commit()
+    return jsonify(ok=True, deleted=n, message=f"Deleted {n} session record(s)")
 
 
 # ------------------------------------------------------------------ actions

@@ -107,7 +107,7 @@ Other close codes: `1001` = server is shutting down (reconnect with backoff), `4
 | `state` | After any relay/session change, and in response to `get_state` | see 2.6 |
 | `cfg_ack` | After applying a config | `ver`, `ok`, `err?` |
 | `cmd_ack` | After a command | `ref` (copied from the `cmd`), `ok`, `err?` (`quota_exceeded`, `session_expired`, `tripped`, `unknown_cmd`) |
-| `info` | Reply to `get_info` | `ip`, `ssid`, `rssi`, `mac`, `heap`, `heap_min`, `psram`, `psram_free`, `fw`, `hw`, `hw_info` (config.h `HW_INFO`), `chip`, `flash`, `core`, `uptime`, `boot`, `outbox`, `time_src`, `stack` (free stack per task), `reset` (last reset reason, SAFE MODE), and `bat_v` + `bat_pct` when `BATTERY_ENABLE` is on |
+| `info` | Reply to `get_info` | `ip`, `ssid`, `rssi`, `mac`, `heap`, `heap_min`, `psram`, `psram_free`, `fw`, `hw`, `hw_info` (config.h `HW_INFO`), `chip`, `flash`, `core`, `uptime`, `boot`, `outbox`, `time_src`, `stack` (free stack per task), `reset` (last reset reason, SAFE MODE), `clock` (meter clock, epoch; 0 = not set), `rtc` (DS3231 time; only with a DS3231, 0 = not readable), `sensor` / `kind` (AC/DC Power Sensor), and `bat_v` + `bat_pct` when `BATTERY_ENABLE` is on |
 | `ping` | Every 30 s | – (server replies `pong`) |
 
 ### 2.3 Server → Device

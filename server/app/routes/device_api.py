@@ -10,7 +10,7 @@ from simple_websocket import ConnectionClosed
 
 from ..extensions import db, limiter, sock
 from ..models import Channel, Device, PairingCode, now
-from ..services import devconfig, hub, ingest, mesh
+from ..services import devconfig, hub, ingest, mesh, notify
 
 bp = Blueprint("device_api", __name__)
 log = logging.getLogger(__name__)
@@ -91,6 +91,9 @@ def pair_device(body):
     pc.used_at = now()
     pc.device_fk = device.id
     ingest.server_event(device, "paired", {"fw": device.fw, "via": body.get("_via")})
+    if device.resync_pending:  # hardware that was unsynced paired again
+        notify.notify(device, "meter_status", "Meter synced again (paired after unsync): "
+                                              "choose continue or new meter in its Configuration")
     db.session.commit()
     log.info("Device %s paired%s", device_id, f" via {body.get('_via')}" if body.get("_via") else "")
     return 200, {"secret": secret, "link_key": device.link_key, "ws": WS_PATH, "time": now(),

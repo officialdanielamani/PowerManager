@@ -155,12 +155,16 @@
       <div class="small text-body-tertiary mt-2">Times in {{ tz_label() }}. "~" = estimated time (meter clock was not set).</div>
     </div>
     <div class="tab-pane fade" id="tabSessions">
+      {% if current_user.is_admin %}
+      <div class="d-none mb-2" id="sesBar"><button class="btn btn-sm btn-outline-danger" id="sesDelete"><i class="bi bi-trash me-1"></i>Delete selected (<span id="sesCount">0</span>)</button>
+        <span class="small text-body-secondary ms-2">Deletes the session record only; power readings stay. The running session cannot be deleted.</span></div>
+      {% endif %}
       <div class="table-responsive">
       <table class="table table-sm">
-        <thead><tr><th>#</th><th>Started</th><th>Ended</th><th>Duration</th><th>kWh used</th>{% if price[1] is not none %}<th>Cost</th>{% endif %}<th>Limit</th><th>End reason</th><th></th></tr></thead>
+        <thead><tr>{% if current_user.is_admin %}<th style="width:1%"><input class="form-check-input" type="checkbox" id="sesAll" title="Select all ended sessions"></th>{% endif %}<th>#</th><th>Started</th><th>Ended</th><th>Duration</th><th>kWh used</th>{% if price[1] is not none %}<th>Cost</th>{% endif %}<th>Limit</th><th>End reason</th><th></th></tr></thead>
         <tbody>
         {% for s in sessions %}
-          <tr><td>{{ s.sid }}</td><td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
+          <tr>{% if current_user.is_admin %}<td>{% if s.ended_at %}<input class="form-check-input pm-ses" type="checkbox" value="{{ s.id }}">{% endif %}</td>{% endif %}<td>{{ s.sid }}</td><td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
             <td class="text-nowrap">{{ ((s.ended_at or now) - s.started_at)|duration if s.started_at else '–' }}</td>
             {% set kt = tare_kwh(s) %}
             <td><span class="v-raw">{{ '%.3f'|format(s.kwh_used) }}</span>{% if kt is not none %}<span class="v-tared">{{ '%.3f'|format(kt) }}</span>{% endif %}</td>
@@ -173,7 +177,7 @@
               {% if can_csv %}<a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('meters.export_csv', pk=d.id, session=s.id) }}" title="Power data of this session"><i class="bi bi-download"></i> CSV</a>{% endif %}
             {% endif %}</td></tr>
         {% else %}
-          <tr><td colspan="9" class="text-body-secondary">No sessions yet.</td></tr>
+          <tr><td colspan="10" class="text-body-secondary">No sessions yet.</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -201,6 +205,7 @@ PM.meterInfo({
   hasTare: {{ 'true' if m.tare else 'false' }},
   deviceInfo: {{ (url_for('meters.device_info', pk=d.id) if current_user.is_admin else none)|tojson }},
   incDelete: {{ (url_for('meters.incidents_delete', pk=d.id) if current_user.is_admin else none)|tojson }},
+  sesDelete: {{ (url_for('meters.sessions_delete', pk=d.id) if current_user.is_admin else none)|tojson }},
   initial: {{ m|tojson }}
 });
 </script>
