@@ -231,3 +231,17 @@ def test_session_ended_by_protection(app, device):
         m = meter_summary(device, show_price=False)
     assert m["status"] == "ended_tamper" and m["sess_ended"] and m["relay_block"] == "ended"
     assert commands.relay_block_reason(device) == "session_expired"
+
+
+def test_float_limit_from_meter_is_rounded(app, device):
+    """Meters store limits as 32-bit floats: 0.05 arrives as 0.050000001."""
+    from app.models import Session
+    from app.routes.main import meter_summary
+    conn = FakeConn()
+    ingest.handle(conn, device, {"t": "evt", "seq": 1, "ts": now() - 10, "tv": 1, "e": "session_start",
+                                 "sid": 2, "max": 0.050000001})
+    ingest.handle(conn, device, {"t": "state", "sess": {"sid": 2, "kwh": 0.01, "max": 0.050000001, "status": "active"},
+                                 "relay": [{"i": 0, "on": True, "block": None}]})
+    assert Session.query.filter_by(sid=2).one().kwh_max == 0.05
+    with app.test_request_context():
+        assert meter_summary(device, show_price=False)["kwh_max"] == 0.05

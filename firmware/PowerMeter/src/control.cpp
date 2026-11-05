@@ -154,7 +154,7 @@ static void startSession(bool autoRenew) {
     Ctx *c = (Ctx *)p;
     o["sid"] = c->sid;
     o["auto"] = c->autoRenew;
-    o["max"] = c->max;
+    o["max"] = num4(c->max);
   }, &ctx);
   bump();
 }
@@ -286,7 +286,7 @@ void stateJson(JsonObject o) {
   if (g.sess.start) s["start"] = g.sess.start;
   s["kwh"] = serialized(String(kwh, 4));
   if (hasTare()) s["kwh_t"] = serialized(String(sessionKwhTared(), 4));
-  s["max"] = g.cfg.kwh_max;
+  s["max"] = num4(g.cfg.kwh_max);
   s["status"] = sessStatusName(g.sess.status);
   if (g.sess.over) s["over"] = true;
   s["ended"] = g.sess.ended;
@@ -340,8 +340,8 @@ static void checkVoltage(bool ok, float v) {
       emitEvent("voltage_out", [](JsonObject o, void *p) {
         Ctx *c = (Ctx *)p;
         o["v"] = serialized(String(c->v, 1));
-        o["min"] = c->min;
-        o["max"] = c->max;
+        o["min"] = num4(c->min);
+        o["max"] = num4(c->max);
         o["dir"] = c->dir;
         o["action"] = c->action;
       }, &ctx);
@@ -453,7 +453,7 @@ static void checkRules(bool firstPass) {
         Ctx *c = (Ctx *)p;
         o["ch"] = 0;
         o["val"] = serialized(String(c->a, 2));
-        o["limit"] = c->limit;
+        o["limit"] = num4(c->limit);
       }, &ctx);
       bump();
     }

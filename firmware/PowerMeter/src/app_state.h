@@ -105,3 +105,6 @@ struct StateLock {
 };
 
 const char *sessStatusName(SessStatus s);
+
+// Config values are 32-bit floats: 0.05 would be sent as 0.050000001. Round to 4 decimals for JSON.
+inline double num4(float f) { return round((double)f * 10000.0) / 10000.0; }

@@ -330,19 +330,19 @@ static void hState() {
   }
   JsonObject c = d["cfg"].to<JsonObject>();
   c["report_s"] = g.cfg.report_s;
-  c["kwh_max"] = g.cfg.kwh_max;
+  c["kwh_max"] = num4(g.cfg.kwh_max);
   static const char *KA[] = {"end", "hold", "warn"};
   c["kwh_action"] = KA[g.cfg.kwh_action % 3];
-  c["amp_max"] = g.cfg.amp_max;
+  c["amp_max"] = num4(g.cfg.amp_max);
   c["auto"] = g.cfg.auto_renew;
   c["mode"] = g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
   c["offline_off_min"] = g.cfg.offline_off_min;
   static const char *PA[] = {"run", "hold", "end"};
-  c["tare_a"] = g.cfg.tare_a;
-  c["tare_w"] = g.cfg.tare_w;
+  c["tare_a"] = num4(g.cfg.tare_a);
+  c["tare_w"] = num4(g.cfg.tare_w);
   c["tare_limits"] = g.cfg.tare_limits;
-  c["volt_min"] = g.cfg.volt_min;
-  c["volt_max"] = g.cfg.volt_max;
+  c["volt_min"] = num4(g.cfg.volt_min);
+  c["volt_max"] = num4(g.cfg.volt_max);
   c["volt_action"] = PA[g.cfg.volt_action % 3];
   c["tamper_protect"] = g.cfg.tamper_protect;
   c["tamper_action"] = PA[g.cfg.tamper_action % 3];

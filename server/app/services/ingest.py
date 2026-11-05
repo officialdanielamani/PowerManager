@@ -19,6 +19,11 @@ LIMITS = {"v": (0, 400), "a": (0, 200), "w": (0, 80000), "pf": (0, 1.0001), "hz"
 
 # ---------------------------------------------------------------- helpers
 
+def _r4(x):
+    """Meters store limits as 32-bit floats (0.05 arrives as 0.050000001): round for storage / display."""
+    return round(x, 4) if isinstance(x, float) else x
+
+
 def _f(value):
     try:
         return None if value is None else float(value)
@@ -332,7 +337,7 @@ def _apply_state(device, state):
         if sess.get("start"):
             s.started_at = s.started_at or int(sess["start"])
         s.kwh_used = _f(sess.get("kwh")) or 0.0
-        s.kwh_max = _f(sess.get("max")) or 0.0
+        s.kwh_max = _r4(_f(sess.get("max"))) or 0.0
 
 
 def _session(device, sid):
@@ -370,7 +375,7 @@ def process_event(device, ev):
     e = ev.type
     if e == "overcurrent":
         incidents.open_incident(device.id, "trip", ev.ts, ch=None, event=ev, estimated=est,
-                                detail={"a": d.get("val"), "limit": d.get("limit"), "ch": ev.ch})
+                                detail={"a": d.get("val"), "limit": _r4(_f(d.get("limit"))), "ch": ev.ch})
         notify.notify(device, "max_amp", f"Over-current trip: {d.get('val')} A")
     elif e == "trip_reset":
         incidents.close_incident(device.id, "trip", ev.ts, event=ev, estimated=est,
@@ -439,7 +444,7 @@ def process_event(device, ev):
             cur, price = settings.price()
             if price is not None and s.price_per_kwh is None:
                 s.price_per_kwh, s.currency = price, cur
-            s.kwh_max = _f(d.get("max")) or s.kwh_max
+            s.kwh_max = _r4(_f(d.get("max"))) or s.kwh_max
         if sid != 1:  # the very first session after pairing is not a "renew"
             notify.notify(device, "session_renew",
                           "Session auto-renewed" if d.get("auto") else "Session renewed")

@@ -74,7 +74,7 @@ def meter_summary(d, show_price=None):
         "reading": chans,
         "reading_at": settings.fmt_ts(reading.get("ts")),
         "kwh": sess.get("kwh"),
-        "kwh_max": sess.get("max"),
+        "kwh_max": round(float(sess["max"]), 4) if isinstance(sess.get("max"), (int, float)) else sess.get("max"),
         "status": status,
         "next_reset": settings.fmt_ts(sess.get("next_reset"), with_seconds=False) if sess.get("next_reset") else None,
         "next_reset_ts": sess.get("next_reset"),
