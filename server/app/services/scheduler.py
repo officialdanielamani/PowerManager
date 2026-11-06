@@ -37,11 +37,14 @@ def cleanup():
     for u in User.query.filter_by(notif_autodel=True).all():
         Notification.query.filter(Notification.user_fk == u.id,
                                   Notification.ts < t - u.notif_autodel_days * 86400).delete(synchronize_session=False)
-    for d in Device.query.filter((Device.data_autodel.is_(True)) | (Device.events_autodel.is_(True))).all():
-        if d.data_autodel:
-            cut = t - d.data_autodel_days * 86400
+    for d in Device.query.filter((Device.data_autodel.is_(True)) | (Device.events_autodel.is_(True)) |
+                                 (Device.sessions_autodel.is_(True))).all():
+        if d.sessions_autodel:  # finished sessions (records only)
+            cut = t - d.sessions_autodel_days * 86400
             Session.query.filter(Session.device_fk == d.id, Session.ended_at.isnot(None),
                                  Session.ended_at < cut).delete(synchronize_session=False)
+        if d.data_autodel:  # Historical Data: power readings and their summaries
+            cut = t - d.data_autodel_days * 86400
             Measurement.query.filter(Measurement.device_fk == d.id, Measurement.ts < cut).delete(synchronize_session=False)
             Rollup.query.filter(Rollup.device_fk == d.id, Rollup.bucket_start < cut).delete(synchronize_session=False)
         if d.events_autodel:

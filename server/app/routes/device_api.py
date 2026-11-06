@@ -62,7 +62,7 @@ def pair_device(body):
         if device.purged:  # removed with all data: a brand-new meter
             device.name, device.info, device.cfg = device_id, "", {}
             device.purged = False
-            device.data_autodel = device.events_autodel = False
+            device.data_autodel = device.events_autodel = device.sessions_autodel = False
             device.resync_pending = False
         else:  # unsynced, history kept: the admin chooses "continue" or "new meter"
             device.resync_pending = True

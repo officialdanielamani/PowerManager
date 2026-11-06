@@ -161,6 +161,7 @@ def test_cleanup_job(app, admin):
         pk = _meter("Dryer A", "AAAA1111")
         d = db.session.get(Device, pk)
         d.data_autodel, d.data_autodel_days = True, 120
+        d.sessions_autodel, d.sessions_autodel_days = True, 120  # separate option since 0.7.3
         d.events_autodel, d.events_autodel_days = True, 120
         u = User.query.filter_by(username="admin").one()
         u.notif_autodel, u.notif_autodel_days = True, 30
@@ -262,3 +263,48 @@ def test_sessions_delete_only_ended(app, admin):
     assert r["ok"] and r["deleted"] == 1
     with app.app_context():
         assert [s.sid for s in Session.query.filter_by(device_fk=pk)] == [2]
+
+
+def test_cleanup_options_are_separate(app, admin):
+    from app.extensions import db
+    from app.models import Device, Measurement, Session, now
+    from app.services import scheduler
+    with app.app_context():
+        d = Device(device_id="CLN00001", name="C", caps={"channels": 1}, cfg={}, pair_gen=1)
+        db.session.add(d)
+        db.session.flush()
+        old = now() - 200 * 86400
+        db.session.add(Measurement(device_fk=d.id, ch=0, gen=1, seq=1, ts=old, w=1.0))
+        db.session.add(Session(device_fk=d.id, gen=1, sid=1, started_at=old, ended_at=old + 10))
+        d.data_autodel, d.data_autodel_days = True, 120  # Historical Data only
+        db.session.commit()
+        scheduler.cleanup()
+        assert Measurement.query.filter_by(device_fk=d.id).count() == 0
+        assert Session.query.filter_by(device_fk=d.id).count() == 1  # sessions kept: their own option is off
+
+
+def test_delete_history_range_last_all(app, admin):
+    from app.extensions import db
+    from app.models import Device, Measurement, Rollup, Session, now
+    with app.app_context():
+        d = Device(device_id="DEL00001", name="D", caps={"channels": 1}, cfg={}, pair_gen=1)
+        db.session.add(d)
+        db.session.flush()
+        t = now()
+        for k, age in enumerate((60, 2 * 3600, 3 * 86400)):  # 1 min, 2 h, 3 days old
+            db.session.add(Measurement(device_fk=d.id, ch=0, gen=1, seq=k + 1, ts=t - age, w=10.0, e=1.0 + k))
+        db.session.add(Rollup(device_fk=d.id, ch=0, period="d", bucket_start=(t - 3 * 86400) - (t - 3 * 86400) % 86400, n=1))
+        db.session.add(Session(device_fk=d.id, gen=1, sid=1, started_at=t - 4 * 86400))
+        db.session.commit()
+        pk = d.id
+    url = f"/meters/{pk}/history/delete"
+    r = admin.post(url, json={"mode": "last", "n": 10, "unit": "minutes"}).get_json()
+    assert r["ok"] and r["deleted"] == 1
+    r = admin.post(url, json={"mode": "all"})  # not confirmed
+    assert r.status_code == 400
+    r = admin.post(url, json={"mode": "all", "confirm": True}).get_json()
+    assert r["ok"] and r["deleted"] == 2
+    with app.app_context():
+        assert Measurement.query.filter_by(device_fk=pk).count() == 0
+        assert Rollup.query.filter_by(device_fk=pk).count() == 0
+        assert Session.query.filter_by(device_fk=pk).count() == 1  # sessions are not Historical Data

@@ -427,14 +427,17 @@ class Meter:
         c, ref = msg.get("c"), msg.get("ref")
         ok, err = True, None
         if c == "relay":
-            if msg.get("on") and self.blocked() in ("tripped", "quota", "expired", "ended", "disabled"):
+            if msg.get("on") and self.blocked() in ("tripped", "quota", "expired", "ended", "disabled", "no_session"):
                 ok, err = False, {"tripped": "tripped", "quota": "quota_exceeded", "expired": "session_expired",
-                                  "ended": "session_expired", "disabled": "disabled"}[self.blocked()]
+                                  "ended": "session_expired", "disabled": "disabled", "no_session": "no_session"}[self.blocked()]
             else:
                 self.want_on = bool(msg.get("on"))
                 self.event("relay", on=self.want_on, src="server")
         elif c == "renew":
             self.new_session(auto=False, reason="manual")
+        elif c == "end":
+            if self.sess.get("sid"):
+                self.stop_session("stopped")
         elif c == "reset_trip":
             if self.tripped:
                 self.tripped = False

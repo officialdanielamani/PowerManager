@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.6.4"
+#define FW_VERSION "0.6.5"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 

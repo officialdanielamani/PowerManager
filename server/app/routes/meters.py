@@ -125,7 +125,7 @@ def configure(pk):
         cfg, cfg_errors = devconfig.parse_form(form, device)
         errors += cfg_errors
         retention = {}
-        for key, label in (("data", "Data"), ("events", "Historical events")):
+        for key, label in (("sessions", "Sessions"), ("events", "Historical events"), ("data", "Historical data")):
             raw = (form.get(f"{key}_autodel_days") or "120").strip()
             if not raw.isdigit() or not 1 <= int(raw) <= 3650:
                 errors.append(f"{label} auto-delete: days must be 1–3650")
@@ -134,6 +134,7 @@ def configure(pk):
         if not errors:
             device.tare_a, device.tare_w = cfg.get("tare_a", 0.0), cfg.get("tare_w", 0.0)  # mirror (tare is part of cfg)
             device.data_autodel, device.data_autodel_days = retention["data"]
+            device.sessions_autodel, device.sessions_autodel_days = retention["sessions"]
             device.events_autodel, device.events_autodel_days = retention["events"]
             device.name, device.info = name, info
             config_changed = cfg != device.cfg
@@ -282,8 +283,6 @@ def action(pk):
             return jsonify(ok=False, error="bad_aux", message="No such AUX relay."), 400
         cmd, err = commands.issue(device, "aux", {"i": int(i), "on": act == "aux_on"}, current_user)
     elif act in ("renew", "end", "reset_trip", "send_now"):
-        if act == "end" and not device.is_mc:
-            return jsonify(ok=False, error="unknown", message="Unknown action"), 400
         params = {"by": current_user.username} if act == "reset_trip" else {}
         if ch is not None and act != "send_now":
             params["ch"] = ch
@@ -457,6 +456,41 @@ def _range_args(device):
     start = settings.local_to_epoch(request.args.get("from", ""))
     end = settings.local_to_epoch(request.args.get("to", ""))
     return history.resolve_range(device.id, rng, start, end)
+
+
+DELETE_UNITS = {"minutes": 60, "hours": 3600, "days": 86400}
+
+
+@bp.post("/<int:pk>/history/delete")
+@admin_required
+def history_delete(pk):
+    """Delete Historical Data (power readings and their summaries): a date range, the last N
+    minutes / hours / days, or everything (with confirmation). Sessions and events stay."""
+    device = _device(pk, allow_removed=True)
+    b = request.get_json(silent=True) or {}
+    mode, t = b.get("mode"), now()
+    if mode == "all":
+        if b.get("confirm") is not True:
+            return jsonify(ok=False, error="confirm", message="Tick the confirmation first."), 400
+        start, end, what = 0, 2 ** 31 - 1, "all historical data"
+    elif mode == "last":
+        n, unit = str(b.get("n", "")), b.get("unit")
+        if not n.isdigit() or not 1 <= int(n) <= 100000 or unit not in DELETE_UNITS:
+            return jsonify(ok=False, error="bad", message="Enter a number and pick minutes, hours or days."), 400
+        start, end, what = t - int(n) * DELETE_UNITS[unit], t + 3600, f"the last {n} {unit}"
+    elif mode == "range":
+        start = settings.local_to_epoch(b.get("from") or "")
+        end = settings.local_to_epoch(b.get("to") or "")
+        if not start or not end or start >= end:
+            return jsonify(ok=False, error="bad", message="Pick a start and an end (end after start)."), 400
+        what = f"{settings.fmt_ts(start)} → {settings.fmt_ts(end)}"
+    else:
+        return jsonify(ok=False, error="bad"), 400
+    n = history.delete_range(device.id, start, end)
+    ingest.server_event(device, "data_deleted", {"by": current_user.username, "what": what, "readings": n})
+    db.session.commit()
+    log.info("Historical data of %s deleted (%s, %d readings) by %s", device.device_id, what, n, current_user.username)
+    return jsonify(ok=True, deleted=n, message=f"Deleted {n} reading(s): {what}")
 
 
 @bp.get("/<int:pk>/history")

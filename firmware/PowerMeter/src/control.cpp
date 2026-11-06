@@ -191,7 +191,8 @@ void renew(const char *reason, bool autoRenew) {
 }
 
 static const char *stopReasonName(uint8_t why) {
-  return why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : why == STOP_SENSOR ? "sensor" : "disabled";
+  return why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : why == STOP_SENSOR ? "sensor"
+       : why == STOP_MANUAL ? "stopped" : "disabled";
 }
 
 // Voltage / tamper / sensor protection with action "end": end the session now (relay off until renewed).
@@ -206,6 +207,12 @@ static void stopSession(StopReason why) {
 }
 
 static const char *ACTION_NAME[] = {"run", "hold", "end"};
+
+// End session (server): ends now, relay off until Renew.
+void endSession() {
+  StateLock l;
+  stopSession(STOP_MANUAL);
+}
 
 void setDisabled(bool disabled) {
   StateLock l;

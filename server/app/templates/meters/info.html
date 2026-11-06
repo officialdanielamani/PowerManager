@@ -34,6 +34,7 @@
     <button class="btn btn-sm btn-success" data-action="relay_on" id="btnRelayOn"><i class="bi bi-toggle-on me-1"></i>Relay ON</button>
     <button class="btn btn-sm btn-outline-secondary" data-action="relay_off"><i class="bi bi-toggle-off me-1"></i>Relay OFF</button>
     <button class="btn btn-sm btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
+    <button class="btn btn-sm btn-outline-danger" data-action="end" data-confirm="End the session now? The relay stays off until renewed."><i class="bi bi-stop-circle me-1"></i>End session</button>
     <button class="btn btn-sm btn-outline-danger {{ '' if m.status == 'tripped' else 'd-none' }}" data-action="reset_trip" id="btnResetTrip"><i class="bi bi-shield-check me-1"></i>Reset Trip</button>
     {% endif %}
   </div>
@@ -112,6 +113,7 @@
       <button class="btn btn-sm btn-primary" id="applyCustom">Apply</button>
     </div>
     {% if can_csv %}<a class="btn btn-sm btn-outline-primary ms-auto" id="csvBtn" href="#"><i class="bi bi-download me-1"></i>Export CSV</a>{% endif %}
+    {% if current_user.is_admin %}<button type="button" class="btn btn-sm btn-outline-danger {{ '' if can_csv else 'ms-auto' }}" data-bs-toggle="modal" data-bs-target="#delDataModal"><i class="bi bi-trash me-1"></i>Delete data…</button>{% endif %}
   </div>
   <div class="card-body">
     <div class="d-flex flex-wrap gap-2 mb-2 small" id="seriesBtns">
@@ -218,6 +220,27 @@
   <div class="modal-body" id="infoBody"></div>
 </div></div></div>
 {% endif %}
+{% if current_user.is_admin %}
+<div class="modal fade" id="delDataModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-trash me-1"></i>Delete Historical Data</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <p class="small text-body-secondary">Deletes power readings (and their hourly / daily summaries) of <strong>{{ d.name }}</strong>. Sessions and Historical Events are not touched. This cannot be undone.</p>
+    <div class="form-check"><input class="form-check-input" type="radio" name="delMode" id="delRange" value="range" checked><label class="form-check-label fw-semibold" for="delRange">Date range</label></div>
+    <div class="d-flex flex-wrap gap-2 align-items-center ms-4 mb-3">
+      <input type="datetime-local" class="form-control form-control-sm w-auto" id="delFrom"><span>–</span>
+      <input type="datetime-local" class="form-control form-control-sm w-auto" id="delTo"><span class="small text-body-secondary">{{ tz_label() }}</span></div>
+    <div class="form-check"><input class="form-check-input" type="radio" name="delMode" id="delLast" value="last"><label class="form-check-label fw-semibold" for="delLast">Delete data of the past</label></div>
+    <div class="d-flex gap-2 align-items-center ms-4 mb-3">
+      <input type="number" class="form-control form-control-sm" style="width:100px" min="1" max="100000" id="delN" value="1">
+      <select class="form-select form-select-sm w-auto" id="delUnit"><option value="minutes">minutes</option><option value="hours" selected>hours</option><option value="days">days</option></select></div>
+    <div class="border border-danger rounded p-2">
+      <div class="form-check"><input class="form-check-input" type="radio" name="delMode" id="delAll" value="all"><label class="form-check-label fw-semibold text-danger" for="delAll">Danger zone: delete ALL Historical Data</label></div>
+      <div class="form-check ms-4 mt-1"><input class="form-check-input" type="checkbox" id="delConfirm"><label class="form-check-label small" for="delConfirm">I understand what I am doing and ALL Historical Data of this meter will be deleted.</label></div>
+    </div>
+  </div>
+  <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-danger" id="delGo"><i class="bi bi-trash me-1"></i>Delete</button></div>
+</div></div></div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
@@ -234,5 +257,28 @@ PM.meterInfo({
   sesDelete: {{ (url_for('meters.sessions_delete', pk=d.id) if current_user.is_admin else none)|tojson }},
   initial: {{ m|tojson }}
 });
+{% if current_user.is_admin %}
+(function () {  // Delete Historical Data
+  var go = document.getElementById('delGo'), cb = document.getElementById('delConfirm');
+  function mode() { return document.querySelector('input[name=delMode]:checked').value; }
+  function sync() { go.disabled = mode() === 'all' && !cb.checked; }
+  document.querySelectorAll('input[name=delMode]').forEach(function (r) { r.addEventListener('change', sync); });
+  cb.addEventListener('change', function () { if (cb.checked) document.getElementById('delAll').checked = true; sync(); });
+  go.addEventListener('click', function () {
+    var m = mode(), body = {mode: m};
+    if (m === 'range') { body.from = document.getElementById('delFrom').value; body.to = document.getElementById('delTo').value; }
+    if (m === 'last') { body.n = document.getElementById('delN').value; body.unit = document.getElementById('delUnit').value; }
+    if (m === 'all') body.confirm = cb.checked;
+    var what = m === 'all' ? 'ALL Historical Data' : m === 'last' ? 'the data of the past ' + body.n + ' ' + body.unit : 'the data in this range';
+    if (!confirm('Delete ' + what + ' of this meter? This cannot be undone.')) return;
+    go.disabled = true;
+    PM.post("{{ url_for('meters.history_delete', pk=d.id) }}", body).then(function (r) {
+      PM.toast(r.message || r.error, r.ok ? 'success' : 'danger');
+      if (r.ok) setTimeout(function () { location.reload(); }, 900);
+    }).finally(sync);
+  });
+  sync();
+})();
+{% endif %}
 </script>
 {% endblock %}

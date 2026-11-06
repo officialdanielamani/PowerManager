@@ -104,6 +104,8 @@ class Device(db.Model):
     # Per-meter automatic clean-up (server-only settings, not sent to the meter).
     data_autodel = db.Column(db.Boolean, nullable=False, default=False)
     data_autodel_days = db.Column(db.Integer, nullable=False, default=120)
+    sessions_autodel = db.Column(db.Boolean, nullable=False, default=False)
+    sessions_autodel_days = db.Column(db.Integer, nullable=False, default=120)
     events_autodel = db.Column(db.Boolean, nullable=False, default=False)
     events_autodel_days = db.Column(db.Integer, nullable=False, default=120)
     # Mesh (ESP-NOW): a leaf meter's messages travel through a gateway meter. They are signed with

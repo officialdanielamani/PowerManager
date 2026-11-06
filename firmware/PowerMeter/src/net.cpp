@@ -576,6 +576,8 @@ static void handleCommand(JsonObject m) {
     if (!ok) led::flash(led::FLASH_REJECT);
   } else if (!strcmp(c, "renew")) {
     control::renew("manual", false);
+  } else if (!strcmp(c, "end")) {
+    control::endSession();
   } else if (!strcmp(c, "send_now")) {
     control::reportNow();
   } else if (!strcmp(c, "reset_trip")) {

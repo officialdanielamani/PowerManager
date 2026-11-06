@@ -59,6 +59,13 @@ def run():
     _add_column("device", "hw_sig VARCHAR(40)")
     # v0.7.2: sub-second readings
     _add_column("measurement", "ms INTEGER")
+    # v0.7.3: data clean-up split into sessions / events / historical data. "data" used to delete the
+    # finished sessions too: keep doing that for meters that had it on.
+    cols = _columns("device")
+    if cols is not None and "sessions_autodel" not in cols:
+        _add_column("device", "sessions_autodel BOOLEAN NOT NULL DEFAULT 0")
+        _add_column("device", "sessions_autodel_days INTEGER NOT NULL DEFAULT 120")
+        db.session.execute(text("UPDATE device SET sessions_autodel = data_autodel, sessions_autodel_days = data_autodel_days"))
 
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:

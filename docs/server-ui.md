@@ -157,3 +157,13 @@ Detected from the meter firmware at pairing (`caps.mc`); see [multichannel.md](m
 - Bulk Configuration skips multi-channel meters (configure them one by one); Bulk Renew renews all their sessions.
 - Telegram *Now Reading* lists every channel.
 
+## Configuration page
+
+- Header: **Renew Now** and **End session** (multi-channel Independent: **Renew all / End all**), like the Info page, plus an **Unsaved changes** badge after any edit (the browser also warns before leaving the page unsaved).
+- Every section has its own **Save** (it saves the whole page).
+- **Data clean-up** (server only, runs daily), three separate options: delete finished **Sessions**, **Historical Events**, **Historical Data** (power readings + hourly / daily summaries) older than N days.
+
+## Delete Historical Data (Info page, admin)
+
+**Delete data…** next to Export CSV: a date range, the past N minutes / hours / days, or (Danger zone, with a confirmation tick) all Historical Data of the meter. Sessions and Historical Events are not touched; summaries are rebuilt from the readings that remain.
+

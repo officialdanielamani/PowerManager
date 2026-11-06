@@ -195,3 +195,28 @@ def csv_wide(device, start, end):
     header = ["V_avg", "Hz_avg"] + [f"{nm} {col}" for nm in names for col in ("A_avg", "W_avg", "W_max", "kWh")]
     return period, header, [(t, buckets[t]) for t in sorted(buckets)]
 
+
+def delete_range(device_pk, start, end):
+    """Delete the power readings of a meter between start and end (inclusive) and fix the hourly / daily
+    summaries: buckets fully inside the range go, buckets at the edges are rebuilt from the readings
+    that remain (if those readings are still kept). Sessions and events are not touched.
+    Returns the number of readings deleted."""
+    from ..extensions import db
+    from ..models import RollupDirty
+    from .rollup import build_bucket
+    n = (Measurement.query.filter(Measurement.device_fk == device_pk, Measurement.ts >= start, Measurement.ts <= end)
+         .delete(synchronize_session=False))
+    chans = [c for (c,) in db.session.query(Rollup.ch).filter(Rollup.device_fk == device_pk).distinct()]
+    for period, span in (("h", 3600), ("d", 86400)):
+        (Rollup.query.filter(Rollup.device_fk == device_pk, Rollup.period == period, Rollup.bucket_start >= start,
+                             Rollup.bucket_start + span - 1 <= end).delete(synchronize_session=False))
+        for edge in {start - start % span, end - end % span}:
+            for ch in chans:
+                has_raw = (Measurement.query.filter(Measurement.device_fk == device_pk, Measurement.ch == ch,
+                                                    Measurement.ts >= edge, Measurement.ts < edge + span).first())
+                if has_raw is not None:
+                    build_bucket(device_pk, ch, period, edge)
+    (RollupDirty.query.filter(RollupDirty.device_fk == device_pk, RollupDirty.bucket_start >= start,
+                              RollupDirty.bucket_start <= end).delete(synchronize_session=False))
+    return n
+

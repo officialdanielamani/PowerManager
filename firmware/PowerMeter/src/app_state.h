@@ -10,7 +10,7 @@ enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
 enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, SESS_ENDED = 3 };
 // Voltage / tamper protection: run as usual, relay off while the problem lasts, or end the session.
 enum ProtectAction : uint8_t { ACT_RUN = 0, ACT_HOLD = 1, ACT_END = 2 };
-enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3, STOP_SENSOR = 4 };
+enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3, STOP_SENSOR = 4, STOP_MANUAL = 5 };
 // Sensor problem: no reply at all (sensor, wiring, or no AC: the PZEM is powered from the AC side) or
 // replies that are garbled / fail the CRC (wiring, noise, wrong address).
 enum SensorErr : uint8_t { SENS_OK = 0, SENS_NO_REPLY = 1, SENS_BAD = 2 };

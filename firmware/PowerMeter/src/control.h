@@ -16,6 +16,7 @@ bool setRelay(bool on, const char *src, const char *&err);
 void renew(const char *reason, bool autoRenew);  // reason: "manual" / "expired"
 bool resetTrip(const char *src, const char *by);
 void applyConfig(const MeterConfig &c);
+void endSession();               // End session (server): relay off until Renew
 void setDisabled(bool disabled);  // server "disable" / "enable"
 void reportNow();           // record a reading now and send everything now ("Get Data Now")
 bool takeSendRequest();     // net: true once when it is time to send the buffered items
