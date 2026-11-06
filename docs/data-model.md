@@ -88,9 +88,10 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | Column | Notes |
 |--------|-------|
 | device_fk, sid | sid comes from the device |
+| ch | multi-channel meters in Independent mode: the channel of the session; null = the whole meter (Shared mode, single-channel meters) |
 | started_at, ended_at | |
 | kwh_used, kwh_max | |
-| end_reason | `quota` / `expired` / `manual` / null (active) |
+| end_reason | `quota` / `expired` / `manual` / `voltage` / `tamper` / `sensor` / `disabled` / `stopped` (End) / `mode` (mode changed) / null (active) |
 | auto | started by auto-renew |
 | price_per_kwh, currency | electricity price **locked in when the session starts** (Settings → Server). Cost = kwh_used × price. Changing the price affects new sessions only. |
 
@@ -103,7 +104,7 @@ Pairs a **start** event with its **end** event so the UI can show "from → to, 
 | Column | Notes |
 |--------|-------|
 | id PK | |
-| device_fk, ch | ch null for device-wide incidents |
+| device_fk, ch | ch null for device-wide incidents; multi-channel meters: trips are per channel |
 | type | see table below |
 | started_at | UTC |
 | ended_at | UTC, **null = ongoing** |

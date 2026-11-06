@@ -9,7 +9,8 @@ Self-hosted energy meter system: ESP32 meters measure and switch loads, and a Do
 | Part | Tech | Folder |
 |------|------|--------|
 | Server | Python 3.11, Flask, SQLite, WebSocket, runs in Docker — see [server/README.md](server/README.md) | `server/` |
-| Meter firmware | ESP32-S3 Super Mini, Arduino IDE (Arduino-ESP32 core 3.x). AC meter (PZEM-004T) and DC meter (PZEM-017) from one source — see [firmware/README.md](firmware/README.md) | `firmware/` |
+| Meter firmware | ESP32-S3 Super Mini, Arduino IDE (Arduino-ESP32 core 3.x). AC meter (PZEM-004T) and DC meter (PZEM-017) from one source — see [firmware/README.md](firmware/README.md) | `firmware/PowerMeter/` |
+| Multi-channel AC meter firmware | ESP32-S3 + rbAmp BASIC (1–7 SCT-013 channels) + I²C relay board — see [firmware/PowerMeterMC/README.md](firmware/PowerMeterMC/README.md) | `firmware/PowerMeterMC/` |
 | Docs | Markdown | `docs/` |
 
 ## Documents
@@ -22,6 +23,7 @@ Self-hosted energy meter system: ESP32 meters measure and switch loads, and a Do
 | [docs/server-ui.md](docs/server-ui.md) | Server pages, fields, validation rules, roles |
 | [docs/mesh.md](docs/mesh.md) | Mesh over ESP-NOW: roles, security, radio details, test plan |
 | [docs/firmware.md](docs/firmware.md) | ESP32 behaviour: setup, tasks, enforcement, LED, buffering, pin map, libraries |
+| [docs/multichannel.md](docs/multichannel.md) | Multi-channel AC meter: hardware, Shared / Independent modes, protocol additions |
 
 ## Planned deployment (summary)
 

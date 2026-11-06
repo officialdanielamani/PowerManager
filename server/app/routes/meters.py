@@ -132,7 +132,7 @@ def configure(pk):
             else:
                 retention[key] = (form.get(f"{key}_autodel") == "on", int(raw))
         if not errors:
-            device.tare_a, device.tare_w = cfg["tare_a"], cfg["tare_w"]  # mirror (tare is part of cfg)
+            device.tare_a, device.tare_w = cfg.get("tare_a", 0.0), cfg.get("tare_w", 0.0)  # mirror (tare is part of cfg)
             device.data_autodel, device.data_autodel_days = retention["data"]
             device.events_autodel, device.events_autodel_days = retention["events"]
             device.name, device.info = name, info
@@ -150,7 +150,7 @@ def configure(pk):
                 db.session.commit()
                 flash("Saved.", "success")
                 return redirect(url_for("meters.info", pk=device.id))
-    cfg = device.cfg or devconfig.default_cfg(devconfig.channel_count(device))
+    cfg = device.cfg or devconfig.default_for(device)
     dur = int(cfg.get("dur_min", 1440))
     return render_template("meters/configure.html", d=device, cfg=cfg, errors=errors,
                            waiting=waiting, online=hub.is_online(device.id), kwh_actions=devconfig.KWH_ACTIONS,
@@ -269,15 +269,24 @@ def action(pk):
     device = _device(pk)
     body = request.get_json(silent=True) or request.form
     act = body.get("action")
+    ch = body.get("ch")  # multi-channel meters: the channel (absent = all / the shared session)
+    ch = int(ch) if str(ch).isdigit() and device.is_mc else None
     if act in ("relay_on", "relay_off"):
-        cmd, err = commands.issue(device, "relay", {"on": act == "relay_on"}, current_user)
-    elif act in ("renew", "reset_trip", "send_now"):
+        params = {"on": act == "relay_on"}
+        if device.is_mc:
+            params["ch"] = ch or 0
+        cmd, err = commands.issue(device, "relay", params, current_user)
+    elif act in ("renew", "end", "reset_trip", "send_now"):
+        if act == "end" and not device.is_mc:
+            return jsonify(ok=False, error="unknown", message="Unknown action"), 400
         params = {"by": current_user.username} if act == "reset_trip" else {}
+        if ch is not None and act != "send_now":
+            params["ch"] = ch
         cmd, err = commands.issue(device, act, params, current_user)
     elif device.disabled_at and act not in ("send_now", "enable", "disable", "unsync", "remove", "get_info", "tare_now"):
         return jsonify(ok=False, error="disabled", message="This meter is disabled (read-only). Enable it first."), 409
     elif act == "set_default":
-        device.cfg = devconfig.default_cfg(devconfig.channel_count(device))
+        device.cfg = devconfig.default_for(device)
         ensure_device_defaults(device, reset=True)
         device.cfg_ver_wanted += 1
         device.cfg_error = None
@@ -635,6 +644,12 @@ def _differs(devices, fn):
 @admin_required
 def bulk_configure():
     devices = _bulk_devices(_ids_arg(request.values.get("ids")))
+    mc = [d for d in devices if d.is_mc]
+    if mc:  # multi-channel meters have per-channel settings: configure them one by one
+        devices = [d for d in devices if not d.is_mc]
+        if request.method == "GET":
+            flash("Skipped multi-channel meter(s) " + ", ".join(d.name for d in mc) +
+                  ": configure them on their own Configuration page.", "info")
     if not devices:
         flash("Select at least one meter on the dashboard first.", "warning")
         return redirect(url_for("main.dashboard"))
@@ -655,7 +670,7 @@ def bulk_configure():
             viewer_ids = {int(x) for x in form.getlist("viewers") if x.isdigit()}
             results = []
             for d in devices:
-                cfg = _bulk_apply(d.cfg or devconfig.default_cfg(devconfig.channel_count(d)), new, groups)
+                cfg = _bulk_apply(d.cfg or devconfig.default_for(d), new, groups)
                 changed = cfg != d.cfg
                 if changed:
                     d.cfg = cfg
@@ -673,7 +688,7 @@ def bulk_configure():
             group_names = ", ".join(sorted(BULK_GROUPS[g] for g in groups))
             log.info("Bulk configuration (%s) applied to %d meter(s) by %s", group_names, len(devices),
                      current_user.username)
-    cfg = first.cfg or devconfig.default_cfg(devconfig.channel_count(first))
+    cfg = first.cfg or devconfig.default_for(first)
     dur = int(cfg.get("dur_min", 1440))
     ch0 = (cfg.get("ch") or [{}])[0]
     differs = {

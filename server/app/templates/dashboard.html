@@ -53,6 +53,7 @@
           <span class="display-6 fw-semibold text-body" data-field="w">{{ m.w if m.w is not none else '–' }}</span><span class="text-body-secondary">W</span>
           <span class="ms-auto badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span>
         </div>
+        {% if m.mc %}<div class="small mb-2 pm-mc-mini" data-field="mc-mini"></div>{% endif %}
 
         <div class="pm-meter-row">
           <div class="d-flex justify-content-between small"><span class="text-body-secondary"><i class="bi bi-lightning-charge me-1"></i>Energy</span>

@@ -56,7 +56,7 @@ def meter_summary(d, show_price=None):
         secs = ((sess_end or now()) - sess_start) if sess_start else 0
         kwh_t = round(tare_svc.kwh(float(kwh_now), secs, tare), 4)
     cost_t = round(kwh_t * price, 4) if show_price and price is not None and kwh_t is not None else None
-    return {
+    out = {
         "tare": {"a": d.tare_a, "w": d.tare_w} if tare else None,
         "reading_tared": chans_t,
         "w_tared": round(w_t, 1) if w_t is not None else None,
@@ -98,6 +98,74 @@ def meter_summary(d, show_price=None):
         "session_desc": devconfig.describe_session(d.cfg or {}),
         "auto": bool((d.cfg or {}).get("auto")),
     }
+    if d.is_mc:
+        out.update(_mc_summary(d, out, show_price))
+    return out
+
+
+def _mc_summary(d, base, show_price):
+    """Multi-channel meter: one entry per channel (reading, relay, and in independent mode its session)."""
+    st = d.last_state or {}
+    cfg = d.cfg or {}
+    ccfg = cfg.get("ch") or []
+    indep = d.mc_mode == "independent"
+    readings = {c.get("i"): c for c in (d.last_reading or {}).get("ch") or []}
+    relays = {r.get("i"): r for r in st.get("relay") or []}
+    sessions = {s.get("ch"): s for s in st.get("sessions") or []} if indep else {}
+    t = now()
+    channels, totals, costs, maxes = [], 0.0, [], []
+    for i in range(devconfig.channel_count(d)):
+        rd, rl = readings.get(i) or {}, relays.get(i) or {}
+        c = {"i": i, "name": d.channel_name(i), "label": (ccfg[i].get("name") if i < len(ccfg) else "") or "",
+             "w": rd.get("w"), "a": rd.get("a"), "pf": rd.get("pf"), "e": rd.get("e"),
+             "relay_on": bool(rl.get("on")), "relay_block": rl.get("block"), "tripped": bool(rl.get("tripped")),
+             "amp_max": (ccfg[i].get("amp_max") if i < len(ccfg) else 0) or 0}
+        if indep:
+            ss = sessions.get(i) or {}
+            rec = None
+            if isinstance(ss.get("sid"), int) and ss["sid"] > 0:
+                rec = Session.query.filter_by(device_fk=d.id, gen=d.pair_gen, sid=ss["sid"]).first()
+            status = ss.get("status") or ("none" if not ss.get("sid") else "unknown")
+            if status == "ended":
+                status = "ended_" + str(ss.get("end_reason") or "")
+            if status == "active" and ss.get("over"):
+                status = "over"
+            if not ss.get("sid"):
+                status = "none"
+            kwh = ss.get("kwh")
+            cur, price = settings.price(d.kind)
+            if rec is not None and rec.price_per_kwh is not None:
+                cur, price = rec.currency or "", rec.price_per_kwh
+            cost = round(float(kwh) * price, 4) if show_price and price is not None and kwh is not None else None
+            start = ss.get("start") or (rec.started_at if rec else None)
+            c.update({"sid": ss.get("sid"), "status": status, "kwh": kwh, "kwh_max": ss.get("max") or 0,
+                      "cost": settings.money(cost, cur) if cost is not None else None,
+                      "sess_start_ts": start, "sess_start": settings.fmt_ts(start) if start else None,
+                      "sess_end_ts": rec.ended_at if rec and rec.ended_at else None,
+                      "next_reset": settings.fmt_ts(ss.get("next_reset"), with_seconds=False) if ss.get("next_reset") else None,
+                      "next_reset_ts": ss.get("next_reset"),
+                      "sess_mode": (ccfg[i].get("sess_mode") if i < len(ccfg) else "none") or "none",
+                      "sess_ended": status not in ("active", "over"),
+                      "session_desc": devconfig.describe_session(ccfg[i] if i < len(ccfg) else {})})
+            if kwh is not None:
+                totals += float(kwh)
+            if cost is not None:
+                costs.append((cost, cur))
+            maxes.append(float(ss.get("max") or 0))
+        channels.append(c)
+    out = {"mc": True, "mode": d.mc_mode, "channels": channels, "rdy": bool(cfg.get("rdy")),
+           "relay_on": any(c["relay_on"] for c in channels)}
+    if indep:
+        statuses = {c["status"] for c in channels}
+        out.update({
+            "status": "active" if statuses <= {"active"} else ("independent_mixed" if "active" in statuses else
+                                                              next(iter(statuses)) if len(statuses) == 1 else "independent_mixed"),
+            "kwh": round(totals, 4),
+            "kwh_max": round(sum(maxes), 4) if maxes and all(m > 0 for m in maxes) else 0,
+            "cost": settings.money(sum(c for c, _ in costs), costs[0][1]) if costs else None,
+            "sess_start": None, "next_reset": None, "session_desc": "Per channel (independent)",
+        })
+    return out
 
 
 @bp.get("/")

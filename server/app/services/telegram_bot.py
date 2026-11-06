@@ -81,12 +81,24 @@ def reading_text(device, user):
         lines.append({"no_reply": "⚠️ Sensor not responding", "bad": "⚠️ Sensor error",
                       "no_ac": "⚠️ No " + ("DC supply" if device.kind == "dc" else "AC power")}
                      .get(m["reading_err"], "⚠️ No reading"))
-    for c in m.get("reading") or []:
+    if m.get("mc"):  # multi-channel: one line per channel
+        for c in m["channels"]:
+            line = (f"{c['name']}: {_fmt(c.get('w'), 1)} W · {_fmt(c.get('a'), 3)} A · "
+                    f"{'ON' if c['relay_on'] else ('TRIP' if c['tripped'] else 'OFF')}")
+            if device.mc_mode == "independent" and c.get("kwh") is not None:
+                line += f" · {_fmt(c['kwh'], 3)}" + (f"/{c['kwh_max']:g}" if c.get("kwh_max") else "") + " kWh"
+                if c.get("cost"):
+                    line += f" · {c['cost']}"
+            lines.append(line)
+        volts = next((x.get("v") for x in m.get("reading") or [] if x.get("v") is not None), None)
+        if volts is not None:
+            lines.append(f"Voltage {_fmt(volts, 1)} V")
+    for c in [] if m.get("mc") else (m.get("reading") or []):
         dc = device.kind == "dc"
         lines.append(f"Voltage {_fmt(c.get('v'), 2 if dc else 1)} V · Current {_fmt(c.get('a'), 2 if dc else 3)} A")
         lines.append(f"Power {_fmt(c.get('w'), 1)} W" + ("" if dc else f" · PF {_fmt(c.get('pf'), 2)} · {_fmt(c.get('hz'), 1)} Hz"))
         lines.append(f"Energy total {_fmt(c.get('e'), 3)} kWh")
-    if m.get("kwh") is not None:
+    if m.get("kwh") is not None and not (m.get("mc") and device.mc_mode == "independent"):
         limit = f" / {m['kwh_max']:g} kWh" if m.get("kwh_max") else ""
         lines.append(f"Session used {_fmt(m['kwh'], 3)} kWh{limit}" + (f" · {m['cost']}" if m.get("cost") else ""))
     lines.append(f"Reading at {m.get('reading_at') or '–'} ({settings.get('timezone')})")

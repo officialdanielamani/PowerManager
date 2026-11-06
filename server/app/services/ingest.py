@@ -4,7 +4,7 @@ import logging
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..extensions import db
-from ..models import Device, Event, Incident, Measurement, RollupDirty, Session, now
+from ..models import Channel, Device, Event, Incident, Measurement, RollupDirty, Session, now
 from . import commands, devconfig, incidents, notify, settings
 
 log = logging.getLogger(__name__)
@@ -165,6 +165,12 @@ def h_hello(conn, device, msg):
         caps = dict(device.caps or {})
         caps.update(msg["caps"])
         device.caps = caps
+        if devconfig.fit_channels(device):  # multi-channel meter: channel count known / changed
+            device.cfg_ver_wanted = (device.cfg_ver_wanted or 0) + 1
+            have = {c.idx for c in device.channels}
+            for i in range(devconfig.channel_count(device)):
+                if i not in have:
+                    device.channels.append(Channel(idx=i, label=f"CH{i + 1}"))
     state = msg.get("state")
     if isinstance(state, dict):
         _apply_state(device, state)
@@ -234,7 +240,28 @@ def h_tel(conn, device, msg):
 
 
 def _session_progress(device, items):
-    """Telemetry items carry {"s": {"sid", "kwh"}}: keep "session used" current between state messages."""
+    """Telemetry items carry {"s": {"sid", "kwh"}}: keep "session used" current between state messages.
+    Multi-channel meters in independent mode send {"ss": [{"ch", "sid", "kwh"}, ...]}."""
+    latest_ss = None
+    for item in items[:200]:
+        if isinstance(item, dict) and isinstance(item.get("ss"), list):
+            latest_ss = item["ss"]
+    if latest_ss is not None:
+        st = dict(device.last_state or {})
+        known = {s.get("ch"): dict(s) for s in st.get("sessions") or [] if isinstance(s, dict)}
+        for p in latest_ss:
+            if not isinstance(p, dict) or not isinstance(p.get("sid"), int) or _f(p.get("kwh")) is None:
+                continue
+            cur = known.get(p.get("ch"))
+            if cur is None or cur.get("sid") != p["sid"]:
+                continue  # a session we have no state for yet: the next state message brings it
+            cur["kwh"] = _f(p["kwh"])
+            s = Session.query.filter_by(device_fk=device.id, gen=device.pair_gen, sid=p["sid"]).first()
+            if s is not None and s.ended_at is None:
+                s.kwh_used = cur["kwh"]
+        st["sessions"] = [known[k] for k in sorted(known, key=lambda x: -1 if x is None else x)]
+        device.last_state = st
+        return
     latest = None
     for item in items[:200]:
         if isinstance(item, dict) and isinstance(item.get("s"), dict) and isinstance(item["s"].get("sid"), int):
@@ -324,29 +351,41 @@ HANDLERS = {
 # ---------------------------------------------------------------- state / events
 
 def _apply_state(device, state):
-    clean = {k: state[k] for k in ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err") if k in state}
+    keys = ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor")
+    clean = {k: state[k] for k in keys if k in state}
     merged = dict(device.last_state or {})
     if "relay" in state:  # a full state: flags that are only sent while true are cleared when missing
-        for k in ("volt_out", "sensor_err"):
+        for k in ("volt_out", "sensor_err", "no_sensor"):
             merged.pop(k, None)
+        if "mode" in state:  # multi-channel: shared sends "sess", independent "sessions"
+            merged.pop("sess", None)
+            merged.pop("sessions", None)
     merged.update(clean)
     merged["at"] = now()
     device.last_state = merged
-    sess = clean.get("sess")
-    if isinstance(sess, dict) and isinstance(sess.get("sid"), int):
-        s = _session(device, sess["sid"])
-        if sess.get("start"):
-            s.started_at = s.started_at or int(sess["start"])
-        s.kwh_used = _f(sess.get("kwh")) or 0.0
-        s.kwh_max = _r4(_f(sess.get("max"))) or 0.0
+    sessions = [clean.get("sess")] + list(clean.get("sessions") or [])
+    for sess in sessions:
+        if isinstance(sess, dict) and isinstance(sess.get("sid"), int) and sess["sid"] > 0:
+            s = _session(device, sess["sid"], sess.get("ch"))
+            if s.ended_at is not None and device.is_mc:
+                continue  # ended: its numbers come from session_end (a slot may now count differently)
+            if sess.get("start"):
+                s.started_at = s.started_at or int(sess["start"])
+            s.kwh_used = _f(sess.get("kwh")) or 0.0
+            s.kwh_max = _r4(_f(sess.get("max"))) or 0.0
 
 
-def _session(device, sid):
+def _session(device, sid, ch=None, authoritative=False):
+    """The session record. `ch` (multi-channel independent mode) is taken when the record is created
+    or from session_start (authoritative); a state report may list an old shared session under a slot."""
     s = Session.query.filter_by(device_fk=device.id, gen=device.pair_gen, sid=sid).first()
-    if s is None:
+    new = s is None
+    if new:
         s = Session(device_fk=device.id, gen=device.pair_gen, sid=sid)
         db.session.add(s)
         db.session.flush()
+    if device.is_mc and (new or authoritative):
+        s.ch = ch if isinstance(ch, int) else None
     return s
 
 
@@ -358,29 +397,44 @@ def _reconcile_incidents(device, state):
         checks.append(("tamper", bool(state["tamper"])))
     if "ac" in state:
         checks.append(("power", state["ac"] is False))
-    if "tripped" in state:
+    relays = state.get("relay") or []
+    if relays and all(isinstance(r, dict) and "tripped" in r for r in relays):  # multi-channel: per channel
+        for r in relays:
+            checks.append(("trip", bool(r.get("tripped")), r.get("i")))
+    elif "tripped" in state:
         checks.append(("trip", bool(state["tripped"])))
     if "relay" in state:  # full state message: sensor_err is only sent while there is one
         checks.append(("sensor", bool(state.get("sensor_err"))))
-    for itype, active in checks:
-        open_inc = incidents.find_open(device.id, itype)
+    for check in checks:
+        itype, active, ch = check[0], check[1], (check[2] if len(check) > 2 else None)
+        open_inc = incidents.find_open(device.id, itype, ch)
         if active and open_inc is None:
-            incidents.open_incident(device.id, itype, t, detail={"opened_by": "state_sync"})
+            incidents.open_incident(device.id, itype, t, ch=ch, detail={"opened_by": "state_sync"})
         elif not active and open_inc is not None:
-            incidents.close_incident(device.id, itype, t, detail={"closed_by": "state_sync"})
+            incidents.close_incident(device.id, itype, t, ch=ch, detail={"closed_by": "state_sync"})
+
+
+def _chp(device, ev):
+    """'CH1 Kitchen: ' for events of one channel of a multi-channel meter, else ''."""
+    return f"{device.channel_name(ev.ch)}: " if device.is_mc and isinstance(ev.ch, int) else ""
 
 
 def process_event(device, ev):
     d = ev.data or {}
     est = ev.time_estimated
     e = ev.type
+    mch = ev.ch if device.is_mc and isinstance(ev.ch, int) else None  # per-channel incidents (multi-channel)
     if e == "overcurrent":
-        incidents.open_incident(device.id, "trip", ev.ts, ch=None, event=ev, estimated=est,
+        incidents.open_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                 detail={"a": d.get("val"), "limit": _r4(_f(d.get("limit"))), "ch": ev.ch})
-        notify.notify(device, "max_amp", f"Over-current trip: {d.get('val')} A")
+        notify.notify(device, "max_amp", f"{_chp(device, ev)}Over-current trip: {d.get('val')} A")
     elif e == "trip_reset":
-        incidents.close_incident(device.id, "trip", ev.ts, event=ev, estimated=est,
+        incidents.close_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
+    elif e == "relay_error":
+        notify.notify(device, "sensor_error", "Relay board not answering on I2C: the relays cannot be switched")
+    elif e == "relay_ok":
+        notify.notify(device, "sensor_error", "Relay board answering again")
     elif e == "tamper_open":
         act = d.get("action")  # only when Tamper Protection is enabled on the meter
         incidents.open_incident(device.id, "tamper", ev.ts, event=ev, estimated=est,
@@ -423,37 +477,41 @@ def process_event(device, ev):
         # limit) | warn (power stays on). Firmware 0.1.x sends only "end": true/false.
         action = d.get("action") or ("end" if d.get("end", True) else "warn")
         kwh = d.get("kwh", "?")
+        pre = _chp(device, ev)
         if action == "end":
             # Close the session record here as well, so it ends at the limit even if the
             # meter's session_end arrives late or never (older firmware only sent it on Renew).
-            sid = ((device.last_state or {}).get("sess") or {}).get("sid")
+            sid = commands.session_state(device, mch).get("sid")
             if isinstance(sid, int):
                 s = _session(device, sid)
                 if s.ended_at is None:
                     s.ended_at, s.end_reason = ev.ts, "quota"  # kWh used: from session_end (raw)
-            notify.notify(device, "kwh_exceeded", f"Session kWh limit reached ({kwh} kWh): power off, session ended")
+            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit reached ({kwh} kWh): power off, session ended")
         elif action == "hold":
             notify.notify(device, "kwh_exceeded",
-                          f"Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed")
+                          f"{pre}Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed")
         else:
-            notify.notify(device, "kwh_exceeded", f"Session kWh limit exceeded ({kwh} kWh): power kept on")
+            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit exceeded ({kwh} kWh): power kept on")
     elif e == "session_start":
         sid = d.get("sid")
         if isinstance(sid, int):
-            s = _session(device, sid)
+            s = _session(device, sid, mch, authoritative=True)
             s.started_at = ev.ts
             s.auto = bool(d.get("auto"))
             cur, price = settings.price(device.kind)
             if price is not None and s.price_per_kwh is None:
                 s.price_per_kwh, s.currency = price, cur
             s.kwh_max = _r4(_f(d.get("max"))) or s.kwh_max
-        if sid != 1:  # the very first session after pairing is not a "renew"
+        first = sid == 1 or (device.is_mc and isinstance(sid, int) and sid <= devconfig.channel_count(device)
+                             and not d.get("auto") and Session.query.filter_by(device_fk=device.id, gen=device.pair_gen)
+                             .filter(Session.ended_at.isnot(None)).count() == 0)
+        if not first:  # the very first session(s) after pairing are not a "renew"
             notify.notify(device, "session_renew",
-                          "Session auto-renewed" if d.get("auto") else "Session renewed")
+                          _chp(device, ev) + ("Session auto-renewed" if d.get("auto") else "Session renewed"))
     elif e == "session_end":
         sid = d.get("sid")
         if isinstance(sid, int):
-            s = _session(device, sid)
+            s = _session(device, sid, mch)
             if s.ended_at is None:  # keep the first end (e.g. the kWh limit), not a later Renew
                 s.ended_at = ev.ts
                 s.end_reason = str(d.get("reason", ""))[:10] or None

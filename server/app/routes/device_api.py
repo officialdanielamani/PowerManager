@@ -32,7 +32,7 @@ def ensure_device_defaults(device, reset=False):
         if i not in existing:
             device.channels.append(Channel(idx=i, label=f"CH{i + 1}"))
     if reset or not device.cfg or len(device.cfg.get("ch", [])) != n:
-        device.cfg = devconfig.default_cfg(n)
+        device.cfg = devconfig.default_for(device)
 
 
 def pair_device(body):

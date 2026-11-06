@@ -53,6 +53,8 @@ def run():
     # v0.2 -> v0.3: price per session
     _add_column("meter_session", "price_per_kwh FLOAT")
     _add_column("meter_session", "currency VARCHAR(8)")
+    # v0.7: multi-channel meters (independent mode: one session per channel)
+    _add_column("meter_session", "ch INTEGER")
 
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:

@@ -96,6 +96,48 @@ def default_cfg(n_channels=1):
     }
 
 
+MC_MODES = ("shared", "independent")
+
+
+def _mc_channel_default():
+    return {"name": "", "amp_max": 0.0, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION,
+            "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "auto": False}
+
+
+def default_for(device):
+    """Default config of a meter (multi-channel meters get the shared / independent fields)."""
+    n = channel_count(device)
+    cfg = default_cfg(n)
+    if device.is_mc:
+        cfg.update({"mode": "shared", "rdy": False, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION})
+        cfg["ch"] = [_mc_channel_default() for _ in range(n)]
+        for k in ("tare_a", "tare_w", "tare_limits"):  # the clamps measure only the load
+            cfg.pop(k, None)
+    return cfg
+
+
+def fit_channels(device):
+    """A multi-channel meter reported a different channel count: pad / trim the per-channel config.
+    Returns True if the config changed."""
+    if not device.is_mc:
+        return False
+    n = channel_count(device)
+    cfg = dict(device.cfg or default_for(device))
+    chans = list(cfg.get("ch") or [])
+    if len(chans) == n and "mode" in cfg:
+        return False
+    if "mode" not in cfg:  # config made before the meter said it is multi-channel
+        base = default_for(device)
+        base.update({k: v for k, v in cfg.items() if k != "ch"})
+        cfg = base
+        chans = [dict(_mc_channel_default(), **{k: c.get(k) for k in ("amp_max", "kwh_max", "kwh_action") if k in c})
+                 for c in chans]
+    chans = (chans + [_mc_channel_default() for _ in range(n)])[:n]
+    cfg["ch"] = chans
+    device.cfg = cfg
+    return True
+
+
 def _num(form, key, cast, lo, hi, label, errors, default=0):
     raw = (form.get(key) or "").strip()
     if raw == "":
@@ -111,10 +153,65 @@ def _num(form, key, cast, lo, hi, label, errors, default=0):
     return value
 
 
+def _parse_sess(form, sfx, errors, label):
+    """Session time limit fields (shared: no suffix, independent: _<i>)."""
+    out = {}
+    mode = form.get("sess_mode" + sfx, "none")
+    out["sess_mode"] = mode if mode in SESSION_MODES else "none"
+    days = _num(form, "dur_d" + sfx, int, 0, 365, f"{label}Days", errors)
+    hours = _num(form, "dur_h" + sfx, int, 0, 23, f"{label}Hours", errors)
+    mins = _num(form, "dur_m" + sfx, int, 0, 59, f"{label}Minutes", errors)
+    dur = days * 1440 + hours * 60 + mins
+    if out["sess_mode"] == "duration" and dur < 1:
+        errors.append(f"{label}Session duration must be at least 1 minute")
+    out["dur_min"] = max(1, dur)
+    daily = (form.get("daily_at" + sfx) or "00:00").strip()
+    try:
+        h, m = daily.split(":")
+        assert 0 <= int(h) <= 23 and 0 <= int(m) <= 59
+        out["daily_at"] = f"{int(h):02d}:{int(m):02d}"
+    except (ValueError, AssertionError):
+        errors.append(f"{label}Daily reset time must be HH:MM")
+        out["daily_at"] = "00:00"
+    out["auto"] = form.get("auto" + sfx) == "on"
+    return out
+
+
+def _parse_mc(form, device, cfg, errors):
+    """Multi-channel fields: mode, RDY, shared total limit, per-channel names / limits / sessions."""
+    mode = form.get("mode", "shared")
+    cfg["mode"] = mode if mode in MC_MODES else "shared"
+    cfg["rdy"] = form.get("rdy") == "on" and bool((device.caps or {}).get("rdy", True))
+    if cfg["rdy"]:  # RDY: raw readings can be recorded every second
+        cfg["read_s"] = _num(form, "read_s", int, 1, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
+        errors[:] = [e for e in errors if not e.startswith("Read data every (s): must be between 5")]
+    cfg["kwh_max"] = _num(form, "kwh_max", float, 0, 100000, "Max kWh (all channels)", errors, 0.0)
+    a = form.get("kwh_action", DEFAULT_KWH_ACTION)
+    cfg["kwh_action"] = a if a in KWH_ACTIONS else DEFAULT_KWH_ACTION
+    rating = amp_rating(device)
+    chans = []
+    for i in range(channel_count(device)):
+        label = f"CH{i + 1}: "
+        c = _mc_channel_default()
+        c["name"] = (form.get(f"name_{i}") or "").strip()[:20]
+        if any(ch in c["name"] for ch in "<>\"'&"):
+            errors.append(f"{label}name: letters, numbers and spaces only")
+            c["name"] = ""
+        c["amp_max"] = _num(form, f"amp_max_{i}", float, 0, rating, f"{label}max A", errors, 0.0)
+        c["kwh_max"] = _num(form, f"kwh_max_{i}", float, 0, 100000, f"{label}max kWh", errors, 0.0)
+        a = form.get(f"kwh_action_{i}", DEFAULT_KWH_ACTION)
+        c["kwh_action"] = a if a in KWH_ACTIONS else DEFAULT_KWH_ACTION
+        c.update(_parse_sess(form, f"_{i}", errors, label))
+        chans.append(c)
+    cfg["ch"] = chans
+    for k in ("tare_a", "tare_w", "tare_limits"):
+        cfg.pop(k, None)
+
+
 def parse_form(form, device):
     """Return (cfg, errors) from the Configure form."""
     errors = []
-    cfg = default_cfg(channel_count(device))
+    cfg = default_for(device)
     cfg["report_s"] = _num(form, "report_s", int, REPORT_MIN, REPORT_MAX, "Send data every (s)", errors, 60)
     cfg["read_s"] = _num(form, "read_s", int, READ_MIN, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
     if cfg["read_s"] > cfg["report_s"]:
@@ -141,7 +238,7 @@ def parse_form(form, device):
     cfg["auto"] = form.get("auto") == "on"
 
     rating = amp_rating(device)
-    for i, ch in enumerate(cfg["ch"]):
+    for i, ch in enumerate([] if device.is_mc else cfg["ch"]):
         ch["kwh_max"] = _num(form, f"kwh_max_{i}", float, 0, 100000, f"CH{i+1} max kWh", errors, 0.0)
         action = form.get(f"kwh_action_{i}", DEFAULT_KWH_ACTION)
         ch["kwh_action"] = action if action in KWH_ACTIONS else DEFAULT_KWH_ACTION
@@ -165,16 +262,43 @@ def parse_form(form, device):
         errors.append("Sensor timeout: at least 3 s (or 0 = off)")
     a = form.get("sensor_action", DEFAULT_PROTECT_ACTION)
     cfg["sensor_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
+    if device.is_mc:
+        _parse_mc(form, device, cfg, errors)
     return cfg, errors
 
 
-def to_device(cfg, ver):
-    sess_mode = cfg.get("sess_mode", "none")
-    sess = {"mode": sess_mode, "auto": bool(cfg.get("auto"))}
+def _sess_doc(c):
+    sess_mode = c.get("sess_mode", "none")
+    sess = {"mode": sess_mode, "auto": bool(c.get("auto"))}
     if sess_mode == "daily":
-        sess["daily_utc_min"] = settings.local_hhmm_to_utc_minute(cfg.get("daily_at", "00:00"))
+        sess["daily_utc_min"] = settings.local_hhmm_to_utc_minute(c.get("daily_at", "00:00"))
     if sess_mode == "duration":
-        sess["dur_min"] = int(cfg.get("dur_min", 1440))
+        sess["dur_min"] = int(c.get("dur_min", 1440))
+    return sess
+
+
+def to_device(cfg, ver):
+    if "mode" in cfg:  # multi-channel meter (docs/multichannel.md)
+        return {"ver": ver, "cfg": {
+            "report_s": int(cfg.get("report_s", 60)),
+            "read_s": int(cfg.get("read_s", cfg.get("report_s", 60))),
+            "rdy": bool(cfg.get("rdy")),
+            "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
+            "mode": cfg.get("mode", "shared"),
+            "sess": _sess_doc(cfg),
+            "kwh_max": float(cfg.get("kwh_max", 0) or 0),
+            "kwh_action": cfg.get("kwh_action", DEFAULT_KWH_ACTION),
+            "volt": {"min": float(cfg.get("volt_min", 0) or 0), "max": float(cfg.get("volt_max", 0) or 0),
+                     "action": cfg.get("volt_action", DEFAULT_PROTECT_ACTION)},
+            "tamper": {"protect": bool(cfg.get("tamper_protect")),
+                       "action": cfg.get("tamper_action", DEFAULT_PROTECT_ACTION)},
+            "sensor": {"timeout_s": int(cfg.get("sensor_to_s", SENSOR_TIMEOUT_DEFAULT)),
+                       "action": cfg.get("sensor_action", DEFAULT_PROTECT_ACTION)},
+            "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
+                    "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
+                    "sess": _sess_doc(c)} for i, c in enumerate(cfg.get("ch", []))],
+        }}
+    sess = _sess_doc(cfg)
     return {
         "ver": ver,
         "cfg": {

@@ -145,3 +145,15 @@ With Telegram enabled (Settings → Notifications) the server also answers messa
 | ⚡ Now Reading | Buttons to pick a meter → *Get Data Now* on that meter, waits up to 12 s, then V / A / W (PF / Hz for AC), energy, session kWh (+ cost if the account may see prices) |
 | `/now <Device ID or nick name>` | Same, without the buttons |
 
+## Multi-channel AC meters
+
+Detected from the meter firmware at pairing (`caps.mc`); see [multichannel.md](multichannel.md).
+
+- **Configuration → Set Limit → Configuration mode:** **Shared** (default: one session and one kWh limit for all channels) or **Independent** (each channel its own session, kWh limit, time limit, auto renew). Changing the mode ends the running session(s).
+- **Configuration → Channels:** per channel a name, Max A (both modes) and, in Independent mode, kWh limit + action and session time limit.
+- **Configuration → General → Read data when RDY:** limits checked on every 100 ms window; raw readings stored at the read interval (1 s minimum instead of 5 s).
+- **Info page:** a *Channels* panel (power, current, PF, kWh counter, relay ON/OFF and Reset Trip per channel; Renew / End per channel in Independent mode); header **Renew Now / End session** (Shared) or **Renew all / End all** (Independent). Latest data shows one voltage and a row per channel; the history chart and CSV have a channel picker; the Sessions tab has a Channel column.
+- **Dashboard card:** total W plus one line per channel (W, relay, and in Independent mode its kWh bar).
+- Bulk Configuration skips multi-channel meters (configure them one by one); Bulk Renew renews all their sessions.
+- Telegram *Now Reading* lists every channel.
+

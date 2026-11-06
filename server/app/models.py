@@ -126,6 +126,20 @@ class Device(db.Model):
         return "dc" if (self.caps or {}).get("kind") == "dc" else "ac"
 
     @property
+    def is_mc(self):
+        """Multi-channel AC meter (rbAmp firmware): per-channel relays, shared / independent sessions."""
+        return bool((self.caps or {}).get("mc"))
+
+    @property
+    def mc_mode(self):
+        return "independent" if self.is_mc and (self.cfg or {}).get("mode") == "independent" else "shared"
+
+    def channel_name(self, i):
+        chans = (self.cfg or {}).get("ch") or []
+        name = (chans[i].get("name") if i < len(chans) else "") or ""
+        return f"CH{i + 1}" + (f" {name}" if name else "")
+
+    @property
     def sensor_name(self):
         return "DC Power Sensor" if self.kind == "dc" else "AC Power Sensor"
 
@@ -201,6 +215,7 @@ class Session(db.Model):
     device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False)
     gen = db.Column(db.Integer, nullable=False, default=1)
     sid = db.Column(db.Integer, nullable=False)
+    ch = db.Column(db.Integer)  # multi-channel meter in independent mode: the channel; None = whole meter
     started_at = db.Column(db.Integer)
     ended_at = db.Column(db.Integer)
     kwh_used = db.Column(db.Float, nullable=False, default=0.0)

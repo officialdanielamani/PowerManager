@@ -11,7 +11,11 @@
     'disabled': ('dark', 'Disabled'),
     'expired': ('warning', 'Session ended'),
     'tripped': ('danger', 'Over-current trip'),
-    'unknown': ('secondary', 'No data yet')} -%}
+    'unknown': ('secondary', 'No data yet'),
+    'none': ('warning', 'No session (Renew to start)'),
+    'independent_mixed': ('info', 'Per channel'),
+    'ended_stopped': ('secondary', 'Session ended (End)'),
+    'ended_mode': ('secondary', 'Session ended (mode changed)')} -%}
   {%- set s = map.get(status, ('secondary', status)) -%}
   <span class="badge text-bg-{{ s[0] }}" data-field="status-badge">{{ s[1] }}</span>
 {%- endmacro %}

@@ -44,7 +44,9 @@ var PM = (function () {
       btn.addEventListener('click', function () {
         if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
         btn.disabled = true;
-        post(url, {action: btn.dataset.action}).then(function (r) {
+        var body = {action: btn.dataset.action};
+        if (btn.dataset.ch != null) body.ch = +btn.dataset.ch;
+        post(url, body).then(function (r) {
           if (r.ok && r.redirect) { location.href = r.redirect; return; }
           toast(r.message || (r.ok ? 'Done' : r.error), r.ok ? (r.queued ? 'info' : 'success') : 'danger');
         }).finally(function () { btn.disabled = false; });
@@ -56,7 +58,9 @@ var PM = (function () {
                 tripped: ['danger', 'Over-current trip'], unknown: ['secondary', 'No data yet'],
                 over: ['warning', 'Over kWh limit (power on)'], ended_voltage: ['danger', 'Session ended (voltage)'],
                 ended_tamper: ['danger', 'Session ended (tamper)'], ended_sensor: ['danger', 'Session ended (sensor error)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
-                disabled: ['dark', 'Disabled']};
+                disabled: ['dark', 'Disabled'], none: ['warning', 'No session (Renew to start)'],
+                independent_mixed: ['info', 'Per channel'], ended_stopped: ['secondary', 'Session ended (End)'],
+                ended_mode: ['secondary', 'Session ended (mode changed)']};
   var INCIDENT = {power: '<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>',
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
@@ -73,6 +77,56 @@ var PM = (function () {
     var o = Object.assign({}, m);
     o.w = m.w_tared; o.kwh = m.kwh_tared; o.cost = m.cost_tared; o.reading = m.reading_tared;
     return o;
+  }
+
+  // ---- multi-channel meters
+  function chBadge(c) {
+    return '<span class="badge rounded-pill ' + (c.relay_on ? 'text-bg-success' : (c.tripped ? 'text-bg-danger' : 'text-bg-secondary')) + '">' +
+      (c.relay_on ? 'ON' : (c.tripped ? 'TRIP' : 'OFF')) + '</span>';
+  }
+  function mcMini(m) {  // dashboard card: one line per channel
+    if (!m.mc) return '';
+    return m.channels.map(function (c) {
+      var st = m.mode === 'independent' && c.status !== 'active' ?
+        ' <span class="badge text-bg-warning">' + esc((STATUS[c.status] || ['', c.status])[1]) + '</span>' : '';
+      var pct = c.kwh_max ? Math.min(100, (c.kwh || 0) / c.kwh_max * 100) : 0;
+      return '<div class="d-flex justify-content-between align-items-center gap-2"><span class="text-truncate">' + esc(c.name) + st + '</span>' +
+        '<span class="text-nowrap">' + (c.w == null ? '–' : c.w) + ' W ' + chBadge(c) + '</span></div>' +
+        (m.mode === 'independent' ? '<div class="progress mb-1" style="height:4px" title="' + fmt(c.kwh, 3) + ' / ' + (c.kwh_max || '∞') +
+          ' kWh"><div class="progress-bar ' + (pct >= 100 ? 'bg-warning' : '') + '" style="width:' + pct + '%"></div></div>' : '');
+    }).join('');
+  }
+  function renderMc(m, admin) {  // meter Info page: Channels panel
+    var box = document.getElementById('mcChannels');
+    if (!box || !m.mc) return;
+    var ind = m.mode === 'independent';
+    box.innerHTML = '<div class="row g-2">' + m.channels.map(function (c) {
+      var btn = function (act, cls, icon, label, confirmText) {
+        return '<button class="btn btn-sm ' + cls + '" data-mc-action="' + act + '" data-ch="' + c.i + '"' +
+          (confirmText ? ' data-confirm="' + esc(confirmText) + '"' : '') + '><i class="bi ' + icon + ' me-1"></i>' + label + '</button>';
+      };
+      var blocked = c.tripped || (ind ? c.sess_ended || c.status === 'quota' : (m.status === 'quota' || m.sess_ended));
+      var sess = '';
+      if (ind) {
+        var s = STATUS[c.status] || ['secondary', c.status];
+        sess = '<div class="small mt-2"><span class="badge text-bg-' + s[0] + '">' + esc(s[1]) + '</span> ' +
+          (c.sid ? '#' + c.sid + ' · ' : '') + fmt(c.kwh, 3) + ' / ' + (c.kwh_max || '∞') + ' kWh' + (c.cost ? ' · ' + esc(c.cost) : '') +
+          '<div class="text-body-secondary">' + esc(c.session_desc || '') + (c.next_reset ? ' · next reset ' + esc(c.next_reset) : '') + '</div></div>';
+      }
+      return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100">' +
+        '<div class="d-flex align-items-center gap-2"><span class="fw-semibold text-truncate">' + esc(c.name) + '</span><span class="ms-auto">' + chBadge(c) + '</span></div>' +
+        '<div class="d-flex flex-wrap gap-3 small mt-1"><span><span class="fs-5 fw-semibold">' + (c.w == null ? '–' : c.w) + '</span> W</span><span>' + fmt(c.a, 3) + ' A</span><span>PF ' + fmt(c.pf, 2) + '</span>' +
+        '<span class="text-body-secondary">' + fmt(c.e, 3) + ' kWh total</span>' + (c.amp_max ? '<span class="text-body-secondary">max ' + c.amp_max + ' A</span>' : '') + '</div>' +
+        (c.relay_block && !c.relay_on ? '<div class="small text-body-secondary">Off: ' + esc(c.relay_block) + '</div>' : '') + sess +
+        (admin ? '<div class="d-flex flex-wrap gap-1 mt-2">' +
+          (blocked ? '<button class="btn btn-sm btn-success" disabled title="Blocked until the session is renewed / trip is reset"><i class="bi bi-toggle-on me-1"></i>ON</button>'
+                   : btn('relay_on', 'btn-success', 'bi-toggle-on', 'ON')) +
+          btn('relay_off', 'btn-outline-secondary', 'bi-toggle-off', 'OFF') +
+          (c.tripped ? btn('reset_trip', 'btn-outline-danger', 'bi-shield-check', 'Reset Trip') : '') +
+          (ind ? btn('renew', 'btn-outline-primary', 'bi-arrow-repeat', 'Renew', 'Start a new session on ' + c.name + '?') +
+                 btn('end', 'btn-outline-danger', 'bi-stop-circle', 'End', 'End the session of ' + c.name + ' now? Its relay stays off until renewed.') : '') +
+          '</div>' : '') + '</div></div>';
+    }).join('') + '</div>';
   }
 
   function updateMeterCard(root, m) {
@@ -98,6 +152,12 @@ var PM = (function () {
     set(root, 'cost-row', function (el) { el.classList.toggle('d-none', !m.cost); });
     set(root, 'reading_at', function (el) { el.textContent = m.reading_at; });
     set(root, 'next_reset', function (el) { el.textContent = m.next_reset || ''; });
+    set(root, 'mc-mini', function (el) { el.innerHTML = mcMini(m); });
+    if (m.mc) set(root, 'relay', function (el) {
+      var n = m.channels.filter(function (c) { return c.relay_on; }).length;
+      el.className = 'badge rounded-pill ' + (n ? 'text-bg-success' : 'text-bg-secondary');
+      el.textContent = 'Relays ' + n + '/' + m.channels.length + ' ON';
+    });
   }
 
   // ------------------------------------------------------------ session time helpers
@@ -138,6 +198,10 @@ var PM = (function () {
       });
     }
     store(opt.data);
+    opt.data.forEach(function (m) {
+      var card = document.querySelector('[data-meter="' + m.id + '"]');
+      if (card && m.mc) updateMeterCard(card, view(m, true));
+    });
     tick();
     setInterval(tick, 1000);
     poll(opt.poll, 5000, function (data) {
@@ -189,8 +253,19 @@ var PM = (function () {
         esc(ERR[m.reading_err] || 'No reading from the sensor.') + ' <span class="small">(' + esc(m.reading_at) + ')' +
         (m.reading_ok_at ? ' · last good reading ' + esc(m.reading_ok_at) : '') + '</span></div>';
     } else if (!m.reading || !m.reading.length) { box.innerHTML = '<div class="text-body-secondary">No readings yet.</div>'; return; }
-    m.reading.forEach(function (c) {
-      if (m.reading.length > 1) html += '<div class="fw-semibold small mb-1">Channel ' + (c.i + 1) + '</div>';
+    if (m.mc) {  // multi-channel: one voltage, then a compact row per channel
+      var c0 = m.reading[0] || {};
+      html += '<div class="row g-2 mb-2">' + [['Voltage', fmt(c0.v, 1), 'V'], ['Frequency', c0.hz == null ? '–' : c0.hz, 'Hz'],
+        ['Total power', fmt(m.w, 1), 'W']].map(function (x) { return '<div class="col-4"><div class="pm-stat"><div class="small text-body-secondary">' + x[0] + '</div><div class="pm-big">' + x[1] + ' <small class="fs-6 text-body-secondary">' + x[2] + '</small></div></div></div>'; }).join('') + '</div>';
+      html += '<table class="table table-sm align-middle mb-2"><thead><tr><th>Channel</th><th class="text-end">A</th><th class="text-end">W</th><th class="text-end">PF</th><th class="text-end">kWh total</th></tr></thead><tbody>' +
+        m.reading.map(function (c) {
+          var cname = m.channels && m.channels[c.i] ? m.channels[c.i].name : 'CH' + (c.i + 1);
+          return '<tr><td>' + esc(cname) + '</td><td class="text-end">' + fmt(c.a, 3) + '</td><td class="text-end">' + fmt(c.w, 1) + '</td><td class="text-end">' + fmt(c.pf, 2) + '</td><td class="text-end">' + fmt(c.e, 3) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    (m.mc ? [] : m.reading).forEach(function (c) {
+      var cname = 'Channel ' + (c.i + 1);
+      if (m.reading.length > 1) html += '<div class="fw-semibold small mb-1">' + esc(cname) + '</div>';
       html += '<div class="row g-2 mb-2">' +
         (m.kind === 'dc'  // DC: no power factor / frequency
           ? [['Voltage', fmt(c.v, 2), 'V'], ['Current', fmt(c.a, 2), 'A'], ['Power', fmt(c.w, 1), 'W'], ['Energy total', fmt(c.e, 3), 'kWh']]
@@ -209,9 +284,22 @@ var PM = (function () {
 
   function meterInfo(opt) {
     var head = document.getElementById('meterHead');
+    var mcBox = document.getElementById('mcChannels');
+    if (mcBox && opt.action) mcBox.addEventListener('click', function (e) {  // per-channel buttons
+      var b = e.target.closest('[data-mc-action]');
+      if (!b || (b.dataset.confirm && !confirm(b.dataset.confirm))) return;
+      b.disabled = true;
+      post(opt.action, {action: b.dataset.mcAction, ch: +b.dataset.ch}).then(function (r) {
+        toast(r.message || (r.ok ? 'Done' : r.error), r.ok ? (r.queued ? 'info' : 'success') : 'danger');
+        setTimeout(function () {
+          fetch(opt.live, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(onLive).catch(function () {});
+        }, 1200);
+      }).finally(function () { b.disabled = false; });
+    });
     function onLive(m) {
       updateMeterCard(document.body, m);
       renderLatest(m);
+      renderMc(m, !!opt.action);
       var on = document.getElementById('btnRelayOn');
       if (on) {
         var blocked = m.status === 'quota' || m.status === 'expired' || m.status === 'tripped' || m.status.indexOf('ended') === 0;
