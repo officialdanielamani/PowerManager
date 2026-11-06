@@ -17,7 +17,7 @@ static std::atomic<bool> reportNow_{false};
 static std::atomic<bool> sendReq_{false};  // time to send (report_s passed, event, Get Data Now)
 static uint32_t lastSendReqMs_ = 0, lastReportMs_ = 0;
 static bool offlineEventSent_ = false;
-static SemaphoreHandle_t rdySem_ = nullptr;
+static SemaphoreHandle_t drdySem_ = nullptr;
 static uint32_t relaySwitches_ = 0;
 
 static void bump() { stateVer_++; }
@@ -411,9 +411,9 @@ static void pushTelemetry() {
 
 // ------------------------------------------------------------------ sensor
 
-static void IRAM_ATTR onRdy() {
+static void IRAM_ATTR onDrdy() {
   BaseType_t woken = pdFALSE;
-  if (rdySem_) xSemaphoreGiveFromISR(rdySem_, &woken);
+  if (drdySem_) xSemaphoreGiveFromISR(drdySem_, &woken);
   if (woken) portYIELD_FROM_ISR();
 }
 
@@ -429,9 +429,9 @@ static void sensorFound() {
 void begin() {
   pinMode(PIN_TAMPER, INPUT_PULLUP);
   relays::begin();  // all relays OFF first
-  rdySem_ = xSemaphoreCreateBinary();
-  pinMode(PIN_RDY, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_RDY), onRdy, FALLING);
+  drdySem_ = xSemaphoreCreateBinary();
+  pinMode(PIN_DRDY, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_DRDY), onDrdy, FALLING);
   {
     StateLock l;
     g.tamper = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
@@ -523,8 +523,8 @@ static void checkVoltage(bool ok, float v) {
   }
 }
 
-// One read of the module: every 100 ms window with RDY, every second without. Over-current is
-// checked on every read, so with RDY a trip happens within ~200 ms.
+// One read of the module: every 100 ms window with DRDY, every second without. Over-current is
+// checked on every read, so with DRDY a trip happens within ~200 ms.
 static void readSensor() {
   rbamp::Sample smp;
   bool ok = rbamp::read(smp);
@@ -816,14 +816,14 @@ void task(void *) {
   uint32_t lastReadMs = 0, lastProbeMs = 0;
   TickType_t last = xTaskGetTickCount();
   for (;;) {
-    bool rdy;
+    bool drdy;
     {
       StateLock l;
-      rdy = g.cfg.rdy;
+      drdy = g.cfg.drdy;
     }
     bool fresh = false;
-    if (rdy) {
-      fresh = xSemaphoreTake(rdySem_, pdMS_TO_TICKS(CONTROL_TICK_MS)) == pdTRUE;  // every 100 ms window
+    if (drdy) {
+      fresh = xSemaphoreTake(drdySem_, pdMS_TO_TICKS(CONTROL_TICK_MS)) == pdTRUE;  // every 100 ms window
       last = xTaskGetTickCount();
     } else {
       vTaskDelayUntil(&last, pdMS_TO_TICKS(CONTROL_TICK_MS));
@@ -834,7 +834,7 @@ void task(void *) {
       sys::crumb(sys::CR_CONTROL, "sensor probe");
       if (rbamp::begin()) sensorFound();
     }
-    if (fresh || now - lastReadMs >= SENSOR_READ_MS) {  // without RDY wired: once a second
+    if (fresh || now - lastReadMs >= SENSOR_READ_MS) {  // without DRDY wired: once a second
       lastReadMs = now;
       sys::crumb(sys::CR_CONTROL, "sensor");
       readSensor();

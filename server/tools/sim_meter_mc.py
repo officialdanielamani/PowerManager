@@ -61,7 +61,7 @@ def cmd_pair(args):
 
 def caps(n):
     return {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": f"UI{n}", "channels": n, "relays": n,
-            "voltage": True, "rdy": True, "rtc": True, "amp_rating": 34.8, "ratings": [30] * n, "inputs": ["tamper"]}
+            "voltage": True, "drdy": True, "rtc": True, "amp_rating": 34.8, "ratings": [30] * n, "inputs": ["tamper"]}
 
 
 class MeterMC:

@@ -220,9 +220,9 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   int report = c["report_s"] | 60;
   if (report < 10 || report > 3600) { err = "report_s"; return false; }
   m.report_s = report;
-  m.rdy = c["rdy"] | false;
+  m.drdy = c["drdy"] | false;
   int readS = c["read_s"] | report;
-  if (readS < (m.rdy ? 1 : 5) || readS > report) { err = "read_s"; return false; }
+  if (readS < (m.drdy ? 1 : 5) || readS > report) { err = "read_s"; return false; }
   m.read_s = readS;
   int off = c["offline_off_min"] | 0;
   if (off < 0 || off > 1440) { err = "offline_off_min"; return false; }
@@ -306,7 +306,7 @@ static void fillCaps(JsonObject caps) {
   caps["channels"] = n;
   caps["relays"] = min<int>(n, RELAY_COUNT);
   caps["voltage"] = g.hasVoltage;
-  caps["rdy"] = PIN_RDY >= 0;
+  caps["drdy"] = PIN_DRDY >= 0;
   caps["rtc"] = (bool)HAS_DS3231;
   float maxA = 0;
   JsonArray r = caps["ratings"].to<JsonArray>();

@@ -109,7 +109,7 @@ def default_for(device):
     n = channel_count(device)
     cfg = default_cfg(n)
     if device.is_mc:
-        cfg.update({"mode": "shared", "rdy": False, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION})
+        cfg.update({"mode": "shared", "drdy": False, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION})
         cfg["ch"] = [_mc_channel_default() for _ in range(n)]
         for k in ("tare_a", "tare_w", "tare_limits"):  # the clamps measure only the load
             cfg.pop(k, None)
@@ -178,11 +178,11 @@ def _parse_sess(form, sfx, errors, label):
 
 
 def _parse_mc(form, device, cfg, errors):
-    """Multi-channel fields: mode, RDY, shared total limit, per-channel names / limits / sessions."""
+    """Multi-channel fields: mode, DRDY, shared total limit, per-channel names / limits / sessions."""
     mode = form.get("mode", "shared")
     cfg["mode"] = mode if mode in MC_MODES else "shared"
-    cfg["rdy"] = form.get("rdy") == "on" and bool((device.caps or {}).get("rdy", True))
-    if cfg["rdy"]:  # RDY: raw readings can be recorded every second
+    cfg["drdy"] = form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", True))
+    if cfg["drdy"]:  # DRDY: raw readings can be recorded every second
         cfg["read_s"] = _num(form, "read_s", int, 1, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
         errors[:] = [e for e in errors if not e.startswith("Read data every (s): must be between 5")]
     cfg["kwh_max"] = _num(form, "kwh_max", float, 0, 100000, "Max kWh (all channels)", errors, 0.0)
@@ -282,7 +282,7 @@ def to_device(cfg, ver):
         return {"ver": ver, "cfg": {
             "report_s": int(cfg.get("report_s", 60)),
             "read_s": int(cfg.get("read_s", cfg.get("report_s", 60))),
-            "rdy": bool(cfg.get("rdy")),
+            "drdy": bool(cfg.get("drdy", cfg.get("rdy"))),
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "mode": cfg.get("mode", "shared"),
             "sess": _sess_doc(cfg),

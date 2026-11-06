@@ -11,7 +11,7 @@ The server treats it as an AC meter with `caps.mc = true` and `caps.channels = N
 | Part | Bus / pin | Notes |
 |---|---|---|
 | rbAmp BASIC (SCT-UI1/2/3/5/7, SCT-I1/2/3) | I²C `0x50` | variant read from `HW_VARIANT` (`0x55`); 5 V supply, isolated from mains; answers during a power cut (U ≈ 0) |
-| rbAmp DRDY | GPIO (`PIN_RDY`) | open-drain, ~10 µs low pulse every 100 ms window; pull-up 10 k (or the internal one) |
+| rbAmp DRDY | GPIO (`PIN_DRDY`) | open-drain, ~10 µs low pulse every 100 ms window; pull-up 10 k (or the internal one) |
 | DS3231 | I²C `0x68` | (its EEPROM at `0x57`) |
 | PCF8574 / PCF8574A | I²C `0x20–0x27` / `0x38–0x3F` | one bit per relay |
 | XL9535 relay board | I²C `0x20–0x27` | TCA9535-compatible: port 0 = relays 1–8 |
@@ -48,7 +48,7 @@ Session numbers (`sid`) come from one counter on the meter, so they are unique a
 
 ```json
 {"kind":"ac","mc":true,"sensor":"rbamp","variant":"UI2","channels":2,"relays":2,
- "voltage":true,"rdy":true,"amp_rating":30,"ratings":[30,30]}
+ "voltage":true,"drdy":true,"amp_rating":30,"ratings":[30,30]}
 ```
 
 `voltage: false` (SCT-I* variants): no voltage → no power / energy (only current); no "No AC" detection.
@@ -57,7 +57,7 @@ Session numbers (`sid`) come from one counter on the meter, so they are unique a
 
 ```json
 {"ver":7,"cfg":{
-  "report_s":60,"read_s":10,"rdy":false,"offline_off_min":0,
+  "report_s":60,"read_s":10,"drdy":false,"offline_off_min":0,
   "mode":"shared",
   "sess":{"mode":"none","auto":false},           // shared mode session
   "kwh_max":10.0,"kwh_action":"hold",             // shared mode: total of all channels
@@ -69,9 +69,9 @@ Session numbers (`sid`) come from one counter on the meter, so they are unique a
          "sess":{"mode":"daily","daily_utc_min":0,"auto":true}}, …]}}
 ```
 
-`rdy: true` = read the module on every DRDY pulse (100 ms): limits are checked on every window. Without it
+`drdy: true` = read the module on every DRDY pulse (100 ms): limits are checked on every window. Without it
 the module is read once a second. Readings are recorded raw (no averaging) every `read_s`
-(1–3600 s with `rdy`, 5–3600 s without) and sent every `report_s`.
+(1–3600 s with `drdy`, 5–3600 s without) and sent every `report_s`.
 
 Why not record every 100 ms window: that is ~2 KB/s into the meter's flash buffer (it would wear out the
 flash within months) and ~1.7 million database rows per meter per day. A short live-capture mode streaming

@@ -38,7 +38,7 @@
 {% if d.is_mc %}
 <div class="card mb-3"><div class="card-header fw-semibold d-flex align-items-center gap-2">Channels
   <span class="badge text-bg-light border fw-normal">{{ 'Independent: one session per channel' if d.mc_mode == 'independent' else 'Shared: one session for all channels' }}</span>
-  {% if (d.cfg or {}).get('rdy') %}<span class="badge text-bg-info fw-normal" title="Limits checked on every 100 ms measurement window">RDY</span>{% endif %}
+  {% if (d.cfg or {}).get('drdy') %}<span class="badge text-bg-info fw-normal" title="Limits checked on every 100 ms measurement window">DRDY</span>{% endif %}
   <span class="ms-auto small text-body-secondary fw-normal">{{ (d.caps or {}).get('variant', '') }} {{ d.sensor_name }}</span></div>
   <div class="card-body" id="mcChannels"><div class="text-body-secondary small">Loading…</div></div></div>
 {% endif %}

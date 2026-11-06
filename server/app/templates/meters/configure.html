@@ -56,10 +56,10 @@
         <div class="form-text">Read: 5 s – 1 h, send: 10 s – 1 h (read ≤ send). Example: read every 10 s and send every 60 s = 6 readings sent together once a minute.
           Limits are checked on the meter every second regardless; events (trip, tamper, …) are sent right away.
           Note: the meter buffers ~500 readings while offline, so shorter read intervals mean a shorter offline buffer (10 s ≈ 80 min).</div>
-        {% if d.is_mc and (d.caps or {}).get('rdy', true) %}
-        <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="rdy" id="rdy" {{ chk('rdy', cfg.get('rdy')) }}>
-          <label class="form-check-label" for="rdy">Read data when RDY</label>
-          <div class="form-text">The power module signals each new 100 ms measurement (RDY pin): the meter then checks every limit on every
+        {% if d.is_mc and (d.caps or {}).get('drdy', true) %}
+        <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="drdy" id="drdy" {{ chk('drdy', cfg.get('drdy')) }}>
+          <label class="form-check-label" for="drdy">Read data when DRDY</label>
+          <div class="form-text">The power module signals each new 100 ms measurement (DRDY pin): the meter then checks every limit on every
             window instead of once a second. Readings are stored raw (not averaged) at the read interval, which can then go down to 1 s.</div></div>
         {% endif %}</div>
       <div class="d-flex flex-wrap gap-2">
@@ -268,7 +268,7 @@
   document.querySelectorAll('input[name=sess_mode]').forEach(function (r) { r.addEventListener('change', syncMode); });
   syncMode();
   PM.bindActions(actionUrl);
-  // multi-channel: mode (shared / independent), per-channel session inputs, RDY
+  // multi-channel: mode (shared / independent), per-channel session inputs, DRDY
   function syncMc() {
     var r = document.querySelector('input[name=mode]:checked'); if (!r) return;
     document.querySelectorAll('[data-mc]').forEach(function (el) { el.classList.toggle('d-none', el.dataset.mc !== r.value); });
@@ -279,9 +279,9 @@
     document.querySelectorAll('[data-chsess="' + sel.dataset.chmode + '"]').forEach(function (el) { el.classList.toggle('d-none', el.dataset.for !== sel.value); });
   }
   document.querySelectorAll('[data-chmode]').forEach(function (sel) { sel.addEventListener('change', function () { syncCh(sel); }); syncCh(sel); });
-  var rdy = document.getElementById('rdy'), readIn = document.querySelector('input[name=read_s]');
-  function syncRdy() { if (rdy && readIn) readIn.min = rdy.checked ? 1 : 5; }
-  if (rdy) { rdy.addEventListener('change', syncRdy); syncRdy(); }
+  var drdy = document.getElementById('drdy'), readIn = document.querySelector('input[name=read_s]');
+  function syncDrdy() { if (drdy && readIn) readIn.min = drdy.checked ? 1 : 5; }
+  if (drdy) { drdy.addEventListener('change', syncDrdy); syncDrdy(); }
   var tn = document.getElementById('tareNow');
   if (tn) tn.addEventListener('click', function () {
     PM.post(actionUrl, {action: 'tare_now'}).then(function (r) {

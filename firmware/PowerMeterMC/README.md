@@ -37,7 +37,7 @@ by Markus Sattler; **ESP32S3 Dev Module**, USB CDC On Boot Enabled, Flash 4 MB, 
 | `RELAY_ADDRESS`, `RELAY_COUNT` | board address and number of relays (1/2/4/8) |
 | `RELAY_ACTIVE_HIGH` | XL9535 boards: 1. PCF8574 driving low-side SSR / relay inputs: usually 0 |
 | `HAS_DS3231` | 1 (used in this project) |
-| `PIN_RDY` | the DRDY pin (read on every 100 ms window when **Read data when RDY** is ticked on the server) |
+| `PIN_DRDY` | the DRDY pin (read on every 100 ms window when **Read data when DRDY** is ticked on the server) |
 
 The module variant (UI1/UI2/UI3/UI5/UI7 or I1/I2/I3) is read from the module: channel count and whether it
 has a voltage input are automatic. The serial banner shows what was found, e.g.
@@ -49,8 +49,8 @@ has a voltage input are automatic. The serial banner shows what was found, e.g.
   reads each channel's average power and adds it to its own per-channel kWh counter (saved every 5 min and on
   every session change).
 - **Limits:** max current per channel; kWh and time limits for the whole meter (**Shared** mode, default)
-  or per channel (**Independent** mode) — chosen on the server. Without RDY the module is read once a second;
-  with RDY on every 100 ms window, so an over-current trip happens within ~0.2 s.
+  or per channel (**Independent** mode) — chosen on the server. Without DRDY the module is read once a second;
+  with DRDY on every 100 ms window, so an over-current trip happens within ~0.2 s.
 - **Relays:** written on every change and again every 2 s (recovers from a glitch on the relay board). If the
   board stops answering the meter reports `relay_error` (server notification under *Sensor error*).
 - **No AC:** the module has its own 5 V supply and keeps answering in a power cut (U ≈ 0 V), so "No AC" and

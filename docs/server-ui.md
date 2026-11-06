@@ -151,7 +151,7 @@ Detected from the meter firmware at pairing (`caps.mc`); see [multichannel.md](m
 
 - **Configuration → Set Limit → Configuration mode:** **Shared** (default: one session and one kWh limit for all channels) or **Independent** (each channel its own session, kWh limit, time limit, auto renew). Changing the mode ends the running session(s).
 - **Configuration → Channels:** per channel a name, Max A (both modes) and, in Independent mode, kWh limit + action and session time limit.
-- **Configuration → General → Read data when RDY:** limits checked on every 100 ms window; raw readings stored at the read interval (1 s minimum instead of 5 s).
+- **Configuration → General → Read data when DRDY:** limits checked on every 100 ms window; raw readings stored at the read interval (1 s minimum instead of 5 s).
 - **Info page:** a *Channels* panel (power, current, PF, kWh counter, relay ON/OFF and Reset Trip per channel; Renew / End per channel in Independent mode); header **Renew Now / End session** (Shared) or **Renew all / End all** (Independent). Latest data shows one voltage and a row per channel; the history chart and CSV have a channel picker; the Sessions tab has a Channel column.
 - **Dashboard card:** total W plus one line per channel (W, relay, and in Independent mode its kWh bar).
 - Bulk Configuration skips multi-channel meters (configure them one by one); Bulk Renew renews all their sessions.

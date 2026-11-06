@@ -9,7 +9,7 @@ from .conftest import FakeConn
 from .test_pairing import _code
 
 CAPS = {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": "UI2", "channels": 2, "relays": 2,
-        "voltage": True, "rdy": True, "amp_rating": 34.8, "ratings": [30, 30]}
+        "voltage": True, "drdy": True, "amp_rating": 34.8, "ratings": [30, 30]}
 
 
 def _pair_mc(client, code, device_id="MCM00001"):
@@ -34,25 +34,25 @@ def _form(**kw):
 
 def test_config_form_independent(app, admin, mc):
     r = admin.post(f"/meters/{mc}/configure", data=_form(
-        mode="independent", rdy="on", read_s="1", name_0="Kitchen", name_1="Tenant B", amp_max_0="16", amp_max_1="20",
+        mode="independent", drdy="on", read_s="1", name_0="Kitchen", name_1="Tenant B", amp_max_0="16", amp_max_1="20",
         kwh_max_0="8", kwh_action_0="end", kwh_max_1="12", sess_mode_1="daily", daily_at_1="06:00", auto_1="on"))
     assert r.status_code in (200, 302)
     with app.app_context():
         d = db.session.get(Device, mc)
         assert d.mc_mode == "independent" and d.channel_name(1) == "CH2 Tenant B"
         doc = devconfig.to_device(d.cfg, 1)["cfg"]
-    assert doc["mode"] == "independent" and doc["rdy"] is True and doc["read_s"] == 1
+    assert doc["mode"] == "independent" and doc["drdy"] is True and doc["read_s"] == 1
     assert doc["ch"][0]["kwh_max"] == 8 and doc["ch"][0]["kwh_action"] == "end" and doc["ch"][0]["amp_max"] == 16
     assert doc["ch"][1]["sess"]["mode"] == "daily" and doc["ch"][1]["sess"]["auto"] is True
     assert admin.get(f"/meters/{mc}/configure").status_code == 200
 
 
-def test_rdy_off_keeps_5s_minimum(app, admin, mc):
+def test_drdy_off_keeps_5s_minimum(app, admin, mc):
     with app.app_context():
         d = db.session.get(Device, mc)
         _, errors = devconfig.parse_form(_form(read_s="1"), d)
         assert any("Read data every" in e for e in errors)
-        _, errors = devconfig.parse_form(_form(read_s="1", rdy="on"), d)
+        _, errors = devconfig.parse_form(_form(read_s="1", drdy="on"), d)
         assert not errors
 
 

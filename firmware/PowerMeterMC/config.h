@@ -14,7 +14,7 @@
 #define PIN_I2C_SDA 8       // shared I2C bus: rbAmp, DS3231, relay board
 #define PIN_I2C_SCL 9
 #define I2C_FREQ_HZ 50000   // rbAmp recommendation for ESP32 hosts (do not use 400 kHz)
-#define PIN_RDY 5           // rbAmp DRDY (open-drain, internal pull-up used; add 10 k to 3.3 V for long wires)
+#define PIN_DRDY 5           // rbAmp DRDY (open-drain, internal pull-up used; add 10 k to 3.3 V for long wires)
 #define PIN_TAMPER 4        // NC switch to GND; open = panel open (INPUT_PULLUP)
 #define PIN_LED 48          // WS2812 RGB LED (onboard on most Super Mini boards)
 #define PIN_BOOT_BUTTON 0   // hold 10 s = factory reset
@@ -69,8 +69,8 @@
 #define STACK_WEB 10240
 #define STACK_CONTROL 8192
 #define STACK_LED 3072
-#define CONTROL_TICK_MS 250       // control loop without RDY (with RDY it runs on every 100 ms window)
-#define SENSOR_READ_MS 1000       // without RDY: read the module this often
+#define CONTROL_TICK_MS 250       // control loop without DRDY (with DRDY it runs on every 100 ms window)
+#define SENSOR_READ_MS 1000       // without DRDY: read the module this often
 #define ENERGY_PERIOD_MS 1000     // close an rbAmp period (energy) this often
 #define ENERGY_SAVE_MS 300000     // save the kWh counters to NVS this often (and on session changes)
 #define TRIP_CONFIRM_READS 2      // over-current must be seen this many reads in a row

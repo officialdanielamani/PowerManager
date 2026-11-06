@@ -153,7 +153,7 @@ def _mc_summary(d, base, show_price):
                 costs.append((cost, cur))
             maxes.append(float(ss.get("max") or 0))
         channels.append(c)
-    out = {"mc": True, "mode": d.mc_mode, "channels": channels, "rdy": bool(cfg.get("rdy")),
+    out = {"mc": True, "mode": d.mc_mode, "channels": channels, "drdy": bool(cfg.get("drdy")),
            "relay_on": any(c["relay_on"] for c in channels)}
     if indep:
         statuses = {c["status"] for c in channels}

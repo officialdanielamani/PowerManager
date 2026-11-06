@@ -3,7 +3,7 @@
 // Arduino IDE 2.x, board package "esp32" by Espressif 3.x. See firmware/README.md.
 //
 // FreeRTOS tasks (docs/firmware.md §5):
-//   control (core 1): sensor (every 100 ms window with RDY), limits, relays - never waits on the network
+//   control (core 1): sensor (every 100 ms window with DRDY), limits, relays - never waits on the network
 //   net     (core 0): Wi-Fi, pairing, WebSocket, offline buffer flush
 //   web     (core 0): local web page + captive portal
 //   led     (core 1): status LED

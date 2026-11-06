@@ -46,7 +46,7 @@ struct MeterConfig {
   uint32_t ver = 0;
   uint16_t report_s = 60;  // send to the server every ... s
   uint16_t read_s = 60;    // record a reading every ... s (<= report_s)
-  bool rdy = false;        // read the module on every DRDY pulse (100 ms windows)
+  bool drdy = false;        // read the module on every DRDY pulse (100 ms windows)
   uint16_t offline_off_min = 0;  // 0 = disabled
   uint8_t mode = MODE_SHARED;
   SessConfig sess;         // shared mode

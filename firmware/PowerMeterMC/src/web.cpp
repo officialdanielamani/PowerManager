@@ -345,7 +345,7 @@ static void hState() {
   static const char *SM[] = {"none", "duration", "daily"};
   c["report_s"] = g.cfg.report_s;
   c["read_s"] = g.cfg.read_s;
-  c["rdy"] = g.cfg.rdy;
+  c["drdy"] = g.cfg.drdy;
   c["mode"] = g.cfg.mode == MODE_INDEPENDENT ? "independent" : "shared";
   c["kwh_max"] = num4(g.cfg.kwh_max);
   c["kwh_action"] = KA[g.cfg.kwh_action % 3];
