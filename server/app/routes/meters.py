@@ -500,11 +500,28 @@ def _csv_tare(device, source, header, rows):
     return header + [f"A_tared (-{tare[0]:g})", f"W_tared (-{tare[1]:g})"], out
 
 
+def _csv_decimals(h):
+    """Decimals for a CSV column, the same as on screen: A 3, W 1, PF 2, V / Hz 1, kWh 4."""
+    if "kWh" in h:
+        return 4
+    t = h.split()[-1]
+    if t.startswith("PF"):
+        return 2
+    if t == "A" or t.startswith("A_"):
+        return 3
+    if t[:1] in ("W", "V") or t.startswith("Hz"):
+        return 1
+    return None
+
+
 def _csv_response(filename, header, rows):
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(header)
-    w.writerows(rows)
+    dec = [_csv_decimals(h) for h in header]
+    for r in rows:
+        w.writerow([f"{v:.{dec[i]}f}" if isinstance(v, float) and i < len(dec) and dec[i] is not None else v
+                    for i, v in enumerate(r)])
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 

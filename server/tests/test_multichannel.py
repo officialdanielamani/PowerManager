@@ -82,6 +82,17 @@ def test_drdy_frames_and_wide_csv(app, admin, mc):
     header = csv[0].split(",")
     assert "CH1 Kitchen A" in header and "CH2 W" in header and "channel" not in header
     assert len(csv) == 1 + 12  # one row per window, both channels side by side
+    assert ",1.000,230.0,0.99," in csv[1]  # same decimals as on screen (A 3, W 1, PF 2)
+
+
+def test_negative_power_is_kept(app, admin, mc):
+    from app.models import Measurement
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        ingest.handle(FakeConn(), d, {"t": "tel", "items": [{"seq": 70, "ts": now() - 5, "tv": 1,
+                                      "ch": [{"i": 0, "v": 230, "a": 0.5, "w": -110.5, "pf": -0.96}]}]})
+        m = Measurement.query.filter_by(device_fk=d.id, seq=70).one()
+        assert m.w == -110.5 and m.pf == -0.96  # clamp reversed: visible, not dropped
 
 
 def test_independent_sessions_quota_and_display(app, admin, mc):

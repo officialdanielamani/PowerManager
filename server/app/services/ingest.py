@@ -14,7 +14,8 @@ FIELDS = ("v", "a", "w", "pf", "hz", "e")
 # Physically possible ranges; anything outside is stored as "no value" (bad sensor read or
 # a misbehaving client). Generous on purpose.
 # AC: PZEM-004T (up to 260 V / 100 A); DC: PZEM-017 (up to 300 V / 300 A shunt).
-LIMITS = {"v": (0, 400), "a": (0, 400), "w": (0, 150000), "pf": (0, 1.0001), "hz": (0, 70),
+# Power and PF are signed on the rbAmp (negative = clamp reversed, or export): keep them.
+LIMITS = {"v": (0, 400), "a": (0, 400), "w": (-150000, 150000), "pf": (-1.0001, 1.0001), "hz": (0, 70),
           "e": (0, 10_000_000)}
 
 
