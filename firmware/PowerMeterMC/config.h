@@ -110,7 +110,8 @@
 #define OUTBOX_SEGMENT_ITEMS 50   // items per segment file (~8 KB)
 #define OUTBOX_SEGMENTS 10        // max segments -> keeps the newest ~500 items (min 30 required)
 #define OUTBOX_RAM_ITEMS 200       // readings wait in RAM until acknowledged; flash only when offline
-#define OUTBOX_RAM_MAX_AGE_MS 30000  // ...or still unsent after this long
+#define OUTBOX_RAM_BYTES 64000   // ...and at most this much (DRDY: ~90 s of 2-channel windows)
+#define OUTBOX_RAM_MAX_AGE_MS 120000 // ...or still unsent after this long (DRDY send interval up to 90 s)
 #define OUTBOX_BATCH_MAX 50       // items per "tel" message
 
 // ---------------------------------------------------------------- defaults

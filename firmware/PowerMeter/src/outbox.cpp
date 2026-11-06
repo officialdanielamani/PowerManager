@@ -12,6 +12,9 @@
 #ifndef OUTBOX_RAM_ITEMS
 #define OUTBOX_RAM_ITEMS 120
 #endif
+#ifndef OUTBOX_RAM_BYTES
+#define OUTBOX_RAM_BYTES 48000  // and at most this much JSON in RAM (DRDY records are bigger)
+#endif
 #ifndef OUTBOX_RAM_MAX_AGE_MS
 #define OUTBOX_RAM_MAX_AGE_MS 30000
 #endif
@@ -23,6 +26,11 @@ struct RamItem {
   uint32_t atMs;
 };
 static std::deque<RamItem> ram;  // newer than everything on flash, oldest first
+static size_t ramBytes = 0;
+static void popRam() {
+  ramBytes -= min(ramBytes, (size_t)ram.front().it.json.length());
+  ram.pop_front();
+}
 
 static const char *DIR = "/ob";
 static SemaphoreHandle_t lock;
@@ -141,7 +149,7 @@ static void spill(size_t n) {
   while (n-- && !ram.empty()) {
     RamItem &r = ram.front();
     if (r.it.seq > acked) flashAppend(r.it.kind, r.it.seq, r.it.json);
-    ram.pop_front();
+    popRam();
   }
 }
 
@@ -154,7 +162,9 @@ void push(Kind kind, uint32_t seq, const String &json) {
     flashAppend(kind, seq, json);
   } else {
     ram.push_back({{seq, kind, json}, now});
+    ramBytes += json.length();
     if (ram.size() > OUTBOX_RAM_ITEMS) spill(OUTBOX_SEGMENT_ITEMS);  // offline for a while: to flash
+    while (ramBytes > OUTBOX_RAM_BYTES && ram.size() > 1) spill(1);
     size_t old = 0;
     for (auto &r : ram) {
       if (now - r.atMs < OUTBOX_RAM_MAX_AGE_MS) break;
@@ -199,7 +209,7 @@ void ackUpTo(uint32_t seq) {
   xSemaphoreTake(lock, portMAX_DELAY);
   acked = seq;
   prefs.putUInt("ack", acked);
-  while (!ram.empty() && ram.front().it.seq <= acked) ram.pop_front();
+  while (!ram.empty() && ram.front().it.seq <= acked) popRam();
   // delete segments that are fully acknowledged (never the one being appended to)
   while (firstSeg && firstSeg < lastSeg) {
     if (LittleFS.exists(segPath(firstSeg)) && segLastSeq(firstSeg, nullptr, nullptr) > acked) break;
@@ -221,6 +231,7 @@ void clear() {
   xSemaphoreTake(lock, portMAX_DELAY);
   for (uint32_t n = firstSeg; n && n <= lastSeg; n++) LittleFS.remove(segPath(n));
   ram.clear();
+  ramBytes = 0;
   firstSeg = lastSeg = 0;
   lastSegItems = pending = 0;
   acked = 0;

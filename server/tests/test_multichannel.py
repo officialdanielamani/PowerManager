@@ -51,15 +51,37 @@ def test_read_interval_limits(app, admin, mc):
     with app.app_context():
         d = db.session.get(Device, mc)
         _, errors = devconfig.parse_form(_form(read_s="1"), d)
-        assert not errors  # 1 s for every meter
+        assert not errors  # Normal mode: 1 s for every meter
         _, errors = devconfig.parse_form(_form(read_s="0.5"), d)
-        assert errors  # under 1 s only with DRDY
-        _, errors = devconfig.parse_form(_form(read_s="0.2", drdy="on"), d)
-        assert any("send every 30 s or less" in e for e in errors)  # 0.2 s readings: send often
-        cfg, errors = devconfig.parse_form(_form(read_s="0.2", report_s="10", drdy="on"), d)
-        assert not errors
+        assert errors
+        cfg, errors = devconfig.parse_form(_form(drdy="on", report_s_drdy="15"), d)
+        assert not errors  # DRDY mode: no read interval, send 1-90 s
         doc = devconfig.to_device(cfg, 1)["cfg"]
-        assert doc["read_ms"] == 200 and doc["read_s"] == 1 and doc["drdy"] is True
+        assert doc["drdy"] is True and doc["report_s"] == 15
+        _, errors = devconfig.parse_form(_form(drdy="on", report_s_drdy="91"), d)
+        assert any("Send every" in e for e in errors)
+        cfg, errors = devconfig.parse_form(_form(drdy="off", read_s="5", report_s="60"), d)  # Normal mode again
+        assert not errors and cfg["drdy"] is False and cfg["report_s"] == 60
+
+
+def test_drdy_frames_and_wide_csv(app, admin, mc):
+    from app.models import Measurement
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        t = now() - 30
+        frames = [[k * 100, 230.0 + k, 1.0, 230.0, 0.99, 2.0, 460.0 + k, 0.98] for k in range(12)]  # 12 windows, 1.2 s
+        ingest.handle(FakeConn(), d, {"t": "tel", "items": [{"seq": 50, "ts": t, "tv": 1, "hz": 50, "e": [1.5, 3.25],
+                                                              "fr": frames, "s": {"sid": 0, "kwh": 0}}]})
+        rows = Measurement.query.filter_by(device_fk=d.id).order_by(Measurement.ts, Measurement.ms, Measurement.ch).all()
+        assert len(rows) == 24  # 12 windows x 2 channels
+        assert (rows[-1].ts, rows[-1].ms) == (t + 1, 100) and rows[-1].w == 471.0 and rows[-1].e == 3.25
+        assert d.last_reading["ch"][1]["w"] == 471.0  # latest data = the last window
+        d.cfg = dict(d.cfg, ch=[dict(d.cfg["ch"][0], name="Kitchen"), d.cfg["ch"][1]])
+        db.session.commit()
+    csv = admin.get(f"/meters/{mc}/export.csv?range=1d").get_data(as_text=True).splitlines()
+    header = csv[0].split(",")
+    assert "CH1 Kitchen A" in header and "CH2 W" in header and "channel" not in header
+    assert len(csv) == 1 + 12  # one row per window, both channels side by side
 
 
 def test_independent_sessions_quota_and_display(app, admin, mc):

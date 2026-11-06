@@ -210,7 +210,8 @@ class MeterMC:
         while self.running:
             with self.lock:
                 self.step()
-                if time.time() - last_report >= float(self.cfg().get("read_s", 60)) * self.args.speed:
+                every = 1 if self.cfg().get("drdy") else float(self.cfg().get("read_s", 60))
+                if time.time() - last_report >= every * self.args.speed:
                     last_report = time.time()
                     self.report()
             time.sleep(1 * self.args.speed)
@@ -269,7 +270,17 @@ class MeterMC:
             self.send_state()
 
     def report(self):
-        item = {"seq": self.next_seq(), "ts": int(time.time()), "tv": 1, "ch": self.reading}
+        if self.cfg().get("drdy"):  # DRDY data mode: ~10 measurement windows per second, packed
+            t = time.time()
+            frames = []
+            for k in range(10):
+                fr = [k * 100, self.reading[0]["v"]]
+                for r in self.reading:
+                    fr += [round(r["a"] * random.uniform(0.98, 1.02), 3), round(r["w"] * random.uniform(0.98, 1.02), 1), r["pf"]]
+                frames.append(fr)
+            item = {"seq": self.next_seq(), "ts": int(t), "tv": 1, "hz": 50, "e": [r["e"] for r in self.reading], "fr": frames}
+        else:
+            item = {"seq": self.next_seq(), "ts": int(time.time()), "tv": 1, "ch": self.reading}
         if self.indep():
             item["ss"] = [{"ch": s, "sid": self.st["sess"][s].get("sid", 0),
                            "kwh": round(max(0, self.slot_energy(s) - self.st["sess"][s].get("e0", 0)), 4)}

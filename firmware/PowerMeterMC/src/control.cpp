@@ -411,6 +411,26 @@ void stateJson(JsonObject o) {
 
 // ------------------------------------------------------------------ telemetry
 
+// Session progress with every reading (the "state" message is only sent on changes).
+static void addSessionProgress(JsonDocument &doc) {
+  // caller holds StateLock
+  if (indep()) {
+    JsonArray ss = doc["ss"].to<JsonArray>();
+    for (uint8_t i = 0; i < sessSlots(); i++) {
+      JsonObject o = ss.add<JsonObject>();
+      o["ch"] = i;
+      o["sid"] = g.sess[i].sid;
+      double k = slotEnergy(i) - g.sess[i].e0;
+      o["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+    }
+  } else {
+    JsonObject se = doc["s"].to<JsonObject>();
+    se["sid"] = g.sess[0].sid;
+    double k = slotEnergy(0) - g.sess[0].e0;
+    se["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+  }
+}
+
 static void pushTelemetry() {
   JsonDocument doc;
   uint32_t seq = store::nextSeq();
@@ -434,26 +454,84 @@ static void pushTelemetry() {
         c["e"] = serialized(String(g.ch[i].e, 4));
       }
     }
-    // Session progress with every reading (the "state" message is only sent on changes).
-    if (indep()) {
-      JsonArray ss = doc["ss"].to<JsonArray>();
-      for (uint8_t i = 0; i < sessSlots(); i++) {
-        JsonObject o = ss.add<JsonObject>();
-        o["ch"] = i;
-        o["sid"] = g.sess[i].sid;
-        double k = slotEnergy(i) - g.sess[i].e0;
-        o["kwh"] = serialized(String(k > 0 ? k : 0, 4));
-      }
-    } else {
-      JsonObject se = doc["s"].to<JsonObject>();
-      se["sid"] = g.sess[0].sid;
-      double k = slotEnergy(0) - g.sess[0].e0;
-      se["kwh"] = serialized(String(k > 0 ? k : 0, 4));
-    }
+    addSessionProgress(doc);
   }
   String s;
   serializeJson(doc, s);
   outbox::push(outbox::TEL, seq, s);
+}
+
+// ------------------------------------------------------------------ DRDY frames
+// DRDY data mode: every measurement window (~100 ms) is recorded raw. Windows are packed into one
+// outbox item per second ("fr": [[ms, V, A1, W1, PF1, A2, ...], ...]) to keep RAM and traffic small.
+
+struct Frame {
+  uint64_t atMs;  // epoch ms (uptime ms while the clock is not set)
+  float v;
+  float a[MC_MAX_CH], w[MC_MAX_CH], pf[MC_MAX_CH];
+};
+static const uint8_t FRAMES_MAX = 16;
+static Frame frames_[FRAMES_MAX];
+static uint8_t nFrames_ = 0;
+static uint32_t firstFrameMs_ = 0;
+
+static uint64_t nowMs64() {
+  if (timekeep::valid()) {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (uint64_t)tv.tv_sec * 1000ULL + tv.tv_usec / 1000;
+  }
+  return millis();
+}
+
+static void addFrame(const rbamp::Sample &smp) {
+  // caller holds StateLock
+  if (nFrames_ >= FRAMES_MAX) return;  // pushFrames() runs every second, so this does not happen
+  Frame &f = frames_[nFrames_++];
+  if (nFrames_ == 1) firstFrameMs_ = millis();
+  f.atMs = nowMs64();
+  f.v = smp.v;
+  for (uint8_t i = 0; i < g.nch; i++) {
+    f.a[i] = smp.a[i];
+    f.w[i] = smp.w[i];
+    f.pf[i] = smp.pf[i];
+  }
+}
+
+static void addSessionProgress(JsonDocument &doc);
+
+static void pushFrames() {
+  JsonDocument doc;
+  {
+    StateLock l;
+    if (!nFrames_) return;
+    uint32_t seq = store::nextSeq();
+    doc["seq"] = seq;
+    uint32_t ts = (uint32_t)(frames_[0].atMs / 1000);
+    doc["ts"] = ts;
+    doc["tv"] = timekeep::valid() ? 1 : 0;
+    if (!timekeep::valid()) doc["boot"] = store::bootCount();
+    if (g.hz) doc["hz"] = g.hz;
+    JsonArray e = doc["e"].to<JsonArray>();
+    for (uint8_t i = 0; i < g.nch; i++) e.add(serialized(String(g.ch[i].e, 4)));
+    JsonArray fr = doc["fr"].to<JsonArray>();
+    for (uint8_t k = 0; k < nFrames_; k++) {
+      const Frame &f = frames_[k];
+      JsonArray x = fr.add<JsonArray>();
+      x.add((uint32_t)(f.atMs - (uint64_t)ts * 1000ULL));  // ms after ts
+      x.add(serialized(String(f.v, 1)));
+      for (uint8_t i = 0; i < g.nch; i++) {
+        x.add(serialized(String(f.a[i], 3)));
+        x.add(serialized(String(f.w[i], 1)));
+        x.add(serialized(String(f.pf[i], 2)));
+      }
+    }
+    nFrames_ = 0;
+    addSessionProgress(doc);
+  }
+  String s;
+  serializeJson(doc, s);
+  outbox::push(outbox::TEL, doc["seq"].as<uint32_t>(), s);
 }
 
 // ------------------------------------------------------------------ sensor
@@ -600,6 +678,7 @@ static void readSensor() {
   }
   checkVoltage(ok, smp.v);
   if (!ok) return;
+  if (g.cfg.drdy) addFrame(smp);  // DRDY data mode: every window is recorded
   for (uint8_t i = 0; i < g.nch; i++) {
     ChState &c = g.ch[i];
     float lim = g.cfg.ch[i].amp_max;
@@ -898,15 +977,28 @@ void task(void *) {
     checkRules(first);
     first = false;
 
-    // Record a reading every read_s; send the buffered readings every report_s.
+    // Normal mode: record a reading every read_s. DRDY mode: every window, packed once a second.
+    // Either way the buffered readings are sent every report_s.
     uint32_t readMs, sendMs;
+    bool drdyMode;
     {
       StateLock l;
+      drdyMode = g.cfg.drdy;
       sendMs = (uint32_t)g.cfg.report_s * 1000UL;
       readMs = g.cfg.read_ms ? g.cfg.read_ms : (uint32_t)(g.cfg.read_s ? g.cfg.read_s : g.cfg.report_s) * 1000UL;
     }
     bool nowReq = reportNow_.exchange(false);
-    if (nowReq || millis() - lastReportMs_ >= readMs) {
+    if (drdyMode) {
+      bool due;
+      {
+        StateLock l;
+        due = nFrames_ && (millis() - firstFrameMs_ >= 1000 || nFrames_ >= FRAMES_MAX);
+      }
+      if (due || nowReq) {
+        sys::crumb(sys::CR_CONTROL, "telemetry");
+        pushFrames();
+      }
+    } else if (nowReq || millis() - lastReportMs_ >= readMs) {
       lastReportMs_ = millis();
       sys::crumb(sys::CR_CONTROL, "telemetry");
       pushTelemetry();

@@ -42,7 +42,7 @@ def _raw(device_pk, ch, start, end):
     return (Measurement.query
             .filter(Measurement.device_fk == device_pk, Measurement.ch == ch,
                     Measurement.ts >= start, Measurement.ts <= end)
-            .order_by(Measurement.ts, Measurement.seq).all())
+            .order_by(Measurement.ts, Measurement.ms, Measurement.seq).all())
 
 
 def _rollups(device_pk, ch, period, start, end):
@@ -153,3 +153,45 @@ def apply_tare(data, tare):
         st["kwh"] = _r(t.kwh(st["kwh"], covered, tare), 4)
     data["tared"] = True
     return data
+
+
+def csv_wide(device, start, end):
+    """Multi-channel meters: one CSV row per reading with every channel side by side.
+    Returns (source, header, rows) with rows = [(ts, [values...])]; channel columns are named like
+    the meter's channels ("CH1 Kitchen A", "CH1 Kitchen W", ...)."""
+    from . import devconfig
+    n = devconfig.channel_count(device)
+    names = [device.channel_name(i) for i in range(n)]
+    retention_start = now() - settings.get_int("raw_retention_days", 90) * 86400
+    if start >= retention_start:
+        q = (Measurement.query
+             .filter(Measurement.device_fk == device.id, Measurement.ts >= start, Measurement.ts <= end)
+             .order_by(Measurement.ts, Measurement.ms, Measurement.seq, Measurement.ch))
+        header = ["ms", "V", "Hz"] + [f"{nm} {col}" for nm in names for col in ("A", "W", "PF", "kWh total")] + ["time_estimated"]
+        rows, cur, key = [], None, None
+        for r in q.yield_per(2000):
+            k = (r.gen, r.seq)  # one reading = one seq (DRDY: one per measurement window)
+            if k != key:
+                if cur is not None:
+                    rows.append(cur)
+                key = k
+                cur = (r.ts, [r.ms, r.v, r.hz] + [None] * (4 * n) + [int(r.time_estimated)])
+            if 0 <= r.ch < n:
+                base = 3 + 4 * r.ch
+                cur[1][base:base + 4] = [r.a, r.w, r.pf, r.e]
+                if cur[1][1] is None:
+                    cur[1][1] = r.v
+        if cur is not None:
+            rows.append(cur)
+        return "raw", header, rows
+    period = "h" if end - start <= 730 * 86400 else "d"
+    buckets = {}
+    for ch in range(n):
+        for r in _rollups(device.id, ch, period, start, end):
+            b = buckets.setdefault(r.bucket_start, [None, None] + [None] * (4 * n))
+            if b[0] is None:
+                b[0], b[1] = r.v_avg, r.hz_avg
+            b[2 + 4 * ch:6 + 4 * ch] = [r.a_avg, r.w_avg, r.w_max, r.kwh]
+    header = ["V_avg", "Hz_avg"] + [f"{nm} {col}" for nm in names for col in ("A_avg", "W_avg", "W_max", "kWh")]
+    return period, header, [(t, buckets[t]) for t in sorted(buckets)]
+

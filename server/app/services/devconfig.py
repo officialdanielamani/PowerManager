@@ -24,8 +24,7 @@ DISCONNECTED_DEFAULT_MIN = 5
 
 REPORT_MIN, REPORT_MAX = 10, 3600   # send to the server every ... s
 READ_MIN = 1                        # record a reading every ... s (read <= send)
-READ_MIN_DRDY = 0.2                 # multi-channel meter reading on DRDY: down to 0.2 s (rbAmp window 100-200 ms)
-FAST_SEND_MAX = 30                  # readings under 1 s: send at least every 30 s (they wait in the meter's RAM)
+DRDY_SEND_MAX, DRDY_SEND_DEFAULT = 90, 15  # DRDY data mode (every ~100 ms window recorded): send every 1-90 s
 
 # What a meter does when a limit / protection triggers. Same three choices everywhere.
 #   run  - session runs as usual (only an event + notification)
@@ -251,19 +250,16 @@ def parse_form(form, device):
     """Return (cfg, errors) from the Configure form."""
     errors = []
     cfg = default_for(device)
-    cfg["report_s"] = _num(form, "report_s", int, REPORT_MIN, REPORT_MAX, "Send data every (s)", errors, 60)
     drdy = device.is_mc and form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", (device.caps or {}).get("rdy", True)))
     if drdy:
-        cfg["read_s"] = round(_num(form, "read_s", float, READ_MIN_DRDY, REPORT_MAX, "Read data every (s)", errors,
-                                   float(cfg["report_s"])), 1)
-        if cfg["read_s"] == int(cfg["read_s"]):
-            cfg["read_s"] = int(cfg["read_s"])
-        if cfg["read_s"] < 1 and cfg["report_s"] > FAST_SEND_MAX:
-            errors.append(f"Readings under 1 s: send every {FAST_SEND_MAX} s or less")
+        # DRDY data mode: every measurement window is recorded (no read interval); send every 1-90 s.
+        cfg["report_s"] = _num(form, "report_s_drdy", int, 1, DRDY_SEND_MAX, "Send every (s)", errors, DRDY_SEND_DEFAULT)
+        cfg["read_s"] = _num(form, "read_s", int, READ_MIN, REPORT_MAX, "Read data every (s)", [], 60)  # kept for Normal
     else:
+        cfg["report_s"] = _num(form, "report_s", int, REPORT_MIN, REPORT_MAX, "Send data every (s)", errors, 60)
         cfg["read_s"] = _num(form, "read_s", int, READ_MIN, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
-    if cfg["read_s"] > cfg["report_s"]:
-        errors.append("Read data every: must not be longer than Send every")
+        if cfg["read_s"] > cfg["report_s"]:
+            errors.append("Read data every: must not be longer than Send every")
     cfg["offline_off"] = form.get("offline_off") == "on"
     cfg["offline_off_min"] = _num(form, "offline_off_min", int, 1, 1440, "Offline minutes", errors, 3)
 
@@ -329,8 +325,8 @@ def to_device(cfg, ver):
     if "mode" in cfg:  # multi-channel meter (docs/multichannel.md)
         return {"ver": ver, "cfg": {
             "report_s": int(cfg.get("report_s", 60)),
-            "read_s": max(1, int(-(-float(cfg.get("read_s", cfg.get("report_s", 60))) // 1))),
-            "read_ms": int(round(float(cfg.get("read_s", cfg.get("report_s", 60))) * 1000)),
+            "read_s": int(cfg.get("read_s", cfg.get("report_s", 60))),
+            "read_ms": int(cfg.get("read_s", cfg.get("report_s", 60))) * 1000,
             "drdy": bool(cfg.get("drdy", cfg.get("rdy"))),
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "mode": cfg.get("mode", "shared"),

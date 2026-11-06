@@ -75,7 +75,7 @@
         {% endif %}
         <dt class="col-6">Max current</dt><dd class="col-6">{% for c in cfg.get('ch', []) %}{{ (c.amp_max ~ ' A') if c.amp_max else 'Off' }}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
         <dt class="col-6">Offline relay-off</dt><dd class="col-6">{{ ('after ' ~ cfg.offline_off_min ~ ' min') if cfg.get('offline_off') else 'Off' }}</dd>
-        <dt class="col-6">Read / send data</dt><dd class="col-6">every {{ cfg.get('read_s', cfg.get('report_s', 60)) }} s / every {{ cfg.get('report_s', 60) }} s</dd>
+        <dt class="col-6">Read / send data</dt><dd class="col-6">{% if cfg.get('drdy') %}DRDY: every window (~100 ms){% else %}every {{ cfg.get('read_s', cfg.get('report_s', 60)) }} s{% endif %} / every {{ cfg.get('report_s', 60) }} s</dd>
         <dt class="col-6">Connection</dt><dd class="col-6" data-field="via">{{ ('Mesh via ' ~ m.via) if m.via else ('Wi-Fi' if m.online else '–') }}</dd>
         <dt class="col-6">Last online</dt><dd class="col-6" data-field="last_seen">{{ m.last_seen }}</dd>
         <dt class="col-6">Config</dt><dd class="col-6">{% if d.synced %}<span class="badge text-bg-success">Synced</span>{% else %}<span class="badge text-bg-info">Pending sync</span>{% endif %}</dd>

@@ -217,13 +217,15 @@ static bool parseSess(JsonObject s, SessConfig &out, String &err, const char *fi
 // Multi-channel config (docs/multichannel.md). Rejected as a whole if anything is out of range.
 static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   MeterConfig m;
-  int report = c["report_s"] | 60;
-  if (report < 10 || report > 3600) { err = "report_s"; return false; }
-  m.report_s = report;
   m.drdy = c["drdy"] | false;
+  int report = c["report_s"] | 60;
+  // Normal mode: send every 10 s - 1 h. DRDY mode (every window recorded): 1 - 90 s.
+  if (m.drdy ? (report < 1 || report > 90) : (report < 10 || report > 3600)) { err = "report_s"; return false; }
+  m.report_s = report;
   int readS = c["read_s"] | report;
-  long readMs = c["read_ms"] | (long)readS * 1000L;  // sub-second with DRDY (server sends read_ms)
-  if (readMs < (m.drdy ? 200 : 1000) || readMs > (long)report * 1000L) { err = "read_ms"; return false; }
+  long readMs = c["read_ms"] | (long)readS * 1000L;  // Normal mode; ignored in DRDY mode
+  if (!m.drdy && (readMs < 1000 || readMs > (long)report * 1000L)) { err = "read_ms"; return false; }
+  if (m.drdy) readMs = 1000;
   m.read_ms = readMs;
   m.read_s = (readMs + 999) / 1000;
   int off = c["offline_off_min"] | 0;

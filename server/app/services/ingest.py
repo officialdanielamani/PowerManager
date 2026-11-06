@@ -222,7 +222,9 @@ def h_tel(conn, device, msg):
         except (TypeError, ValueError):
             continue
         rows = []
-        for ch in item.get("ch") or []:
+        if isinstance(item.get("fr"), list):  # DRDY data mode: one reading per measurement window
+            rows, ts = _frame_rows(device, item, seq, ts, est)
+        for ch in [] if rows else (item.get("ch") or []):
             if not isinstance(ch, dict):
                 continue
             try:
@@ -239,11 +241,12 @@ def h_tel(conn, device, msg):
         if rows:
             db.session.execute(sqlite_insert(Measurement).values(rows).on_conflict_do_nothing())
             for row in rows:
-                _mark_dirty(device.id, row["ch"], ts)
+                _mark_dirty(device.id, row["ch"], row["ts"])
         _bump_seq(device, seq)
         if newest is None or ts >= newest["ts"]:
+            last = [r for r in rows if r["seq"] == rows[-1]["seq"]] if rows else []  # (DRDY: the last window)
             newest = {"ts": ts, "est": est, "ch": [
-                {"i": r["ch"], **{f: r[f] for f in FIELDS}} for r in rows]}
+                {"i": r["ch"], **{f: r[f] for f in FIELDS}} for r in last]}
             if not rows:  # no channel data: sensor error, or no AC
                 newest["err"] = str(item.get("se") or "no_ac")[:10]
     prev = device.last_reading or {}
@@ -254,6 +257,37 @@ def h_tel(conn, device, msg):
         device.last_reading = newest
     _session_progress(device, items)
     conn.send({"t": "ack", "last_seq": device.last_seq, "time": now()})
+
+
+FRAMES_PER_ITEM = 64
+
+
+def _frame_rows(device, item, seq, ts, est):
+    """DRDY data mode item: {"ts", "hz", "e": [kWh per channel], "fr": [[ms after ts, V, A1, W1, PF1, A2, ...], ...]}.
+    Returns (rows, ts of the last window). Each window gets its own (negative) seq so it is stored once and
+    never collides with the seq of a normal item; the order comes from ts + ms."""
+    rows, last_ts = [], ts
+    frames = [f for f in item["fr"][:FRAMES_PER_ITEM] if isinstance(f, list) and len(f) >= 2]
+    energies = item.get("e") if isinstance(item.get("e"), list) else []
+    hz = _f(item.get("hz"))
+    for k, fr in enumerate(frames):
+        try:
+            off = max(0, int(fr[0]))
+        except (TypeError, ValueError):
+            continue
+        t, ms = ts + off // 1000, off % 1000
+        n = (len(fr) - 2) // 3
+        for i in range(n):
+            vals = {"v": _f(fr[1]), "a": _f(fr[2 + 3 * i]), "w": _f(fr[3 + 3 * i]), "pf": _f(fr[4 + 3 * i]), "hz": hz,
+                    "e": _f(energies[i]) if k == len(frames) - 1 and i < len(energies) else None}
+            row = {"device_fk": device.id, "gen": device.pair_gen, "ch": i, "seq": -(seq * FRAMES_PER_ITEM + k),
+                   "ts": t, "ms": ms, "time_estimated": est}
+            for f in FIELDS:
+                lo, hi = LIMITS[f]
+                row[f] = vals[f] if vals[f] is not None and lo <= vals[f] <= hi else None
+            rows.append(row)
+        last_ts = t
+    return rows, last_ts
 
 
 def _session_progress(device, items):

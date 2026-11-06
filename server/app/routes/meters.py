@@ -534,17 +534,27 @@ def export_csv(pk):
         if sess is None or sess.device_fk != device.id or not sess.started_at:
             abort(404)
         start, end = sess.started_at, sess.ended_at or now()
+        if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
+            source, header, rows = history.csv_wide(device, start, end)
+            out = [[_utc(ts), settings.fmt_ts(ts)] + [("" if v is None else v) for v in vals] for ts, vals in rows]
+            hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
+            return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
         source, header, rows = history.csv_rows(device.id, ch, start, end)
         header, rows = _csv_tare(device, source, header, rows)
         header, rows = _csv_kind(device, header, rows)
-        out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals] for ts, vals in rows]
+        out = [[_utc(ts), settings.fmt_ts(ts), ch + 1] + [("" if v is None else v) for v in vals] for ts, vals in rows]
         hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
         return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
     start, end = _range_args(device)
+    if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
+        source, header, rows = history.csv_wide(device, start, end)
+        out = [[_utc(ts), settings.fmt_ts(ts)] + [("" if v is None else v) for v in vals] for ts, vals in rows]
+        hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
+        return _csv_response(f"{device.device_id}_{_fname_ts(start)}_{_fname_ts(end)}.csv", hdr, out)
     source, header, rows = history.csv_rows(device.id, ch, start, end)
     header, rows = _csv_tare(device, source, header, rows)
     header, rows = _csv_kind(device, header, rows)
-    out = [[_utc(ts), settings.fmt_ts(ts), ch] + [("" if v is None else v) for v in vals]
+    out = [[_utc(ts), settings.fmt_ts(ts), ch + 1] + [("" if v is None else v) for v in vals]
            for ts, vals in rows]
     hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
     return _csv_response(f"{device.device_id}_{_fname_ts(start)}_{_fname_ts(end)}.csv", hdr, out)

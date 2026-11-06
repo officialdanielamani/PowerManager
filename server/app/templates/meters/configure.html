@@ -47,20 +47,38 @@
       <div class="mb-3"><label class="form-label">Info</label>
         <input class="form-control" name="info" maxlength="200" value="{{ val('info', d.info) }}" placeholder="e.g. Basement"></div>
       <div class="mb-3"><label class="form-label">Data</label>
-        <div class="d-flex align-items-center flex-wrap gap-2">
-          <span>Read data every</span>
-          <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="read_s" min="1" max="3600" step="1" required value="{{ val('read_s', cfg.get('read_s', cfg.report_s)) }}"><span class="input-group-text">s</span></div>
-          <span>and send every</span>
-          <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="report_s" min="10" max="3600" required value="{{ val('report_s', cfg.report_s) }}"><span class="input-group-text">s</span></div>
+        {% set has_drdy = d.is_mc and (d.caps or {}).get('drdy', true) %}
+        {% set dmode = 'drdy' if (val('drdy', 'on' if cfg.get('drdy') else 'off') == 'on' and has_drdy) else 'normal' %}
+        {% if has_drdy %}
+        <div class="btn-group btn-group-sm mb-2" role="group" aria-label="Data mode">
+          <input type="radio" class="btn-check" name="drdy" id="dm_normal" value="off" {{ 'checked' if dmode == 'normal' }}>
+          <label class="btn btn-outline-primary" for="dm_normal">Normal mode</label>
+          <input type="radio" class="btn-check" name="drdy" id="dm_drdy" value="on" {{ 'checked' if dmode == 'drdy' }}>
+          <label class="btn btn-outline-primary" for="dm_drdy">DRDY</label>
         </div>
-        <div class="form-text">Read: 1 s – 1 h{% if d.is_mc %} (with DRDY: from 0.2 s; send then at least every 30 s){% endif %}, send: 10 s – 1 h (read ≤ send). Example: read every 10 s and send every 60 s = 6 readings sent together once a minute.
-          Limits are checked on the meter every second regardless; events (trip, tamper, …) are sent right away.
-          Note: the meter buffers ~500 readings while offline, so shorter read intervals mean a shorter offline buffer (10 s ≈ 80 min).</div>
-        {% if d.is_mc and (d.caps or {}).get('drdy', true) %}
-        <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="drdy" id="drdy" {{ chk('drdy', cfg.get('drdy')) }}>
-          <label class="form-check-label" for="drdy">Read data when DRDY</label>
-          <div class="form-text">The power module signals each new 100 ms measurement (DRDY pin): the meter then checks every limit on every
-            window instead of once a second. Readings are stored raw (not averaged) at the read interval, which can then go down to 0.2 s.</div></div>
+        {% endif %}
+        <div data-dm="normal">
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <span>Read data every</span>
+            <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="read_s" min="1" max="3600" step="1" value="{{ val('read_s', cfg.get('read_s', cfg.report_s)) }}"><span class="input-group-text">s</span></div>
+            <span>and send every</span>
+            <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="report_s" min="10" max="3600" value="{{ val('report_s', cfg.report_s if dmode == 'normal' else 60) }}"><span class="input-group-text">s</span></div>
+          </div>
+          <div class="form-text">Read: 1 s – 1 h, send: 10 s – 1 h (read ≤ send). Example: read every 10 s and send every 60 s = 6 readings sent together once a minute.
+            Limits are checked on the meter every second regardless; events (trip, tamper, …) are sent right away.
+            Offline the meter keeps ~500 readings, so shorter read intervals mean a shorter offline buffer (10 s ≈ 80 min).</div>
+        </div>
+        {% if has_drdy %}
+        <div data-dm="drdy">
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <span>Send every</span>
+            <div class="input-group input-group-sm" style="width:120px"><input class="form-control" type="number" name="report_s_drdy" min="1" max="90" value="{{ val('report_s_drdy', cfg.report_s if dmode == 'drdy' else 15) }}"><span class="input-group-text">s</span></div>
+          </div>
+          <div class="form-text">Send: 1–90 s. The reading follows DRDY: the power module signals every new measurement window
+            (~100 ms on current rbAmp firmware, ~200 ms on older modules), and every window is recorded raw (≈ 10 readings per second,
+            ≈ 600 per minute). Limits and protections are checked on every window. Lots of data: about 860,000 rows per channel per day
+            on the server — use it for detailed measurements, Normal mode for everyday metering.</div>
+        </div>
         {% endif %}</div>
       <div class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-outline-primary" data-action="renew" data-confirm="Start a new session now?"><i class="bi bi-arrow-repeat me-1"></i>Renew Now</button>
@@ -288,9 +306,15 @@
     document.querySelectorAll('[data-chsess="' + sel.dataset.chmode + '"]').forEach(function (el) { el.classList.toggle('d-none', el.dataset.for !== sel.value); });
   }
   document.querySelectorAll('[data-chmode]').forEach(function (sel) { sel.addEventListener('change', function () { syncCh(sel); }); syncCh(sel); });
-  var drdy = document.getElementById('drdy'), readIn = document.querySelector('input[name=read_s]');
-  function syncDrdy() { if (drdy && readIn) { readIn.min = drdy.checked ? 0.2 : 1; readIn.step = drdy.checked ? 0.1 : 1; } }
-  if (drdy) { drdy.addEventListener('change', syncDrdy); syncDrdy(); }
+  function syncDm() {  // Data: Normal mode (read + send) or DRDY (send only)
+    var r = document.querySelector('input[name=drdy]:checked'), m = r && r.value === 'on' ? 'drdy' : 'normal';
+    document.querySelectorAll('[data-dm]').forEach(function (el) {
+      el.classList.toggle('d-none', el.dataset.dm !== m);
+      el.querySelectorAll('input').forEach(function (i) { i.required = el.dataset.dm === m; });
+    });
+  }
+  document.querySelectorAll('input[name=drdy]').forEach(function (r) { r.addEventListener('change', syncDm); });
+  syncDm();
   var tn = document.getElementById('tareNow');
   if (tn) tn.addEventListener('click', function () {
     PM.post(actionUrl, {action: 'tare_now'}).then(function (r) {

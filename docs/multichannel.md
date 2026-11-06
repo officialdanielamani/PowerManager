@@ -143,11 +143,23 @@ Protocol: `caps.aux` = number of AUX relays; state `aux: [{"i":0,"relay":3,"on":
 Since firmware 0.6.4 / MC 0.7.2 a newly paired meter does not start a session on its own: it shows
 **No session** and the relays stay off (`block: no_session`) until the admin presses **Renew**.
 
-## Read interval and the offline buffer
+## Data modes (Configuration → General → Data)
 
-Readings can be recorded every 1 s (every meter) and, on a multi-channel meter reading on DRDY, down to
-0.2 s (`read_ms`; send then at least every 30 s). Readings wait in the meter's RAM until the server
-acknowledges them and only go to the flash buffer when the meter cannot send them (RAM full, older than
-30 s, or before an event), so fast intervals do not wear out the flash. Sub-second readings carry `ms`
-(milliseconds within `ts`), stored by the server and exported in the CSV `ms` column.
+- **Normal mode:** read every X s (1 s – 1 h) and send every Y s (10 s – 1 h, read ≤ send).
+- **DRDY:** no read interval. The rbAmp pulses DRDY once per measurement window (~100 ms on current module
+  firmware, ~200 ms before v1.2) and **every window is recorded raw** (≈ 10 readings per second). Send every
+  1–90 s. The meter packs each second's windows into one record (`"fr": [[ms after ts, V, A1, W1, PF1, A2, …], …]`,
+  plus `"e"` = kWh counters and `"hz"`); the server stores one reading per window (`ms` = milliseconds).
+  About 860,000 rows per channel per day: use it for detailed measurements.
 
+Limits and protections are checked on every reading: every window in DRDY mode, every second in Normal mode,
+whatever the send interval.
+
+Readings wait in the meter's RAM until the server acknowledges them and only go to the flash buffer when they
+cannot be sent (RAM full, unsent for too long, or before an event), so fast data does not wear out the flash.
+
+## CSV
+
+Multi-channel meters export **one row per reading with every channel side by side**: `ms, V, Hz`, then for each
+channel `<name> A`, `<name> W`, `<name> PF`, `<name> kWh total` (names as in Configuration, e.g. "CH1 Kitchen").
+Session CSVs work the same. Single-channel meters keep their format; the channel column starts at 1.
