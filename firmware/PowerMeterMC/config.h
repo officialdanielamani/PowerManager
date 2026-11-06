@@ -2,13 +2,14 @@
 // ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
 #pragma once
 
-#define FW_VERSION "0.7.0"
+#define FW_VERSION "0.7.1"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
 #define METER_KIND "ac"
 #define SENSOR_NAME "AC Power Sensor"
 #define MC_MAX_CH 7               // rbAmp BASIC: up to 7 current channels (UI7)
+#define FW_TYPE "rbamp-mc"        // stored on the meter: a different firmware type clears old state
 
 // ---------------------------------------------------------------- pins (check your board)
 #define PIN_I2C_SDA 8       // shared I2C bus: rbAmp, DS3231, relay board

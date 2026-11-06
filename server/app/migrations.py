@@ -55,6 +55,8 @@ def run():
     _add_column("meter_session", "currency VARCHAR(8)")
     # v0.7: multi-channel meters (independent mode: one session per channel)
     _add_column("meter_session", "ch INTEGER")
+    # v0.7.1: hardware change detection
+    _add_column("device", "hw_sig VARCHAR(40)")
 
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:

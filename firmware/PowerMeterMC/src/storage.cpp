@@ -40,6 +40,23 @@ static String randomString(const char *alphabet, int len) {
   return s;
 }
 
+// Flashing a different firmware type on this ESP32 (PZEM AC / PZEM DC / rbAmp multi-channel): the
+// sessions, kWh counters, relay / trip state and config of the old firmware mean nothing to the new
+// one. Clear them (Wi-Fi, admin login, pairing, "disabled" and the sequence numbers stay). The server
+// sees the new type and keeps the old history as an archived meter.
+static void checkFirmwareType() {
+  String prev = pm.getString("fwtype", "");
+  if (prev == FW_TYPE) return;
+  if (prev.length()) {
+    static const char *KEYS[] = {"cfg", "s_sid", "s_start", "s_e0", "s_stat", "s_over", "s_end", "s_stop", "s_tare",
+                                 "want", "tripped", "wantm", "tripm", "energy", "nch", "sidc", "started",
+                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6"};
+    for (const char *k : KEYS) pm.remove(k);
+    Serial.printf("[store] firmware type changed (%s -> %s): old sessions / kWh / relay state cleared\n",
+                  prev.c_str(), FW_TYPE);
+  }
+  pm.putString("fwtype", FW_TYPE);
+}
 void begin() {
   sSeqLock = xSemaphoreCreateMutex();
   ident.begin("ident", false);
@@ -59,6 +76,7 @@ void begin() {
     sApPass = randomString(PW_ALPHABET, 8);
     ident.putString("appass", sApPass);
   }
+  checkFirmwareType();
   sBoot = pm.getUInt("boot", 0) + 1;
   pm.putUInt("boot", sBoot);
 

@@ -2,7 +2,7 @@
 from ..extensions import db
 from ..models import (Channel, Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, PairingCode, Rollup, RollupDirty, Session, now)
-from . import commands, hub, incidents, ingest, notify
+from . import commands, devconfig, hub, incidents, ingest, notify
 
 HISTORY_MODELS = (Measurement, Rollup, RollupDirty, Session, Incident, Command, Notification,
                   NotificationRule, MeterViewer, Event)
@@ -80,6 +80,72 @@ def remove(device, user):
     device.info = ""
     device.last_state, device.last_reading, device.last_info = {}, {}, {}
     db.session.commit()
+
+
+# History that belongs to the hardware (moved to the archive). The meter's name, linked users and
+# notification options stay with the live meter: it is still the same place / customer.
+HW_HISTORY_MODELS = (Measurement, Rollup, RollupDirty, Session, Incident, Command, Notification, Event)
+
+
+def hardware_changed(device, new_caps, new_sig):
+    """Different hardware / firmware type on the same ESP32 (same Device ID), e.g. PZEM AC -> rbAmp 2ch.
+    The old history is kept for reference as an archived meter '<ID>~n'; the live meter starts clean
+    with the right config for the new type. Returns the archive (None if there was no history)."""
+    old_sig = device.hw_sig
+    t = now()
+    has_history = any(m.query.filter_by(device_fk=device.id).first() is not None
+                      for m in (Measurement, Session, Incident))  # (server events alone are not history)
+    archived = None
+    if has_history:
+        close_ongoing_incidents(device, "hardware_changed")
+        _close_open_session(device, "hardware")
+        n = 1
+        while Device.query.filter_by(device_id=f"{device.device_id}~{n}").first() is not None:
+            n += 1
+        old_label = devconfig.hw_label(old_sig)
+        archived = Device(device_id=f"{device.device_id}~{n}", name=f"{device.name} [{old_label}]"[:40],
+                          info=device.info, caps=device.caps, cfg=device.cfg, fw=device.fw, hw=device.hw,
+                          hw_sig=old_sig, pair_gen=device.pair_gen, paired_at=device.paired_at,
+                          last_seen_at=device.last_seen_at, removed_at=t, last_reading=device.last_reading,
+                          tare_a=device.tare_a, tare_w=device.tare_w,
+                          last_state={"archive": {"reason": "hardware", "at": t, "from": old_label,
+                                                  "to": devconfig.hw_label(new_sig), "live": device.id}})
+        db.session.add(archived)
+        db.session.flush()
+        for c in device.channels:
+            archived.channels.append(Channel(idx=c.idx, label=c.label))
+        for model in HW_HISTORY_MODELS:
+            model.query.filter_by(device_fk=device.id).update({"device_fk": archived.id}, synchronize_session=False)
+        for v in MeterViewer.query.filter_by(device_fk=device.id).all():  # viewers keep seeing the old history
+            db.session.add(MeterViewer(device_fk=archived.id, user_fk=v.user_fk))
+    # Live meter: new type, fresh config and history. A new pairing generation keeps the new session
+    # numbers (which restart on the meter) apart from anything older.
+    device.caps = dict(new_caps)
+    device.hw_sig = new_sig
+    device.pair_gen = (device.pair_gen or 1) + 1
+    n = devconfig.channel_count(device)
+    for c in list(device.channels):  # keep / reset the rows that still exist, drop extra ones
+        if c.idx >= n:
+            device.channels.remove(c)
+            db.session.delete(c)
+        else:
+            c.label = f"CH{c.idx + 1}"
+    have = {c.idx for c in device.channels}
+    for i in range(n):
+        if i not in have:
+            device.channels.append(Channel(idx=i, label=f"CH{i + 1}"))
+    device.cfg = devconfig.default_for(device)
+    device.cfg_ver_wanted = (device.cfg_ver_wanted or 0) + 1
+    device.cfg_ver_applied = 0
+    device.cfg_error = None
+    device.tare_a = device.tare_w = 0.0
+    device.last_state, device.last_reading, device.last_info = {}, {}, {}
+    ingest.server_event(device, "hardware_changed", {"from": old_sig, "to": new_sig,
+                                                     "archive": archived.device_id if archived else None})
+    msg = f"Hardware changed: {devconfig.hw_label(old_sig)} → {devconfig.hw_label(new_sig)}. Config reset to defaults"
+    msg += f"; the old history is kept for reference as {archived.device_id}." if archived else "."
+    notify.notify(device, "meter_status", msg)
+    return archived
 
 
 def resync_as_new(device):

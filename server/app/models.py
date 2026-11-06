@@ -80,6 +80,7 @@ class Device(db.Model):
     secret_hash = db.Column(db.String(255))
     fw = db.Column(db.String(32), default="")
     hw = db.Column(db.String(64), default="")
+    hw_sig = db.Column(db.String(40))  # meter type from its firmware (devconfig.hw_signature)
     proto = db.Column(db.Integer, default=1)
     caps = db.Column(db.JSON, nullable=False, default=dict)
     paired_at = db.Column(db.Integer)

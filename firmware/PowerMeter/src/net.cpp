@@ -463,6 +463,8 @@ static void sendHello() {
   }
   JsonObject caps = doc["caps"].to<JsonObject>();
   caps["kind"] = METER_KIND;
+  caps["sensor"] = METER_DC ? "pzem017" : "pzem004t";
+  caps["mc"] = false;  // single-channel firmware (the server detects a change of hardware type)
   caps["channels"] = SENSOR_CHANNELS;
   caps["rtc"] = (bool)HAS_DS3231;
   caps["amp_rating"] = SENSOR_AMP_RATING;

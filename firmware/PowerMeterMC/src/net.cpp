@@ -303,7 +303,7 @@ static void fillCaps(JsonObject caps) {
   caps["mc"] = true;
   caps["sensor"] = "rbamp";
   caps["variant"] = g.variant;
-  caps["channels"] = n;
+  if (g.nch) caps["channels"] = n;  // unknown until the module answers (the server then waits)
   caps["relays"] = min<int>(n, RELAY_COUNT);
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;

@@ -91,11 +91,11 @@
 
 {% if removed %}
 <details class="mt-4">
-  <summary class="text-body-secondary small">Unsynced meters with kept history ({{ removed|length }})</summary>
+  <summary class="text-body-secondary small">Unsynced / archived meters with kept history ({{ removed|length }})</summary>
   <ul class="list-group mt-2">
     {% for d in removed %}
     <a class="list-group-item list-group-item-action small" href="{{ url_for('meters.info', pk=d.id) }}">
-      {{ d.name }} <span class="text-body-secondary">({{ d.device_id }}) · unsynced {{ d.removed_at|dt }}</span></a>
+      {{ d.name }} <span class="text-body-secondary">({{ d.device_id }}) · {{ 'archived (hardware changed)' if (d.last_state or {}).get('archive') else 'unsynced' }} {{ d.removed_at|dt }}</span></a>
     {% endfor %}
   </ul>
 </details>

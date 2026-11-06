@@ -162,9 +162,16 @@ def h_hello(conn, device, msg):
     except (TypeError, ValueError):
         device.proto = 1
     if isinstance(msg.get("caps"), dict):
-        caps = dict(device.caps or {})
-        caps.update(msg["caps"])
-        device.caps = caps
+        new_sig = devconfig.hw_signature(msg["caps"])
+        if device.hw_sig and new_sig and new_sig != device.hw_sig:
+            # Other hardware / firmware type on this ESP32: archive the old history, start clean.
+            from . import lifecycle
+            lifecycle.hardware_changed(device, msg["caps"], new_sig)
+        else:
+            caps = dict(device.caps or {})
+            caps.update(msg["caps"])
+            device.caps = caps
+            device.hw_sig = new_sig or device.hw_sig
         if devconfig.fit_channels(device):  # multi-channel meter: channel count known / changed
             device.cfg_ver_wanted = (device.cfg_ver_wanted or 0) + 1
             have = {c.idx for c in device.channels}

@@ -109,3 +109,22 @@ New session end reason `stopped` (End / End all).
 | `renew` | `{ch?}` | shared: the session; independent: that channel, or all channels without `ch` |
 | `end` | `{ch?}` | end the session(s) now (relay off until renewed) |
 | `reset_trip` | `{ch?}` | one channel, or all |
+
+## Changing the hardware on a meter
+
+The Device ID comes from the ESP32, so flashing another firmware type on the same board (PZEM AC, PZEM DC,
+rbAmp with N channels) keeps the same meter on the server. Both sides handle this automatically:
+
+- **Meter:** each firmware stores its type (`FW_TYPE`). A different type on first boot clears the old
+  sessions, kWh counters, relay / trip state and config. Wi-Fi, the admin login, the pairing, "disabled"
+  and the sequence numbers stay, so no re-setup or re-pairing is needed.
+- **Server:** every `hello` carries the type (`caps.kind`, `caps.mc`, `caps.channels`). If it differs from
+  the last one, the meter's history (readings, sessions, events, notifications) moves to an archived meter
+  **`<ID>~n`** named "<name> [old type]" under *Unsynced / archived meters*, kept for reference (viewers of
+  the meter can still open it). The live meter keeps its name, info, linked users and notification options,
+  gets the default config of the new type and a new pairing generation, and a **Meter status** notification
+  says what changed. A multi-channel meter whose module did not answer yet (channel count unknown) never
+  counts as a change.
+
+Example: PZEM AC → rbAmp 5 ch → PZEM DC → rbAmp 2 ch → PZEM AC leaves one live meter and four archives.
+

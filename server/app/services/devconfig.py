@@ -99,6 +99,28 @@ def default_cfg(n_channels=1):
 MC_MODES = ("shared", "independent")
 
 
+def hw_signature(caps):
+    """Meter type as reported by its firmware: AC / DC, single-channel PZEM or rbAmp with N channels.
+    A change means different hardware on the same ESP32 (same Device ID)."""
+    caps = caps or {}
+    kind = "dc" if caps.get("kind") == "dc" else "ac"
+    if caps.get("mc"):
+        try:
+            n = int(caps["channels"])
+        except (KeyError, TypeError, ValueError):
+            return None  # module not found yet: channel count unknown, do not decide anything
+        return f"{kind}-mc{n}"
+    return f"{kind}-1"
+
+
+def hw_label(sig):
+    """'AC (PZEM-004T)', 'DC (PZEM-017)', 'AC multi-channel, 2 ch' ..."""
+    sig = sig or "ac-1"
+    if "-mc" in sig:
+        return f"{sig.split('-')[0].upper()} multi-channel, {sig.split('-mc')[1]} ch"
+    return "DC (PZEM-017)" if sig.startswith("dc") else "AC (PZEM-004T)"
+
+
 def _mc_channel_default():
     return {"name": "", "amp_max": 0.0, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION,
             "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "auto": False}

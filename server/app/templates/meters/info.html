@@ -2,7 +2,12 @@
 {% from "_macros.html" import status_badge, kind_badge %}
 {% block title %}{{ d.name }} · PowerManager{% endblock %}
 {% block content %}
-{% if d.removed_at %}
+{% set arch = (d.last_state or {}).get('archive') %}
+{% if d.removed_at and arch %}
+<div class="alert alert-secondary"><i class="bi bi-archive me-1"></i>Archived on {{ d.removed_at|dt }}: the hardware of this meter changed
+  from <strong>{{ arch['from'] }}</strong> to <strong>{{ arch['to'] }}</strong>. This is the history of the old hardware, kept for reference.
+  {% if arch.get('live') %}<a href="{{ url_for('meters.info', pk=arch['live']) }}">Go to the live meter</a>{% endif %}</div>
+{% elif d.removed_at %}
 <div class="alert alert-secondary"><i class="bi bi-archive me-1"></i>This meter was unsynced on {{ d.removed_at|dt }}. History is kept for viewing.</div>
 {% elif d.disabled_at %}
 <div class="alert alert-warning d-flex flex-wrap align-items-center gap-2">

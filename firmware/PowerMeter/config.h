@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.6.2"
+#define FW_VERSION "0.6.3"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -20,6 +20,7 @@
 #define SENSOR_NAME "AC Power Sensor"
 #endif
 #define HW_INFO SENSOR_NAME " 1Chn"  // free text shown in "Get meter info" on the server
+#define FW_TYPE (METER_DC ? "pzem-dc" : "pzem-ac")  // stored on the meter: a different firmware type clears old state
 
 // ---------------------------------------------------------------- pins (check your board)
 #define PIN_PZEM_RX 5       // ESP32 RX  <- PZEM TX (DC: RS485 module RO / RXD)

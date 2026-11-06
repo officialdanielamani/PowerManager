@@ -74,6 +74,7 @@ def pair_device(body):
         device.last_state = {}
         device.last_seq = 0
 
+    device.hw_sig = devconfig.hw_signature(caps)
     secret = secrets.token_urlsafe(32)
     device.set_secret(secret)
     device.link_key = secrets.token_hex(16)  # mesh signing key (32 hex chars)
