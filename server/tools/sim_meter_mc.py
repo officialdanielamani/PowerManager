@@ -228,10 +228,6 @@ class MeterMC:
             if lim and a > lim and not self.st["tripped"][i]:
                 self.st["tripped"][i] = True
                 self.event("overcurrent", ch=i, val=round(a, 2), limit=lim)
-        if not self.st.get("started") and not self.disabled:
-            for s in range(self.slots()):
-                self.start_session(s)
-            self.st["started"] = True
         changed = False
         for s in range(self.slots()):
             ss = self.st["sess"][s]
@@ -263,6 +259,7 @@ class MeterMC:
         for i in range(self.n):
             st = self.st["sess"][self.slot_of(i)].get("status", "active")
             block = ("disabled" if self.disabled else "tripped" if self.st["tripped"][i] else
+                     "no_session" if not self.st["sess"][self.slot_of(i)].get("sid") else
                      st if st in ("quota", "expired") else "ended" if st == "ended" else None)
             on = self.st["want"][i] and block is None
             if on != self.relay_on[i] or block != self.block[i]:

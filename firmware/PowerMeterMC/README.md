@@ -35,6 +35,7 @@ by Markus Sattler; **ESP32S3 Dev Module**, USB CDC On Boot Enabled, Flash 4 MB, 
 | `RBAMP_CT_MODELS` | SCT-013 model per channel: 1 = 5 A, 2 = 10 A, 6 = 20 A, 3 = 30 A, 4 = 50 A, 7 = 60 A, 5 = 100 A, 0 = leave (CT-series modules) |
 | `RELAY_DRIVER` | `RELAY_XL9535` (XL9535 relay board) or `RELAY_PCF8574` (PCF8574 + SSRs / relay module) |
 | `RELAY_ADDRESS`, `RELAY_COUNT` | board address and number of relays (1/2/4/8) |
+| `RELAY_COUNT` > channels | the extra relays become **AUX relays** (manual ON / OFF only, not metered) |
 | `RELAY_ACTIVE_HIGH` | XL9535 boards: 1. PCF8574 driving low-side SSR / relay inputs: usually 0 |
 | `HAS_DS3231` | 1 (used in this project) |
 | `PIN_DRDY` | the DRDY pin (read on every 100 ms window when **Read data when DRDY** is ticked on the server) |

@@ -276,6 +276,11 @@ def action(pk):
         if device.is_mc:
             params["ch"] = ch or 0
         cmd, err = commands.issue(device, "relay", params, current_user)
+    elif act in ("aux_on", "aux_off"):  # AUX relay (multi-channel: relays beyond the channels)
+        i = body.get("i")
+        if not device.is_mc or not str(i).isdigit() or int(i) >= int((device.caps or {}).get("aux", 0) or 0):
+            return jsonify(ok=False, error="bad_aux", message="No such AUX relay."), 400
+        cmd, err = commands.issue(device, "aux", {"i": int(i), "on": act == "aux_on"}, current_user)
     elif act in ("renew", "end", "reset_trip", "send_now"):
         if act == "end" and not device.is_mc:
             return jsonify(ok=False, error="unknown", message="Unknown action"), 400
@@ -337,6 +342,7 @@ def action(pk):
             "disabled": "This meter is disabled (read-only). Enable it first.",
             "quota_exceeded": "Relay ON blocked: kWh quota for this session is used up. Renew the session first.",
             "session_expired": "Relay ON blocked: session ended. Renew the session first.",
+            "no_session": "Relay ON blocked: no session yet. Press Renew Now to start one.",
             "tripped": "Relay ON blocked: over-current trip. Reset the trip first.",
             "offline": "The device is offline.",
         }

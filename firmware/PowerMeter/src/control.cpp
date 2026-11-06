@@ -224,6 +224,7 @@ bool setRelay(bool on, const char *src, const char *&err) {
   if (on) {
     if (g.disabled) err = "disabled";
     else if (g.tripped) err = "tripped";
+    else if (!g.sess.sid) err = "no_session";
     else if (g.sess.status == SESS_QUOTA) err = "quota_exceeded";
     else if (g.sess.status == SESS_EXPIRED || g.sess.status == SESS_ENDED) err = "session_expired";
     else err = nullptr;
@@ -477,8 +478,7 @@ static void noteRelaySwitch(const char *block) {
 
 static void checkRules(bool firstPass) {
   StateLock l;
-  // First session after pairing / factory reset starts with the first reading.
-  if (g.sess.sid == 0 && !g.disabled && (g.sensorEverOk || millis() > 15000)) startSession(false);
+  // No session starts on its own after pairing: the admin starts the first one with Renew.
 
   // Over-current (latched until reset).
   float ampNow = g.reading.a - (g.cfg.tare_limits ? g.cfg.tare_a : 0.0f);
@@ -562,6 +562,7 @@ static void checkRules(bool firstPass) {
   const char *block = nullptr;
   if (g.disabled) block = "disabled";
   else if (g.tripped) block = "tripped";
+  else if (!g.sess.sid) block = "no_session";  // paired, first session not started yet (Renew)
   else if (g.sess.status == SESS_QUOTA) block = "quota";
   else if (g.sess.status == SESS_EXPIRED) block = "expired";
   else if (g.sess.status == SESS_ENDED) block = "ended";

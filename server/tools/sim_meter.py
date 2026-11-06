@@ -90,8 +90,9 @@ class Meter:
         self.volt_override = None
         self.volt_out = False
         self.volt_bad = self.volt_good = 0
-        if not self.sess:
-            self.new_session(auto=False, reason=None)
+        if not self.sess:  # paired: no session until Renew (like the firmware)
+            self.sess = {"sid": 0, "start": None, "e0": self.st.get("e_total", 0.0), "status": "active"}
+            self.st["sess"] = self.sess
         save_state(args.state, self.st)
 
     # ------------------------------------------------------------ helpers
@@ -121,6 +122,8 @@ class Meter:
     def next_reset(self):
         s = self.cfg().get("sess") or {}
         mode = s.get("mode", "none")
+        if not self.sess.get("sid"):
+            return None  # no session yet
         if mode == "duration":
             return self.sess["start"] + int(s.get("dur_min", 1440)) * 60
         if mode == "daily":
@@ -135,7 +138,7 @@ class Meter:
 
     def end_session(self, reason):
         # like the firmware: session_end is sent once per session
-        if self.sess and not self.sess.get("ended"):
+        if self.sess and self.sess.get("sid") and not self.sess.get("ended"):
             self.sess["ended"] = True
             self.event("session_end", sid=self.sess["sid"], reason=reason, kwh=round(self.session_kwh(), 4))
 
@@ -165,6 +168,8 @@ class Meter:
             return "disabled"
         if self.tripped:
             return "tripped"
+        if not self.sess.get("sid"):
+            return "no_session"
         if self.session_status() == "quota":
             return "quota"
         if self.session_status() == "expired":

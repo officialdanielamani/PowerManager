@@ -2,7 +2,7 @@
 // ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
 #pragma once
 
-#define FW_VERSION "0.7.1"
+#define FW_VERSION "0.7.2"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -109,6 +109,8 @@
 // "Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)".
 #define OUTBOX_SEGMENT_ITEMS 50   // items per segment file (~8 KB)
 #define OUTBOX_SEGMENTS 10        // max segments -> keeps the newest ~500 items (min 30 required)
+#define OUTBOX_RAM_ITEMS 200       // readings wait in RAM until acknowledged; flash only when offline
+#define OUTBOX_RAM_MAX_AGE_MS 30000  // ...or still unsent after this long
 #define OUTBOX_BATCH_MAX 50       // items per "tel" message
 
 // ---------------------------------------------------------------- defaults

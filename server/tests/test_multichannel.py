@@ -47,13 +47,19 @@ def test_config_form_independent(app, admin, mc):
     assert admin.get(f"/meters/{mc}/configure").status_code == 200
 
 
-def test_drdy_off_keeps_5s_minimum(app, admin, mc):
+def test_read_interval_limits(app, admin, mc):
     with app.app_context():
         d = db.session.get(Device, mc)
         _, errors = devconfig.parse_form(_form(read_s="1"), d)
-        assert any("Read data every" in e for e in errors)
-        _, errors = devconfig.parse_form(_form(read_s="1", drdy="on"), d)
+        assert not errors  # 1 s for every meter
+        _, errors = devconfig.parse_form(_form(read_s="0.5"), d)
+        assert errors  # under 1 s only with DRDY
+        _, errors = devconfig.parse_form(_form(read_s="0.2", drdy="on"), d)
+        assert any("send every 30 s or less" in e for e in errors)  # 0.2 s readings: send often
+        cfg, errors = devconfig.parse_form(_form(read_s="0.2", report_s="10", drdy="on"), d)
         assert not errors
+        doc = devconfig.to_device(cfg, 1)["cfg"]
+        assert doc["read_ms"] == 200 and doc["read_s"] == 1 and doc["drdy"] is True
 
 
 def test_independent_sessions_quota_and_display(app, admin, mc):
@@ -139,3 +145,54 @@ def test_telegram_lists_channels(app, admin, mc):
         d.last_state = {"relay": [{"i": 0, "on": True}, {"i": 1, "on": False}], "sess": {"sid": 1, "kwh": 0.3}}
         txt = bot.reading_text(d, User.query.filter_by(username="admin").one())
     assert "CH1 Kitchen: 230.0 W" in txt and "CH2: 115.0 W" in txt and "OFF" in txt
+
+
+def test_subsecond_readings_keep_ms(app, admin, mc):
+    from app.models import Measurement
+    from app.services import history
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        t = now() - 30
+        items = [{"seq": 10 + k, "ts": t, "ms": k * 200, "tv": 1, "ch": [{"i": 0, "v": 230, "a": 1, "w": 230 + k}]}
+                 for k in range(5)]
+        ingest.handle(FakeConn(), d, {"t": "tel", "items": items})
+        rows = Measurement.query.filter_by(device_fk=d.id).order_by(Measurement.seq).all()
+        assert [r.ms for r in rows] == [0, 200, 400, 600, 800]
+        _, header, out = history.csv_rows(d.id, 0, t - 5, t + 5)
+        assert header[-1] == "ms" and [r[1][-1] for r in out] == [0, 200, 400, 600, 800]
+
+
+def test_aux_relays(app, admin):
+    from app.routes.main import meter_summary
+    caps = dict(CAPS, aux=2)  # 2 channels on a 4-relay board: relays 3 and 4 are AUX relays
+    assert _pair_mc(admin, _code(admin), "MCAUX001").status_code == 200
+    with app.app_context():
+        d = Device.query.filter_by(device_id="MCAUX001").one()
+        d.caps = caps
+        assert devconfig.fit_channels(d) and len(d.cfg["aux"]) == 2
+        db.session.commit()
+        pk = d.id
+    r = admin.post(f"/meters/{pk}/configure", data=_form(aux_name_0="Pump", aux_name_1="Fan"))
+    assert r.status_code in (200, 302)
+    assert admin.post(f"/meters/{pk}/action", json={"action": "aux_on", "i": 1}).get_json()["ok"]
+    assert admin.post(f"/meters/{pk}/action", json={"action": "aux_on", "i": 2}).status_code == 400  # no AUX3
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        assert devconfig.to_device(d.cfg, 1)["cfg"]["aux"] == [{"i": 0, "name": "Pump"}, {"i": 1, "name": "Fan"}]
+        assert ("aux", {"i": 1, "on": True}) in [(c.c, c.params) for c in Command.query.filter_by(device_fk=pk)]
+        ingest.handle(FakeConn(), d, {"t": "state", "mode": "shared", "relay": [{"i": 0, "on": False, "tripped": False}],
+                                      "sess": {"sid": 0, "status": "active"},
+                                      "aux": [{"i": 0, "relay": 3, "on": False}, {"i": 1, "relay": 4, "on": True}]})
+        with app.test_request_context():
+            m = meter_summary(d, show_price=False)
+        assert m["aux"][1] == {"i": 1, "relay": 4, "on": True, "name": "AUX2 Fan"}
+        assert m["status"] == "none"  # paired, no session until Renew
+
+
+def test_no_session_blocks_relay_on(app, admin, mc):
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        d.last_state = {"mode": "shared", "relay": [{"i": 0, "tripped": False}], "sess": {"sid": 0, "status": "active"}}
+        db.session.commit()
+    r = admin.post(f"/meters/{mc}/action", json={"action": "relay_on", "ch": 0}).get_json()
+    assert not r["ok"] and r["error"] == "no_session" and "Renew" in r["message"]

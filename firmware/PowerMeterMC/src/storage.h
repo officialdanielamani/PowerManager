@@ -52,6 +52,8 @@ void saveFlags(uint8_t wantMask, uint8_t trippedMask);
 void loadEnergy(double e[MC_MAX_CH]);
 void saveEnergy(const double e[MC_MAX_CH]);
 uint8_t loadChannels();          // channel count of the module seen last time (0 = never)
+uint8_t loadAux();               // AUX relays wanted ON (bit mask)
+void saveAux(uint8_t mask);
 void saveChannels(uint8_t n);
 bool loadDisabled();
 void saveDisabled(bool disabled);

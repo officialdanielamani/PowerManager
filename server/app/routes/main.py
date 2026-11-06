@@ -32,6 +32,8 @@ def meter_summary(d, show_price=None):
             status = "ended_" + str(sess.get("end_reason") or "")
         if status == "active" and sess.get("over"):
             status = "over"  # kWh limit passed but "End session when kWh limit is reached" is off
+        if sess and not sess.get("sid"):
+            status = "none"  # paired, the first session is started with Renew
     # Current session for the timer: start from the meter, end from our session record.
     cur = None
     if isinstance(sess.get("sid"), int):
@@ -153,7 +155,12 @@ def _mc_summary(d, base, show_price):
                 costs.append((cost, cur))
             maxes.append(float(ss.get("max") or 0))
         channels.append(c)
-    out = {"mc": True, "mode": d.mc_mode, "channels": channels, "drdy": bool(cfg.get("drdy")),
+    names = cfg.get("aux") or []
+    aux = [{"i": a.get("i"), "relay": a.get("relay"), "on": bool(a.get("on")),
+            "name": f"AUX{a.get('i', 0) + 1}" + (f" {names[a['i']].get('name')}" if isinstance(a.get("i"), int)
+                                                  and a["i"] < len(names) and names[a["i"]].get("name") else "")}
+           for a in st.get("aux") or [] if isinstance(a, dict)]
+    out = {"mc": True, "mode": d.mc_mode, "channels": channels, "aux": aux, "drdy": bool(cfg.get("drdy")),
            "relay_on": any(c["relay_on"] for c in channels)}
     if indep:
         statuses = {c["status"] for c in channels}

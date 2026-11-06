@@ -73,7 +73,7 @@ def query(device_pk, ch, start, end):
                     if last_e is not None and r.e >= last_e:
                         cum += r.e - last_e
                     last_e = r.e
-            p = {"t": chunk[-1].ts, "kwh_cum": round(cum, 4)}
+            p = {"t": chunk[-1].ts + (chunk[-1].ms or 0) / 1000, "kwh_cum": round(cum, 4)}
             for f in ("v", "a", "w"):
                 vals = [getattr(r, f) for r in chunk if getattr(r, f) is not None]
                 p[f] = _r(sum(vals) / len(vals)) if vals else None
@@ -114,8 +114,8 @@ def csv_rows(device_pk, ch, start, end):
     retention_start = now() - settings.get_int("raw_retention_days", 90) * 86400
     if start >= retention_start:
         rows = _raw(device_pk, ch, start, end)
-        header = ["V", "A", "W", "PF", "Hz", "energy_kWh", "time_estimated"]
-        return "raw", header, [(r.ts, [r.v, r.a, r.w, r.pf, r.hz, r.e, int(r.time_estimated)]) for r in rows]
+        header = ["V", "A", "W", "PF", "Hz", "energy_kWh", "time_estimated", "ms"]
+        return "raw", header, [(r.ts, [r.v, r.a, r.w, r.pf, r.hz, r.e, int(r.time_estimated), r.ms]) for r in rows]
     period = "h" if end - start <= 730 * 86400 else "d"
     rows = _rollups(device_pk, ch, period, start, end)
     header = ["samples", "V_min", "V_max", "V_avg", "A_min", "A_max", "A_avg",

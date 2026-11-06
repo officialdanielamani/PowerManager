@@ -126,14 +126,23 @@ var PM = (function () {
           (ind ? btn('renew', 'btn-outline-primary', 'bi-arrow-repeat', 'Renew', 'Start a new session on ' + c.name + '?') +
                  btn('end', 'btn-outline-danger', 'bi-stop-circle', 'End', 'End the session of ' + c.name + ' now? Its relay stays off until renewed.') : '') +
           '</div>' : '') + '</div></div>';
-    }).join('') + '</div>';
+    }).join('') + '</div>' + (m.aux && m.aux.length ?
+      '<div class="mt-3"><div class="fw-semibold small mb-1">AUX relays <span class="fw-normal text-body-secondary">(extra relays: not metered, manual ON / OFF only, not tied to limits or sessions)</span></div><div class="row g-2">' +
+      m.aux.map(function (a) {
+        return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 d-flex align-items-center gap-2">' +
+          '<span class="fw-semibold text-truncate">' + esc(a.name) + '</span><span class="small text-body-secondary">relay ' + esc(a.relay) + '</span>' +
+          '<span class="ms-auto">' + chBadge({relay_on: a.on}) + '</span>' +
+          (admin ? '<button class="btn btn-sm btn-success" data-mc-action="aux_on" data-i="' + a.i + '">ON</button>' +
+                   '<button class="btn btn-sm btn-outline-secondary" data-mc-action="aux_off" data-i="' + a.i + '">OFF</button>' : '') +
+          '</div></div>';
+      }).join('') + '</div></div>' : '');
   }
 
   function updateMeterCard(root, m) {
     set(root, 'online', function (el) { el.className = 'pm-dot ' + (m.online ? 'on' : 'off'); el.title = m.online ? 'Online' : 'Offline'; });
     set(root, 'w', function (el) { el.textContent = m.w == null ? '–' : m.w; });
     var WHY = {disabled: 'disabled', tripped: 'trip', quota: 'kWh limit', expired: 'session ended', ended: 'session ended', offline: 'offline',
-               voltage: 'voltage', tamper: 'tamper', sensor: 'sensor error'};
+               voltage: 'voltage', tamper: 'tamper', sensor: 'sensor error', no_session: 'no session'};
     set(root, 'relay', function (el) {
       el.className = 'badge rounded-pill ' + (m.relay_on ? 'text-bg-success' : 'text-bg-secondary');
       el.textContent = 'Relay ' + (m.relay_on ? 'ON' : 'OFF' + (m.relay_block && WHY[m.relay_block] ? ' · ' + WHY[m.relay_block] : ''));
@@ -289,7 +298,10 @@ var PM = (function () {
       var b = e.target.closest('[data-mc-action]');
       if (!b || (b.dataset.confirm && !confirm(b.dataset.confirm))) return;
       b.disabled = true;
-      post(opt.action, {action: b.dataset.mcAction, ch: +b.dataset.ch}).then(function (r) {
+      var body = {action: b.dataset.mcAction};
+      if (b.dataset.ch != null) body.ch = +b.dataset.ch;
+      if (b.dataset.i != null) body.i = +b.dataset.i;
+      post(opt.action, body).then(function (r) {
         toast(r.message || (r.ok ? 'Done' : r.error), r.ok ? (r.queued ? 'info' : 'success') : 'danger');
         setTimeout(function () {
           fetch(opt.live, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(onLive).catch(function () {});

@@ -50,7 +50,7 @@ static void checkFirmwareType() {
   if (prev.length()) {
     static const char *KEYS[] = {"cfg", "s_sid", "s_start", "s_e0", "s_stat", "s_over", "s_end", "s_stop", "s_tare",
                                  "want", "tripped", "wantm", "tripm", "energy", "nch", "sidc", "started",
-                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6"};
+                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6", "auxm"};
     for (const char *k : KEYS) pm.remove(k);
     Serial.printf("[store] firmware type changed (%s -> %s): old sessions / kWh / relay state cleared\n",
                   prev.c_str(), FW_TYPE);
@@ -146,13 +146,13 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 101) return false;  // older layout: use defaults, the server re-sends the config
+  if (b.version != 102) return false;  // older layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 101;
+  b.version = 102;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }
@@ -203,6 +203,10 @@ void loadEnergy(double e[MC_MAX_CH]) {
 }
 void saveEnergy(const double e[MC_MAX_CH]) { pm.putBytes("energy", e, sizeof(double) * MC_MAX_CH); }
 uint8_t loadChannels() { return pm.getUChar("nch", 0); }
+uint8_t loadAux() { return pm.getUChar("auxm", 0); }
+void saveAux(uint8_t mask) {
+  if (pm.getUChar("auxm", 0) != mask) pm.putUChar("auxm", mask);
+}
 void saveChannels(uint8_t n) {
   if (pm.getUChar("nch", 0) != n) pm.putUChar("nch", n);
 }

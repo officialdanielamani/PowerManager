@@ -174,6 +174,7 @@ class Measurement(db.Model):
     pf = db.Column(db.Float)
     hz = db.Column(db.Float)
     e = db.Column(db.Float)
+    ms = db.Column(db.Integer)  # milliseconds within ts, for sub-second readings (DRDY); else null
     time_estimated = db.Column(db.Boolean, nullable=False, default=False)
 
     __table_args__ = (

@@ -365,6 +365,7 @@ static void hRelay() {
     String msg = !strcmp(err, "disabled") ? "Blocked: this meter is disabled by the server."
                : !strcmp(err, "tripped") ? "Blocked: over-current trip. Reset the trip first."
                : !strcmp(err, "quota_exceeded") ? "Blocked: kWh quota for this session is used up."
+               : !strcmp(err, "no_session") ? "Blocked: no session yet. Start one with Renew on the server."
                : "Blocked: session ended. Renew it on the server.";
     return sendErr(409, msg);
   }

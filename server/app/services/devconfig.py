@@ -23,7 +23,9 @@ NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
 
 REPORT_MIN, REPORT_MAX = 10, 3600   # send to the server every ... s
-READ_MIN = 5                        # record a reading every ... s (read <= send)
+READ_MIN = 1                        # record a reading every ... s (read <= send)
+READ_MIN_DRDY = 0.2                 # multi-channel meter reading on DRDY: down to 0.2 s (rbAmp window 100-200 ms)
+FAST_SEND_MAX = 30                  # readings under 1 s: send at least every 30 s (they wait in the meter's RAM)
 
 # What a meter does when a limit / protection triggers. Same three choices everywhere.
 #   run  - session runs as usual (only an event + notification)
@@ -133,9 +135,18 @@ def default_for(device):
     if device.is_mc:
         cfg.update({"mode": "shared", "drdy": False, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION})
         cfg["ch"] = [_mc_channel_default() for _ in range(n)]
+        cfg["aux"] = [{"name": ""} for _ in range(aux_count(device))]
         for k in ("tare_a", "tare_w", "tare_limits"):  # the clamps measure only the load
             cfg.pop(k, None)
     return cfg
+
+
+def aux_count(device):
+    """AUX relays of a multi-channel meter: relays on the board beyond the measuring channels."""
+    try:
+        return max(0, int((device.caps or {}).get("aux", 0) or 0)) if device.is_mc else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def fit_channels(device):
@@ -146,7 +157,7 @@ def fit_channels(device):
     n = channel_count(device)
     cfg = dict(device.cfg or default_for(device))
     chans = list(cfg.get("ch") or [])
-    if len(chans) == n and "mode" in cfg:
+    if len(chans) == n and "mode" in cfg and len(cfg.get("aux") or []) == aux_count(device):
         return False
     if "mode" not in cfg:  # config made before the meter said it is multi-channel
         base = default_for(device)
@@ -156,6 +167,7 @@ def fit_channels(device):
                  for c in chans]
     chans = (chans + [_mc_channel_default() for _ in range(n)])[:n]
     cfg["ch"] = chans
+    cfg["aux"] = (list(cfg.get("aux") or []) + [{"name": ""} for _ in range(aux_count(device))])[:aux_count(device)]
     device.cfg = cfg
     return True
 
@@ -204,9 +216,6 @@ def _parse_mc(form, device, cfg, errors):
     mode = form.get("mode", "shared")
     cfg["mode"] = mode if mode in MC_MODES else "shared"
     cfg["drdy"] = form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", True))
-    if cfg["drdy"]:  # DRDY: raw readings can be recorded every second
-        cfg["read_s"] = _num(form, "read_s", int, 1, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
-        errors[:] = [e for e in errors if not e.startswith("Read data every (s): must be between 5")]
     cfg["kwh_max"] = _num(form, "kwh_max", float, 0, 100000, "Max kWh (all channels)", errors, 0.0)
     a = form.get("kwh_action", DEFAULT_KWH_ACTION)
     cfg["kwh_action"] = a if a in KWH_ACTIONS else DEFAULT_KWH_ACTION
@@ -226,6 +235,14 @@ def _parse_mc(form, device, cfg, errors):
         c.update(_parse_sess(form, f"_{i}", errors, label))
         chans.append(c)
     cfg["ch"] = chans
+    aux = []
+    for j in range(aux_count(device)):
+        name = (form.get(f"aux_name_{j}") or "").strip()[:20]
+        if any(ch in name for ch in "<>\"'&"):
+            errors.append(f"AUX{j + 1}: name: letters, numbers and spaces only")
+            name = ""
+        aux.append({"name": name})
+    cfg["aux"] = aux
     for k in ("tare_a", "tare_w", "tare_limits"):
         cfg.pop(k, None)
 
@@ -235,7 +252,16 @@ def parse_form(form, device):
     errors = []
     cfg = default_for(device)
     cfg["report_s"] = _num(form, "report_s", int, REPORT_MIN, REPORT_MAX, "Send data every (s)", errors, 60)
-    cfg["read_s"] = _num(form, "read_s", int, READ_MIN, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
+    drdy = device.is_mc and form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", (device.caps or {}).get("rdy", True)))
+    if drdy:
+        cfg["read_s"] = round(_num(form, "read_s", float, READ_MIN_DRDY, REPORT_MAX, "Read data every (s)", errors,
+                                   float(cfg["report_s"])), 1)
+        if cfg["read_s"] == int(cfg["read_s"]):
+            cfg["read_s"] = int(cfg["read_s"])
+        if cfg["read_s"] < 1 and cfg["report_s"] > FAST_SEND_MAX:
+            errors.append(f"Readings under 1 s: send every {FAST_SEND_MAX} s or less")
+    else:
+        cfg["read_s"] = _num(form, "read_s", int, READ_MIN, REPORT_MAX, "Read data every (s)", errors, cfg["report_s"])
     if cfg["read_s"] > cfg["report_s"]:
         errors.append("Read data every: must not be longer than Send every")
     cfg["offline_off"] = form.get("offline_off") == "on"
@@ -303,7 +329,8 @@ def to_device(cfg, ver):
     if "mode" in cfg:  # multi-channel meter (docs/multichannel.md)
         return {"ver": ver, "cfg": {
             "report_s": int(cfg.get("report_s", 60)),
-            "read_s": int(cfg.get("read_s", cfg.get("report_s", 60))),
+            "read_s": max(1, int(-(-float(cfg.get("read_s", cfg.get("report_s", 60))) // 1))),
+            "read_ms": int(round(float(cfg.get("read_s", cfg.get("report_s", 60))) * 1000)),
             "drdy": bool(cfg.get("drdy", cfg.get("rdy"))),
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "mode": cfg.get("mode", "shared"),
@@ -319,6 +346,7 @@ def to_device(cfg, ver):
             "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
                     "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
                     "sess": _sess_doc(c)} for i, c in enumerate(cfg.get("ch", []))],
+            "aux": [{"i": j, "name": a.get("name", "")} for j, a in enumerate(cfg.get("aux") or [])],
         }}
     sess = _sess_doc(cfg)
     return {

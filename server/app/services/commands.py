@@ -3,7 +3,7 @@ from ..extensions import db
 from ..models import Command, now
 from . import hub
 
-KNOWN = {"relay", "renew", "end", "send_now", "reset_trip", "get_state", "remove", "disable", "enable", "get_info"}
+KNOWN = {"relay", "aux", "renew", "end", "send_now", "reset_trip", "get_state", "remove", "disable", "enable", "get_info"}
 QUEUE_MAX_AGE_S = 7 * 86400
 
 
@@ -29,7 +29,10 @@ def relay_block_reason(device, ch=None):
             return "tripped"
     elif st.get("tripped"):
         return "tripped"
-    status = session_state(device, ch).get("status")
+    sess = session_state(device, ch)
+    if st and sess and not sess.get("sid"):
+        return "no_session"
+    status = sess.get("status")
     if status == "quota":
         return "quota_exceeded"
     if status in ("expired", "ended"):
@@ -50,8 +53,8 @@ def issue(device, c, params=None, user=None):
     if c not in KNOWN:
         return None, "unknown_cmd"
     params = params or {}
-    if device.disabled_at and c in ("renew", "end", "relay", "reset_trip"):
-        if c != "relay" or params.get("on"):
+    if device.disabled_at and c in ("renew", "end", "relay", "aux", "reset_trip"):
+        if c not in ("relay", "aux") or params.get("on"):
             return None, "disabled"
     if c == "relay" and params.get("on"):
         reason = relay_block_reason(device, params.get("ch"))
@@ -64,6 +67,10 @@ def issue(device, c, params=None, user=None):
         # Only the latest relay command matters.
         for old in Command.query.filter_by(device_fk=device.id, c="relay", sent_at=None, cancelled=False).all():
             if (old.params or {}).get("ch") == params.get("ch"):  # per channel on multi-channel meters
+                old.cancelled = True
+    if c == "aux":  # only the latest command per AUX relay matters
+        for old in Command.query.filter_by(device_fk=device.id, c="aux", sent_at=None, cancelled=False).all():
+            if (old.params or {}).get("i") == params.get("i"):
                 old.cancelled = True
     cmd = Command(device_fk=device.id, c=c, params=params,
                   created_by=user.id if user else None)

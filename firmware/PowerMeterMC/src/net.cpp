@@ -222,8 +222,10 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   m.report_s = report;
   m.drdy = c["drdy"] | false;
   int readS = c["read_s"] | report;
-  if (readS < (m.drdy ? 1 : 5) || readS > report) { err = "read_s"; return false; }
-  m.read_s = readS;
+  long readMs = c["read_ms"] | (long)readS * 1000L;  // sub-second with DRDY (server sends read_ms)
+  if (readMs < (m.drdy ? 200 : 1000) || readMs > (long)report * 1000L) { err = "read_ms"; return false; }
+  m.read_ms = readMs;
+  m.read_s = (readMs + 999) / 1000;
   int off = c["offline_off_min"] | 0;
   if (off < 0 || off > 1440) { err = "offline_off_min"; return false; }
   m.offline_off_min = off;
@@ -262,6 +264,10 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
     cc.kwh_max = k;
     cc.kwh_action = kwhAction(ch["kwh_action"] | "hold");
     if (!parseSess(ch["sess"], cc.sess, err, "ch.sess")) return false;
+  }
+  for (JsonObject a : c["aux"].as<JsonArray>()) {
+    int i = a["i"] | -1;
+    if (i >= 0 && i < 8) strlcpy(m.aux_name[i], a["name"] | "", sizeof(m.aux_name[i]));
   }
   out = m;
   return true;
@@ -307,6 +313,7 @@ static void fillCaps(JsonObject caps) {
   caps["relays"] = min<int>(n, RELAY_COUNT);
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;
+  caps["aux"] = auxCount();  // AUX relays (relays beyond the channels)
   caps["rtc"] = (bool)HAS_DS3231;
   float maxA = 0;
   JsonArray r = caps["ratings"].to<JsonArray>();
@@ -598,6 +605,8 @@ static void handleCommand(JsonObject m) {
     if (!ok) led::flash(led::FLASH_REJECT);
   } else if (!strcmp(c, "renew")) {
     control::renew(ch, "manual");
+  } else if (!strcmp(c, "aux")) {
+    ok = control::setAux(m["i"] | 0, m["on"] | false, "server", err);
   } else if (!strcmp(c, "end")) {
     control::endSessions(ch);
   } else if (!strcmp(c, "send_now")) {

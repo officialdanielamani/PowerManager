@@ -43,6 +43,7 @@ static void loadState() {
     g.ch[i].e = e[i];
   }
   g.disabled = store::loadDisabled();
+  g.auxWant = store::loadAux();
 }
 
 static void printBanner() {

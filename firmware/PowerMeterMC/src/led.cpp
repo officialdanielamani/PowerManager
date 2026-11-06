@@ -100,7 +100,7 @@ void task(void *) {
         st = SESS_ACTIVE;
         for (uint8_t i = 0; i < g.nch; i++) tripped |= g.ch[i].tripped;   // any channel
         for (uint8_t i = 0; i < sessSlots(); i++)
-          if (g.sess[i].status != SESS_ACTIVE) st = g.sess[i].status;        // any session ended
+          if (!g.sess[i].sid || g.sess[i].status != SESS_ACTIVE) st = g.sess[i].sid ? g.sess[i].status : SESS_ENDED;  // any ended / none yet
         tamper = g.tamper;
         ac = g.ac;
         net = g.net;

@@ -199,7 +199,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (report < 10 || report > 3600) { err = "report_s"; return false; }
   m.report_s = report;
   int readS = c["read_s"] | report;  // older servers: one reading per send
-  if (readS < 5 || readS > report) { err = "read_s"; return false; }
+  if (readS < 1 || readS > report) { err = "read_s"; return false; }
   m.read_s = readS;
   int off = c["offline_off_min"] | 0;
   if (off < 0 || off > 1440) { err = "offline_off_min"; return false; }

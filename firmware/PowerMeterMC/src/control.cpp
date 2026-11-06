@@ -1,6 +1,7 @@
 #include "control.h"
 
 #include <atomic>
+#include <sys/time.h>
 
 #include "../config.h"
 #include "outbox.h"
@@ -31,7 +32,10 @@ static bool indep() { return g.cfg.mode == MODE_INDEPENDENT; }
 
 static void stampTime(JsonDocument &doc) {
   if (timekeep::valid()) {
-    doc["ts"] = timekeep::now();
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    doc["ts"] = (uint32_t)tv.tv_sec;
+    if (g.cfg.read_ms % 1000) doc["ms"] = (uint16_t)(tv.tv_usec / 1000);  // sub-second readings (DRDY)
     doc["tv"] = 1;
   } else {
     doc["ts"] = millis() / 1000;  // uptime; server converts using hello.up
@@ -238,6 +242,7 @@ bool setRelay(uint8_t ch, bool on, const char *src, const char *&err) {
     SessStatus st = g.sess[slotOf(ch)].status;
     if (g.disabled) err = "disabled";
     else if (g.ch[ch].tripped) err = "tripped";
+    else if (!g.sess[slotOf(ch)].sid) err = "no_session";
     else if (st == SESS_QUOTA) err = "quota_exceeded";
     else if (st == SESS_EXPIRED || st == SESS_ENDED) err = "session_expired";
     if (err) return false;
@@ -256,6 +261,39 @@ bool setRelay(uint8_t ch, bool on, const char *src, const char *&err) {
       o["on"] = c->on;
       o["src"] = c->src;
     }, &ctx);
+    bump();
+  }
+  return true;
+}
+
+bool setAux(uint8_t i, bool on, const char *src, const char *&err) {
+  StateLock l;
+  err = nullptr;
+  if (i >= auxCount()) {
+    err = "bad_aux";
+    return false;
+  }
+  if (on && g.disabled) {
+    err = "disabled";
+    return false;
+  }
+  uint8_t m = on ? (g.auxWant | (1 << i)) : (g.auxWant & ~(1 << i));
+  if (m != g.auxWant) {
+    g.auxWant = m;
+    store::saveAux(m);
+    struct Ctx {
+      uint8_t i, relay;
+      bool on;
+      const char *src;
+    } ctx = {i, (uint8_t)(g.nch + i + 1), on, src};
+    emitEvent("aux_relay", [](JsonObject o, void *p) {
+      Ctx *c = (Ctx *)p;
+      o["i"] = c->i;
+      o["relay"] = c->relay;
+      o["on"] = c->on;
+      o["src"] = c->src;
+    }, &ctx);
+    Serial.printf("[relay] AUX%u (relay %u) %s\n", i + 1, g.nch + i + 1, on ? "ON" : "OFF");
     bump();
   }
   return true;
@@ -354,6 +392,15 @@ void stateJson(JsonObject o) {
   if (g.voltOut) o["volt_out"] = true;
   if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
   if (!g.nch) o["no_sensor"] = true;
+  if (auxCount()) {
+    JsonArray ax = o["aux"].to<JsonArray>();
+    for (uint8_t j = 0; j < auxCount(); j++) {
+      JsonObject a = ax.add<JsonObject>();
+      a["i"] = j;
+      a["relay"] = g.nch + j + 1;
+      a["on"] = (bool)(g.auxWant & (1 << j)) && !g.disabled;
+    }
+  }
   if (indep()) {
     JsonArray a = o["sessions"].to<JsonArray>();
     for (uint8_t i = 0; i < sessSlots(); i++) sessJson(a.add<JsonObject>(), i);
@@ -641,12 +688,7 @@ static void noteRelaySwitch(uint8_t ch, const char *block) {
 static void checkRules(bool firstPass) {
   StateLock l;
   uint8_t slots = sessSlots();
-  // First session(s) after pairing / factory reset start on their own.
-  if (!g.everStarted && !g.disabled && g.nch && (g.sensorEverOk || millis() > 15000)) {
-    for (uint8_t i = 0; i < slots; i++) startSession(i, false);
-    g.everStarted = true;
-    store::saveEverStarted(true);
-  }
+  // No session starts on its own after pairing: the admin starts the first one(s) with Renew.
 
   for (uint8_t s = 0; s < slots; s++) {
     SessionState &ss = g.sess[s];
@@ -737,6 +779,7 @@ static void checkRules(bool firstPass) {
     const char *block = meterBlock;
     if (!block) {
       if (c.tripped) block = "tripped";
+      else if (!g.sess[slotOf(i)].sid) block = "no_session";  // first session not started yet (Renew)
       else if (st == SESS_QUOTA) block = "quota";
       else if (st == SESS_EXPIRED) block = "expired";
       else if (st == SESS_ENDED) block = "ended";
@@ -760,11 +803,20 @@ static void checkRules(bool firstPass) {
     }
   }
   // Write the board on a change, and every 2 s anyway (recovers from a glitch on the relay board).
+  // AUX relays: only their manual ON / OFF (and OFF while the meter is disabled).
+  static uint8_t lastAux = 0xFF;
+  uint8_t aux = g.disabled ? 0 : g.auxWant;
+  if (aux != lastAux) {
+    lastAux = aux;
+    changed = true;
+  }
   if (changed || millis() - lastWriteMs >= 2000) {
     lastWriteMs = millis();
     uint8_t mask = 0;
     for (uint8_t i = 0; i < g.nch && i < 8; i++)
       if (g.ch[i].relayOn) mask |= 1 << i;
+    for (uint8_t j = 0; j < auxCount() && g.nch + j < 8; j++)
+      if (aux & (1 << j)) mask |= 1 << (g.nch + j);
     bool ok = relays::write(mask);
     if (!ok && !relayErrSent) {
       relayErrSent = true;
@@ -851,7 +903,7 @@ void task(void *) {
     {
       StateLock l;
       sendMs = (uint32_t)g.cfg.report_s * 1000UL;
-      readMs = (uint32_t)(g.cfg.read_s ? g.cfg.read_s : g.cfg.report_s) * 1000UL;
+      readMs = g.cfg.read_ms ? g.cfg.read_ms : (uint32_t)(g.cfg.read_s ? g.cfg.read_s : g.cfg.report_s) * 1000UL;
     }
     bool nowReq = reportNow_.exchange(false);
     if (nowReq || millis() - lastReportMs_ >= readMs) {

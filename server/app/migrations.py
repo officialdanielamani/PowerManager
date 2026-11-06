@@ -57,6 +57,8 @@ def run():
     _add_column("meter_session", "ch INTEGER")
     # v0.7.1: hardware change detection
     _add_column("device", "hw_sig VARCHAR(40)")
+    # v0.7.2: sub-second readings
+    _add_column("measurement", "ms INTEGER")
 
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:

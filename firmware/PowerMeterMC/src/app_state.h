@@ -46,6 +46,7 @@ struct MeterConfig {
   uint32_t ver = 0;
   uint16_t report_s = 60;  // send to the server every ... s
   uint16_t read_s = 60;    // record a reading every ... s (<= report_s)
+  uint32_t read_ms = 60000; // the same in ms: 1000+ without DRDY, down to 200 with DRDY
   bool drdy = false;        // read the module on every DRDY pulse (100 ms windows)
   uint16_t offline_off_min = 0;  // 0 = disabled
   uint8_t mode = MODE_SHARED;
@@ -60,6 +61,7 @@ struct MeterConfig {
   uint16_t sensor_to_s = 10;  // no valid reading for this long = sensor error; 0 = off
   uint8_t sensor_action = ACT_HOLD;
   ChConfig ch[MC_MAX_CH];
+  char aux_name[8][21] = {};  // AUX relays: relays beyond the channels (names from the server)
 };
 
 struct Reading {  // one channel
@@ -100,7 +102,8 @@ struct AppState {
   ChState ch[MC_MAX_CH];
   SessionState sess[MC_MAX_CH];
   uint32_t sidCounter = 0;     // session numbers, unique across channels
-  bool everStarted = false;    // first session(s) after pairing start on their own
+  bool everStarted = false;    // (unused since 0.7.2: sessions start with Renew)
+  uint8_t auxWant = 0;         // AUX relays: bit j = AUX j wanted ON (manual only, persisted)
   bool disabled = false;       // disabled by the server: relays off, no session (persisted)
   bool tamper = false;
   bool ac = true;
@@ -132,6 +135,13 @@ const char *sessStatusName(SessStatus s);
 
 // Config values are 32-bit floats: 0.05 would be sent as 0.050000001. Round to 4 decimals for JSON.
 inline double num4(float f) { return round((double)f * 10000.0) / 10000.0; }
+
+// AUX relays: relays on the board beyond the measuring channels. Manual ON / OFF only: not measured,
+// not tied to limits, sessions or protections (a disabled meter switches them off too).
+inline uint8_t auxCount() {
+  int n = (int)RELAY_COUNT - (int)g.nch;
+  return g.nch && n > 0 ? (uint8_t)n : 0;
+}
 
 // Session slots in use: 1 in shared mode, one per channel in independent mode.
 inline uint8_t sessSlots() { return g.cfg.mode == MODE_INDEPENDENT ? (g.nch ? g.nch : 1) : 1; }

@@ -345,6 +345,7 @@ static void hState() {
   static const char *SM[] = {"none", "duration", "daily"};
   c["report_s"] = g.cfg.report_s;
   c["read_s"] = g.cfg.read_s;
+  c["read_ms"] = g.cfg.read_ms;
   c["drdy"] = g.cfg.drdy;
   c["mode"] = g.cfg.mode == MODE_INDEPENDENT ? "independent" : "shared";
   c["kwh_max"] = num4(g.cfg.kwh_max);
@@ -359,6 +360,8 @@ static void hState() {
   c["tamper_action"] = PA[g.cfg.tamper_action % 3];
   c["sensor_to_s"] = g.cfg.sensor_to_s;
   c["sensor_action"] = PA[g.cfg.sensor_action % 3];
+  JsonArray an = c["aux"].to<JsonArray>();
+  for (uint8_t j = 0; j < auxCount(); j++) an.add(g.cfg.aux_name[j]);
   JsonArray cc = c["ch"].to<JsonArray>();
   for (uint8_t i = 0; i < g.nch; i++) {
     JsonObject o = cc.add<JsonObject>();
@@ -379,10 +382,21 @@ static void hRelay() {
     String msg = !strcmp(err, "disabled") ? "Blocked: this meter is disabled by the server."
                : !strcmp(err, "tripped") ? "Blocked: over-current trip. Reset the trip first."
                : !strcmp(err, "quota_exceeded") ? "Blocked: kWh quota for this session is used up."
+               : !strcmp(err, "no_session") ? "Blocked: no session yet. Start one with Renew on the server."
                : !strcmp(err, "bad_channel") ? "No such channel."
                : "Blocked: session ended. Renew it on the server.";
     return sendErr(409, msg);
   }
+  sendOk();
+}
+
+static void hAux() {
+  if (!requireAuth()) return;
+  JsonDocument b;
+  if (!body(b)) return;
+  const char *err = nullptr;
+  if (!control::setAux(b["i"] | 0, b["on"] | false, "local", err))
+    return sendErr(409, !strcmp(err, "disabled") ? "Blocked: this meter is disabled by the server." : "No such AUX relay.");
   sendOk();
 }
 
@@ -485,6 +499,7 @@ void begin() {
   server.on("/api/mesh", HTTP_POST, hMeshRole);
   server.on("/api/state", HTTP_GET, hState);
   server.on("/api/relay", HTTP_POST, hRelay);
+  server.on("/api/aux", HTTP_POST, hAux);
   server.on("/api/send_now", HTTP_POST, hSendNow);
   server.on("/api/reset_trip", HTTP_POST, hResetTrip);
   server.on("/api/pair", HTTP_POST, hPair);

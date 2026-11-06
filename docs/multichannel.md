@@ -128,3 +128,26 @@ rbAmp with N channels) keeps the same meter on the server. Both sides handle thi
 
 Example: PZEM AC → rbAmp 5 ch → PZEM DC → rbAmp 2 ch → PZEM AC leaves one live meter and four archives.
 
+## AUX relays
+
+Relays on the board beyond the measuring channels (e.g. 2 channels on a 4-relay board: relays 3 and 4)
+are **AUX relays**: manual ON / OFF only (server Info page → Channels, or the meter's own page). They are
+not measured, not recorded and not tied to limits, sessions or protections. They keep their ON / OFF over
+a reboot; a disabled meter switches them off.
+
+Protocol: `caps.aux` = number of AUX relays; state `aux: [{"i":0,"relay":3,"on":true}, …]`; command
+`aux {i, on}`; event `aux_relay {i, relay, on, src}`; config `aux: [{"i":0,"name":"Pump"}, …]` (names).
+
+## No session after pairing
+
+Since firmware 0.6.4 / MC 0.7.2 a newly paired meter does not start a session on its own: it shows
+**No session** and the relays stay off (`block: no_session`) until the admin presses **Renew**.
+
+## Read interval and the offline buffer
+
+Readings can be recorded every 1 s (every meter) and, on a multi-channel meter reading on DRDY, down to
+0.2 s (`read_ms`; send then at least every 30 s). Readings wait in the meter's RAM until the server
+acknowledges them and only go to the flash buffer when the meter cannot send them (RAM full, older than
+30 s, or before an event), so fast intervals do not wear out the flash. Sub-second readings carry `ms`
+(milliseconds within `ts`), stored by the server and exported in the CSV `ms` column.
+

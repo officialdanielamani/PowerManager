@@ -201,6 +201,15 @@ def h_hello(conn, device, msg):
     commands.flush_pending(device, conn)
 
 
+def _ms(item):
+    """Milliseconds of a sub-second reading (meters reading on DRDY), else None."""
+    try:
+        ms = int(item.get("ms"))
+    except (TypeError, ValueError):
+        return None
+    return ms if 0 <= ms <= 999 else None
+
+
 def h_tel(conn, device, msg):
     items = msg.get("items") or []
     newest = None
@@ -220,7 +229,8 @@ def h_tel(conn, device, msg):
                 idx = int(ch.get("i", 0))
             except (TypeError, ValueError):
                 continue
-            row = {"device_fk": device.id, "gen": device.pair_gen, "ch": idx, "seq": seq, "ts": ts, "time_estimated": est}
+            row = {"device_fk": device.id, "gen": device.pair_gen, "ch": idx, "seq": seq, "ts": ts, "time_estimated": est,
+                   "ms": _ms(item)}
             for f in FIELDS:
                 val = _f(ch.get(f))
                 lo, hi = LIMITS[f]
@@ -358,11 +368,11 @@ HANDLERS = {
 # ---------------------------------------------------------------- state / events
 
 def _apply_state(device, state):
-    keys = ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor")
+    keys = ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor", "aux")
     clean = {k: state[k] for k in keys if k in state}
     merged = dict(device.last_state or {})
     if "relay" in state:  # a full state: flags that are only sent while true are cleared when missing
-        for k in ("volt_out", "sensor_err", "no_sensor"):
+        for k in ("volt_out", "sensor_err", "no_sensor", "aux"):
             merged.pop(k, None)
         if "mode" in state:  # multi-channel: shared sends "sess", independent "sessions"
             merged.pop("sess", None)

@@ -2,9 +2,27 @@
 
 #include <LittleFS.h>
 #include <Preferences.h>
+#include <deque>
 #include "../config.h"
 
+// RAM first, flash only when needed: readings wait in RAM until the server acknowledges them, so a
+// meter that is online (fast read intervals included) does not wear out its flash. They go to the
+// LittleFS buffer only when RAM is full, when they are still unsent after OUTBOX_RAM_MAX_AGE_MS, or
+// before an event (events always go to flash, behind everything older, so the order is kept).
+#ifndef OUTBOX_RAM_ITEMS
+#define OUTBOX_RAM_ITEMS 120
+#endif
+#ifndef OUTBOX_RAM_MAX_AGE_MS
+#define OUTBOX_RAM_MAX_AGE_MS 30000
+#endif
+
 namespace outbox {
+
+struct RamItem {
+  Item it;
+  uint32_t atMs;
+};
+static std::deque<RamItem> ram;  // newer than everything on flash, oldest first
 
 static const char *DIR = "/ob";
 static SemaphoreHandle_t lock;
@@ -99,9 +117,8 @@ static void dropOldestSegment() {
   }
 }
 
-void push(Kind kind, uint32_t seq, const String &json) {
-  if (!ok) return;
-  xSemaphoreTake(lock, portMAX_DELAY);
+// Appends one item to the flash segments. Caller holds the lock.
+static void flashAppend(Kind kind, uint32_t seq, const String &json) {
   if (!lastSeg || lastSegItems >= OUTBOX_SEGMENT_ITEMS) {
     lastSeg++;
     if (!firstSeg) firstSeg = lastSeg;
@@ -116,6 +133,34 @@ void push(Kind kind, uint32_t seq, const String &json) {
     f.close();
     lastSegItems++;
     pending++;
+  }
+}
+
+// Moves the oldest RAM items to flash (keeps the order). Caller holds the lock.
+static void spill(size_t n) {
+  while (n-- && !ram.empty()) {
+    RamItem &r = ram.front();
+    if (r.it.seq > acked) flashAppend(r.it.kind, r.it.seq, r.it.json);
+    ram.pop_front();
+  }
+}
+
+void push(Kind kind, uint32_t seq, const String &json) {
+  if (!ok) return;
+  xSemaphoreTake(lock, portMAX_DELAY);
+  uint32_t now = millis();
+  if (kind == EVT) {  // events are kept on flash right away, behind all older items
+    spill(ram.size());
+    flashAppend(kind, seq, json);
+  } else {
+    ram.push_back({{seq, kind, json}, now});
+    if (ram.size() > OUTBOX_RAM_ITEMS) spill(OUTBOX_SEGMENT_ITEMS);  // offline for a while: to flash
+    size_t old = 0;
+    for (auto &r : ram) {
+      if (now - r.atMs < OUTBOX_RAM_MAX_AGE_MS) break;
+      old++;
+    }
+    spill(old);  // not acknowledged in time: keep them safe on flash
   }
   xSemaphoreGive(lock);
 }
@@ -139,16 +184,22 @@ void nextBatch(std::vector<Item> &out, uint16_t max) {
     }
     if (f) f.close();
   }
+  for (auto &r : ram) {  // then the newer items still in RAM
+    if (out.size() >= max) break;
+    if (r.it.seq <= acked) continue;
+    out.push_back(r.it);
+  }
   xSemaphoreGive(lock);
 }
 
-uint16_t count() { return pending; }
+uint16_t count() { return pending + ram.size(); }
 
 void ackUpTo(uint32_t seq) {
   if (!ok || seq <= acked) return;
   xSemaphoreTake(lock, portMAX_DELAY);
   acked = seq;
   prefs.putUInt("ack", acked);
+  while (!ram.empty() && ram.front().it.seq <= acked) ram.pop_front();
   // delete segments that are fully acknowledged (never the one being appended to)
   while (firstSeg && firstSeg < lastSeg) {
     if (LittleFS.exists(segPath(firstSeg)) && segLastSeq(firstSeg, nullptr, nullptr) > acked) break;
@@ -169,6 +220,7 @@ void clear() {
   if (!ok) return;
   xSemaphoreTake(lock, portMAX_DELAY);
   for (uint32_t n = firstSeg; n && n <= lastSeg; n++) LittleFS.remove(segPath(n));
+  ram.clear();
   firstSeg = lastSeg = 0;
   lastSegItems = pending = 0;
   acked = 0;

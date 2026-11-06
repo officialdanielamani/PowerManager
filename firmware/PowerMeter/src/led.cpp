@@ -97,7 +97,7 @@ void task(void *) {
       {
         StateLock l;
         tripped = g.tripped;
-        st = g.sess.status;
+        st = g.sess.sid ? g.sess.status : SESS_ENDED;  // no session yet: same as ended
         tamper = g.tamper;
         ac = g.ac;
         net = g.net;
