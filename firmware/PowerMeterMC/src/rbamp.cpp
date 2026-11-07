@@ -47,6 +47,13 @@ static bool windowRead(uint8_t field, uint8_t ch, float &out) {
   return readFloat(REG_CH_DATA, out);
 }
 
+static bool mismatch = false;
+// CAPABILITY bit 12 (fw 1.4.20+): the module keeps the applied model over a restart. Without it the
+// saved model CODE survives (and reads back) but the SCALING falls back to the factory default at
+// every power-up, so the model must be committed again every time (rbAmp docs, init. §6.2).
+static bool selfRating = false;
+static String clampName(uint8_t cls, uint8_t code);
+
 static float modelAmps(uint8_t code) {
   switch (code) {  // SCT-013 family codes (SENSOR_CLASS 1)
     case 1: return 5;
@@ -82,14 +89,18 @@ static void setModels() {
     uint8_t applied = 0;
     if (ch < 3) {
       i2cbus::readRegs(ADDR, REG_APPLIED_CT0 + ch, &applied, 1);
-      if (applied == want) continue;
+      if (applied == want && selfRating) continue;
       i2cbus::writeReg(ADDR, REG_CT_MODEL, want);              // stage
-      i2cbus::writeReg(ADDR, REG_COMMAND, CMD_SET_CT_MODEL_CH0 + ch);  // bind to the channel
+      i2cbus::writeReg(ADDR, REG_COMMAND, CMD_SET_CT_MODEL_CH0 + ch);  // bind to the channel (applies the scaling)
       delay(6);
+      uint8_t err = 0;
+      if (i2cbus::readRegs(ADDR, 0x02, &err, 1) && err)
+        Serial.printf("[rbamp] channel %u: CT model %u rejected (error 0x%02X)\n", ch + 1, want, err);
+      if (applied == want) continue;  // only re-applied (fw < 1.4.20): already saved, no flash write
     } else {
       i2cbus::Lock l;
       if (i2cbus::writeReg(ADDR, REG_CH_SELECT, (uint8_t)((F_CT_MODEL << 4) | ch)) &&
-          i2cbus::readRegs(ADDR, REG_CH_DATA, &applied, 1) && applied == want)
+          i2cbus::readRegs(ADDR, REG_CH_DATA, &applied, 1) && applied == want && selfRating)
         continue;
       i2cbus::writeReg(ADDR, REG_CH_SELECT, (uint8_t)((F_CT_MODEL << 4) | ch));
       i2cbus::writeReg(ADDR, REG_CH_DATA, want);
@@ -129,7 +140,10 @@ bool begin() {
     return false;
   }
   nch = min<uint8_t>(V[var].n, MC_MAX_CH);
-  volt = cap[1] & 0x01;  // CAPABILITY bit 8 = voltage input
+  volt = cap[1] & 0x01;        // CAPABILITY bit 8 = voltage input
+  selfRating = cap[1] & 0x10;  // CAPABILITY bit 12 = keeps the applied CT model over a restart
+  Serial.printf("[rbamp] capability 0x%02X%02X%s\n", cap[1], cap[0],
+                selfRating ? "" : " (fw < 1.4.20: CT model re-applied at every start)");
   strncpy(vname, V[var].name, sizeof(vname) - 1);
   setModels();
   for (uint8_t ch = 0; ch < nch; ch++) {
@@ -142,12 +156,40 @@ bool begin() {
     }
     models[ch] = m;
   }
+  // Show which clamp model the module really uses (wrong scaling = wrong current / power).
+  uint8_t cls = 0;
+  i2cbus::readRegs(ADDR, REG_SENSOR_CLASS, &cls, 1);
+  mismatch = false;
+  for (uint8_t ch = 0; ch < nch; ch++) {
+    bool bad = cls == 1 && CFG_MODELS[ch] && models[ch] != CFG_MODELS[ch];
+    mismatch |= bad;
+    Serial.printf("[rbamp] CH%u clamp in use: %s%s\n", ch + 1, clampName(cls, models[ch]).c_str(),
+                  bad ? "  <-- WARNING: config.h asks for another model, the module did not take it" : "");
+  }
   found = true;
   primed = false;
   lastUptime = 0;
   Serial.printf("[rbamp] found %s: %u channel(s), voltage input %s\n", vname, nch, volt ? "yes" : "no");
   periodStart();  // primer period
   return true;
+}
+
+static String clampName(uint8_t cls, uint8_t code) {
+  if (cls == 2 || cls == 3) return String("factory-paired clamp (code ") + code + ")";
+  if (!code) return "not set (code 0)";
+  return String("SCT-013 ") + (int)modelAmps(code) + " A (code " + code + ")";
+}
+
+String clampSummary() {
+  String s;
+  uint8_t cls = 0;
+  if (found) i2cbus::readRegs(ADDR, REG_SENSOR_CLASS, &cls, 1);
+  for (uint8_t ch = 0; ch < nch; ch++) {
+    if (ch) s += ", ";
+    s += String("CH") + (ch + 1) + " " + clampName(cls, models[ch]);
+  }
+  if (mismatch) s += "  (WARNING: not what config.h asks for)";
+  return s;
 }
 
 bool present() { return found; }

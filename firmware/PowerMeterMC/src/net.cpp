@@ -546,6 +546,7 @@ static void sendInfo() {
     doc["sensor_detail"] = String("rbAmp ") + g.variant + ", " + g.nch + " channel(s)";
   }
   doc["relay_board"] = String(relays::boardName()) + (relays::ok() ? " OK" : " NOT ANSWERING");
+  doc["clamps"] = rbamp::clampSummary();
   doc["kind"] = METER_KIND;
   doc["chip"] = ESP.getChipModel();
   doc["flash"] = ESP.getFlashChipSize();

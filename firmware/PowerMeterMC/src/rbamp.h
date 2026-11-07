@@ -25,6 +25,7 @@ uint8_t channels();
 bool hasVoltage();
 const char *variantName();  // "UI2", "I3", ...
 float rating(uint8_t ch);   // nominal A of the clamp model on that channel (0 = unknown)
+String clampSummary();      // "CH1 SCT-013 100 A (code 5), CH2 ..." as applied on the module
 
 // Reads the latest 100 ms window. On failure returns false and sets lastError() (SensorErr).
 bool read(Sample &out);
