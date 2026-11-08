@@ -1,8 +1,9 @@
 # Multi-channel AC meter (rbAmp)
 
-A separate firmware (`firmware/PowerMeterMC/`) for an ESP32-S3 Super Mini with an **rbAmp BASIC** module
-(SCT-013 clamps), a DS3231, a tamper limit switch and an **I²C relay board** (PCF8574 + SSRs, or an
-XL9535 relay board with 1/2/4/8 relays). One voltage input, 1–7 current channels, one relay per channel.
+A separate firmware (`firmware/PowerMeterMC/`) for an ESP32-S3 Super Mini with one or more **rbAmp BASIC**
+modules (SCT-013 clamps), a DS3231, a tamper limit switch and **I²C relay board(s)** (PCF8574 + SSRs, or
+XL9535 relay boards), optionally DS18B20 temperature sensors. One voltage input, 1–16 current channels; the
+`CHANNELS` table in `config.h` maps each channel to a module input, a clamp model and a relay.
 
 The server treats it as an AC meter with `caps.mc = true` and `caps.channels = N`.
 
@@ -10,11 +11,12 @@ The server treats it as an AC meter with `caps.mc = true` and `caps.channels = N
 
 | Part | Bus / pin | Notes |
 |---|---|---|
-| rbAmp BASIC (SCT-UI1/2/3/5/7, SCT-I1/2/3) | I²C `0x50` | variant read from `HW_VARIANT` (`0x55`); 5 V supply, isolated from mains; answers during a power cut (U ≈ 0) |
+| rbAmp BASIC (SCT-UI1/2/3/5/7, SCT-I1/2/3), 1–8 modules | I²C `0x50` (+ own address per extra module) | variant read from `HW_VARIANT` (`0x55`); 5 V supply, isolated from mains; answers during a power cut (U ≈ 0). Address change: serial `rbamp addr 0x50 0x51` (two-phase commit `0x30`/`0x31` + `CMD_COMMIT_ADDR` + reset) |
 | rbAmp DRDY | GPIO (`PIN_DRDY`) | open-drain, ~10 µs low pulse every 100 ms window; pull-up 10 k (or the internal one) |
 | DS3231 | I²C `0x68` | (its EEPROM at `0x57`) |
 | PCF8574 / PCF8574A | I²C `0x20–0x27` / `0x38–0x3F` | one bit per relay |
-| XL9535 relay board | I²C `0x20–0x27` | TCA9535-compatible: port 0 = relays 1–8 |
+| XL9535 relay board | I²C `0x20–0x27` | TCA9535-compatible: port 0 = relays 1–8, port 1 = 9–16 |
+| DS18B20 (optional) | GPIO (`PIN_TEMP`, default 6) | 1-Wire, 4.7 k pull-up; up to 4 sensors (T1 … sorted by serial number) |
 | Tamper switch | GPIO 4 | one for the enclosure |
 | Battery sense | GPIO 1 | as in the PZEM firmware |
 
@@ -48,8 +50,13 @@ Session numbers (`sid`) come from one counter on the meter, so they are unique a
 
 ```json
 {"kind":"ac","mc":true,"sensor":"rbamp","variant":"UI2","channels":2,"relays":2,
- "voltage":true,"drdy":true,"amp_rating":30,"ratings":[30,30]}
+ "voltage":true,"drdy":true,"amp_rating":30,"ratings":[30,30],"tamper":true,"temp":2}
 ```
+
+With several modules `variant` is joined (`"UI5+I7"`) and `boards` gives their number. `channels` is the number of
+lines in `CHANNELS` (known before the modules answer), `relays` the channels that have a relay, `tamper` false
+when the firmware has no tamper switch (`TAMPER_ENABLE 0`), `temp` the number of DS18B20 sensors found (only with
+`TEMP_ENABLE`).
 
 `voltage: false` (SCT-I* variants): no voltage → no power / energy (only current); no "No AC" detection.
 

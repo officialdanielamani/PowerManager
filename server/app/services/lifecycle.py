@@ -1,10 +1,10 @@
 """Disable / enable / unsync / remove a meter, and the "continue or new meter" choice on re-pair."""
 from ..extensions import db
 from ..models import (Channel, Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
-                      NotificationRule, PairingCode, Rollup, RollupDirty, Session, now)
+                      NotificationRule, PairingCode, Rollup, RollupDirty, Session, Temperature, now)
 from . import commands, devconfig, hub, incidents, ingest, notify
 
-HISTORY_MODELS = (Measurement, Rollup, RollupDirty, Session, Incident, Command, Notification,
+HISTORY_MODELS = (Measurement, Temperature, Rollup, RollupDirty, Session, Incident, Command, Notification,
                   NotificationRule, MeterViewer, Event)
 
 
@@ -84,7 +84,7 @@ def remove(device, user):
 
 # History that belongs to the hardware (moved to the archive). The meter's name, linked users and
 # notification options stay with the live meter: it is still the same place / customer.
-HW_HISTORY_MODELS = (Measurement, Rollup, RollupDirty, Session, Incident, Command, Notification, Event)
+HW_HISTORY_MODELS = (Measurement, Temperature, Rollup, RollupDirty, Session, Incident, Command, Notification, Event)
 
 
 def hardware_changed(device, new_caps, new_sig):

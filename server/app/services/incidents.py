@@ -9,6 +9,7 @@ TYPES = {
     "tamper": "Tamper",
     "voltage": "Voltage out of range",
     "sensor": "Sensor error",
+    "temp": "Temperature too high",
 }
 
 

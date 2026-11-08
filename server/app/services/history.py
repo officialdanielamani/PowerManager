@@ -162,6 +162,40 @@ def query(device_pk, ch, start, end):
     return {"source": src, "start": start, "end": end, "points": points, "stats": stats}
 
 
+_TEMP_SQL = text("""
+    SELECT (ts - :s) / :bs AS b, idx, MAX(ts), AVG(c), MIN(c), MAX(c)
+    FROM temperature WHERE device_fk = :d AND ts >= :s AND ts <= :e AND c IS NOT NULL
+    GROUP BY b, idx ORDER BY b, idx""")
+
+
+def temps(device_pk, start, end):
+    """Temperature sensors (T1, T2 ...) over a range for the chart: averaged per time bucket in SQL
+    (at most MAX_POINTS points). None when the meter has no temperature readings in the range."""
+    from ..extensions import db
+    bs = max(1, -(-(end - start) // MAX_POINTS))
+    rows = db.session.execute(_TEMP_SQL, {"d": device_pk, "s": start, "e": end, "bs": bs}).all()
+    if not rows:
+        return None
+    n = max(r[1] for r in rows) + 1
+    buckets, order = {}, []
+    stats = [[None, None, 0.0, 0] for _ in range(n)]
+    for b, idx, t, avg, mn, mx in rows:
+        if b not in buckets:
+            buckets[b] = [t, [None] * n]
+            order.append(b)
+        buckets[b][0] = max(buckets[b][0], t)
+        buckets[b][1][idx] = round(avg, 1)
+        st = stats[idx]
+        st[0] = mn if st[0] is None else min(st[0], mn)
+        st[1] = mx if st[1] is None else max(st[1], mx)
+        st[2] += avg
+        st[3] += 1
+    return {"names": [f"T{i + 1}" for i in range(n)], "t": [buckets[b][0] for b in order],
+            "series": [[buckets[b][1][i] for b in order] for i in range(n)],
+            "stats": [{"min": _r(s[0], 1), "max": _r(s[1], 1), "avg": _r(s[2] / s[3], 1) if s[3] else None}
+                      for s in stats]}
+
+
 def csv_rows(device_pk, ch, start, end):
     """Yield (header, rows) for CSV export: raw data if still kept, otherwise roll-ups."""
     retention_start = now() - settings.get_int("raw_retention_days", 90) * 86400
@@ -290,6 +324,9 @@ def delete_range(device_pk, start, end):
     from .rollup import build_bucket
     n = (Measurement.query.filter(Measurement.device_fk == device_pk, Measurement.ts >= start, Measurement.ts <= end)
          .delete(synchronize_session=False))
+    from ..models import Temperature
+    (Temperature.query.filter(Temperature.device_fk == device_pk, Temperature.ts >= start, Temperature.ts <= end)
+     .delete(synchronize_session=False))
     chans = [c for (c,) in db.session.query(Rollup.ch).filter(Rollup.device_fk == device_pk).distinct()]
     for period, span in (("h", 3600), ("d", 86400)):
         (Rollup.query.filter(Rollup.device_fk == device_pk, Rollup.period == period, Rollup.bucket_start >= start,

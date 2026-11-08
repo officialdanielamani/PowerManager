@@ -4,7 +4,7 @@ import logging
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..extensions import db
-from ..models import Channel, Device, Event, Incident, Measurement, RollupDirty, Session, now
+from ..models import Channel, Device, Event, Incident, Measurement, RollupDirty, Session, Temperature, now
 from . import commands, devconfig, incidents, notify, settings
 
 log = logging.getLogger(__name__)
@@ -213,7 +213,7 @@ def _ms(item):
 
 def h_tel(conn, device, msg):
     items = msg.get("items") or []
-    newest = None
+    newest, latest_t = None, None
     for item in items[:200]:
         if not isinstance(item, dict) or "seq" not in item:
             continue
@@ -249,6 +249,9 @@ def h_tel(conn, device, msg):
             db.session.execute(sqlite_insert(Measurement).values(rows).on_conflict_do_nothing())
             for ch, ts0 in {(row["ch"], row["ts"] - row["ts"] % 3600) for row in rows}:  # once per channel-hour
                 _mark_dirty(device.id, ch, ts0)
+        temps = _store_temps(device, item, ts)
+        if temps is not None and (latest_t is None or ts >= latest_t[1]):
+            latest_t = (temps, ts)
         _bump_seq(device, seq)
         if newest is None or ts >= newest["ts"]:
             last = [r for r in rows if r["seq"] == rows[-1]["seq"]] if rows else []  # (DRDY: the last window)
@@ -257,6 +260,11 @@ def h_tel(conn, device, msg):
             if not rows:  # no channel data: sensor error, or no AC
                 newest["err"] = str(item.get("se") or "no_ac")[:10]
     prev = device.last_reading or {}
+    if newest is not None:  # temperatures come every TEMP_READ_MS only: keep the latest ones
+        if latest_t is not None and latest_t[1] >= prev.get("t_ts", 0):
+            newest["t"], newest["t_ts"] = latest_t
+        elif prev.get("t") is not None:
+            newest["t"], newest["t_ts"] = prev["t"], prev.get("t_ts")
     if newest is not None and newest["ts"] >= prev.get("ts", 0):
         if not newest["ch"]:
             # Show that there is no current reading (not the old values), and keep when the last good one was.
@@ -305,6 +313,21 @@ def _check_reversed(device, rows):
     if changed:
         st["clamp_rev"] = rev
         device.last_state = st
+
+
+def _store_temps(device, item, ts):
+    """Telemetry item "t": [T1, T2 ...] degC (null = sensor not readable). Returns the list, or None."""
+    t = item.get("t")
+    if not isinstance(t, list):
+        return None
+    vals = []
+    for v in t[:8]:
+        c = _f(v)
+        vals.append(c if c is not None and -60 <= c <= 130 else None)
+    rows = [{"device_fk": device.id, "idx": i, "ts": ts, "c": c} for i, c in enumerate(vals) if c is not None]
+    if rows:  # a re-sent item (no ack yet) is stored once
+        db.session.execute(sqlite_insert(Temperature).values(rows).on_conflict_do_nothing())
+    return vals
 
 
 FRAMES_PER_ITEM = 64
@@ -426,7 +449,8 @@ def h_info(conn, device, msg):
     """Answer to "Get meter info"."""
     keep = ("ip", "ssid", "rssi", "mac", "heap", "heap_min", "psram", "psram_free", "fw", "hw", "hw_info",
             "bat_v", "bat_pct", "uptime", "boot", "core", "chip", "flash", "outbox", "time_src",
-            "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "sensor_detail", "relay_board", "clamps")
+            "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "sensor_detail", "relay_board", "clamps",
+            "sensor_boards", "temp_sensors")
     device.last_info = {k: msg[k] for k in keep if k in msg}
     device.last_info_at = now()
 
@@ -450,11 +474,12 @@ HANDLERS = {
 # ---------------------------------------------------------------- state / events
 
 def _apply_state(device, state):
-    keys = ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor", "aux")
+    keys = ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor", "aux",
+            "temp_high")
     clean = {k: state[k] for k in keys if k in state}
     merged = dict(device.last_state or {})
     if "relay" in state:  # a full state: flags that are only sent while true are cleared when missing
-        for k in ("volt_out", "sensor_err", "no_sensor", "aux"):
+        for k in ("volt_out", "sensor_err", "no_sensor", "aux", "temp_high"):
             merged.pop(k, None)
         if "mode" in state:  # multi-channel: shared sends "sess", independent "sessions"
             merged.pop("sess", None)
@@ -563,6 +588,14 @@ def process_event(device, ev):
         notify.notify(device, "sensor_error", f"Sensor error: no valid reading for {d.get('after_s', '?')} s, {why}: {what}")
     elif e == "sensor_ok":
         incidents.close_incident(device.id, "sensor", ev.ts, event=ev, estimated=est)
+    elif e == "temp_high":
+        incidents.open_incident(device.id, "temp", ev.ts, event=ev, estimated=est,
+                                detail={"i": d.get("i"), "c": d.get("c"), "max": d.get("max"), "action": d.get("action")})
+        what = {"end": "session ended", "hold": "relay off until it cools down"}.get(d.get("action"), "power kept on")
+        sensor = f"T{int(d['i']) + 1}" if str(d.get("i", "")).isdigit() else "A sensor"
+        notify.notify(device, "temp_high", f"Temperature too high: {sensor} {d.get('c')} °C (limit {d.get('max')} °C): {what}")
+    elif e == "temp_ok":
+        incidents.close_incident(device.id, "temp", ev.ts, event=ev, estimated=est, detail={"c_back": d.get("c")})
     elif e == "voltage_ok":
         incidents.close_incident(device.id, "voltage", ev.ts, event=ev, estimated=est, detail={"v_back": d.get("v")})
     elif e == "ac_lost":

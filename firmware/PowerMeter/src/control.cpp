@@ -7,6 +7,7 @@
 #include "outbox.h"
 #include "storage.h"
 #include "system.h"
+#include "temp.h"
 #include "timekeep.h"
 
 namespace control {
@@ -54,6 +55,20 @@ void emitEvent(const char *e, void (*fill)(JsonObject, void *), void *ctx) {
   Serial.printf("[event] %s\n", s.c_str());
 }
 
+// Temperatures ("t": [T1, T2 ...] degC, null = not readable) with the first reading after each new round.
+static bool tempsPending_ = false;
+static void addTemps(JsonDocument &doc) {
+  // caller holds StateLock
+  if (!tempsPending_ || !temp::count()) return;
+  tempsPending_ = false;
+  JsonArray t = doc["t"].to<JsonArray>();
+  for (uint8_t i = 0; i < temp::count(); i++) {
+    float c = temp::value(i);
+    if (isnan(c)) t.add(nullptr);
+    else t.add(serialized(String(c, 1)));
+  }
+}
+
 static void pushTelemetry() {
   JsonDocument doc;
   uint32_t seq = store::nextSeq();
@@ -86,6 +101,7 @@ static void pushTelemetry() {
 #endif
       c["e"] = serialized(String(g.reading.e, 3));
     }
+    addTemps(doc);
   }
   String s;
   serializeJson(doc, s);
@@ -192,7 +208,7 @@ void renew(const char *reason, bool autoRenew) {
 
 static const char *stopReasonName(uint8_t why) {
   return why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : why == STOP_SENSOR ? "sensor"
-       : why == STOP_MANUAL ? "stopped" : "disabled";
+       : why == STOP_MANUAL ? "stopped" : why == STOP_TEMP ? "temp" : "disabled";
 }
 
 // Voltage / tamper / sensor protection with action "end": end the session now (relay off until renewed).
@@ -313,6 +329,7 @@ void stateJson(JsonObject o) {
     s["end_reason"] = stopReasonName(g.sess.stopReason);
   if (g.disabled) o["disabled"] = true;
   if (g.voltOut) o["volt_out"] = true;
+  if (g.tempHigh) o["temp_high"] = true;
   if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
   if (nr) s["next_reset"] = nr;
 }
@@ -326,9 +343,14 @@ void begin(Sensor *sensor) {
   // Strongest output drive: an SSR input needs ~3 V and the 3.3 V rail dips when Wi-Fi transmits.
   gpio_set_drive_capability((gpio_num_t)PIN_RELAY, GPIO_DRIVE_CAP_3);
   digitalWrite(PIN_RELAY, RELAY_ACTIVE_HIGH ? LOW : HIGH);  // start OFF
+  temp::begin();
+#if TAMPER_ENABLE
   pinMode(PIN_TAMPER, INPUT_PULLUP);
+#endif
   StateLock l;
+#if TAMPER_ENABLE
   g.tamper = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
+#endif
   g.lastE = g.sess.e0;  // until the first reading arrives
 }
 
@@ -576,6 +598,7 @@ static void checkRules(bool firstPass) {
   else if (g.cfg.tamper_protect && g.cfg.tamper_action == ACT_HOLD && g.tamper) block = "tamper";
   else if (g.cfg.volt_action == ACT_HOLD && g.voltOut) block = "voltage";
   else if (g.cfg.sensor_action == ACT_HOLD && g.sensorErr) block = "sensor";
+  else if (g.cfg.temp_action == ACT_HOLD && g.tempHigh) block = "temp";
   else if (g.paired && g.cfg.offline_off_min && g.offlineSinceMs &&
            millis() - g.offlineSinceMs >= g.cfg.offline_off_min * 60000UL)
     block = "offline";
@@ -607,7 +630,55 @@ static void checkRules(bool firstPass) {
   }
 }
 
+// Over-temperature: any sensor above cfg.temp_max triggers (event + action); every sensor back below
+// temp_max - TEMP_HYST clears. A sensor that cannot be read does not count either way.
+static void checkTemp() {
+  // caller holds StateLock
+  float hottest = NAN;
+  uint8_t which = 0;
+  for (uint8_t i = 0; i < temp::count(); i++) {
+    float c = temp::value(i);
+    if (!isnan(c) && (isnan(hottest) || c > hottest)) {
+      hottest = c;
+      which = i;
+    }
+  }
+  if (g.cfg.temp_max <= 0 || isnan(hottest)) {
+    if (g.tempHigh && g.cfg.temp_max <= 0) {
+      g.tempHigh = false;
+      emitEvent("temp_ok", [](JsonObject o, void *) { o["disabled"] = true; });
+      bump();
+    }
+    return;
+  }
+  struct Ctx {
+    uint8_t i;
+    float c, max;
+    const char *action;
+  } ctx = {which, hottest, g.cfg.temp_max, ACTION_NAME[g.cfg.temp_action % 3]};
+  if (!g.tempHigh && hottest > g.cfg.temp_max) {
+    g.tempHigh = true;
+    emitEvent("temp_high", [](JsonObject o, void *p) {
+      Ctx *c = (Ctx *)p;
+      o["i"] = c->i;
+      o["c"] = serialized(String(c->c, 1));
+      o["max"] = num4(c->max);
+      o["action"] = c->action;
+    }, &ctx);
+    if (g.cfg.temp_action == ACT_END) stopSession(STOP_TEMP);
+    bump();
+  } else if (g.tempHigh && hottest < g.cfg.temp_max - TEMP_HYST) {
+    g.tempHigh = false;
+    emitEvent("temp_ok", [](JsonObject o, void *p) {
+      o["i"] = ((Ctx *)p)->i;
+      o["c"] = serialized(String(((Ctx *)p)->c, 1));
+    }, &ctx);
+    bump();
+  }
+}
+
 static void checkTamper() {
+#if TAMPER_ENABLE
   static uint8_t same = 0;
   bool open = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
   StateLock l;
@@ -626,6 +697,7 @@ static void checkTamper() {
     emitEvent(open ? "tamper_open" : "tamper_close");
   }
   bump();
+#endif  // TAMPER_ENABLE (no switch fitted: never open)
 }
 
 void task(void *) {
@@ -641,6 +713,15 @@ void task(void *) {
   for (;;) {
     sys::crumb(sys::CR_CONTROL, "sensor");
     if (tick % (1000 / CONTROL_TICK_MS) == 0) readSensor();
+#if TEMP_ENABLE
+    sys::crumb(sys::CR_CONTROL, "temperature");
+    temp::poll();
+    if (temp::takeFresh()) {
+      StateLock l;
+      tempsPending_ = true;
+      checkTemp();
+    }
+#endif
     sys::crumb(sys::CR_CONTROL, "rules");
     checkTamper();
     checkRules(first);

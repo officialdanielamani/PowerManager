@@ -10,6 +10,7 @@
 #include "app_state.h"
 #include "battery.h"
 #include "control.h"
+#include "temp.h"
 #include "net.h"
 #include "storage.h"
 #include "system.h"
@@ -353,6 +354,17 @@ static void hState() {
   c["tamper_action"] = PA[g.cfg.tamper_action % 3];
   c["sensor_to_s"] = g.cfg.sensor_to_s;
   c["sensor_action"] = PA[g.cfg.sensor_action % 3];
+  c["temp_max"] = num4(g.cfg.temp_max);
+  c["temp_action"] = PA[g.cfg.temp_action % 3];
+  if (temp::count()) {
+    JsonArray t = r["t"].to<JsonArray>();
+    for (uint8_t i = 0; i < temp::count(); i++) {
+      float v = temp::value(i);
+      if (isnan(v)) t.add(nullptr);
+      else t.add(serialized(String(v, 1)));
+    }
+  }
+  if (g.tempHigh) r["temp_high"] = true;
   sendJson(200, d);
 }
 

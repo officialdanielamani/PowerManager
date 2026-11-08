@@ -101,6 +101,9 @@ def reading_text(device, user):
     if m.get("kwh") is not None and not (m.get("mc") and device.mc_mode == "independent"):
         limit = f" / {m['kwh_max']:g} kWh" if m.get("kwh_max") else ""
         lines.append(f"Session used {_fmt(m['kwh'], 3)} kWh{limit}" + (f" · {m['cost']}" if m.get("cost") else ""))
+    if m.get("temps"):
+        lines.append(("🔥 " if m.get("temp_high") else "🌡 ") + " · ".join(
+            f"{t['name']} {_fmt(t['c'], 1)} °C" for t in m["temps"]))
     lines.append(f"Reading at {m.get('reading_at') or '–'} ({settings.get('timezone')})")
     return "\n".join(lines)
 

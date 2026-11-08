@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "../config.h"
+#include "hwmap.h"
 
 enum KwhAction : uint8_t { KWH_END = 0, KWH_HOLD = 1, KWH_WARN = 2 };
 enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
@@ -14,7 +15,8 @@ enum ProtectAction : uint8_t { ACT_RUN = 0, ACT_HOLD = 1, ACT_END = 2 };
 enum StopReason : uint8_t {
   STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3, STOP_SENSOR = 4,
   STOP_MANUAL = 5,  // End / End all
-  STOP_MODE = 6     // the configuration mode changed (Shared <-> Independent)
+  STOP_MODE = 6,    // the configuration mode changed (Shared <-> Independent)
+  STOP_TEMP = 7     // over-temperature protection
 };
 // Sensor problem: no reply on I2C, or a reply that is not valid (module error / no valid result).
 enum SensorErr : uint8_t { SENS_OK = 0, SENS_NO_REPLY = 1, SENS_BAD = 2 };
@@ -60,8 +62,10 @@ struct MeterConfig {
   uint8_t tamper_action = ACT_HOLD;
   uint16_t sensor_to_s = 10;  // no valid reading for this long = sensor error; 0 = off
   uint8_t sensor_action = ACT_HOLD;
+  float temp_max = 0;         // over-temperature: any sensor above this (degC); 0 = off
+  uint8_t temp_action = ACT_HOLD;
   ChConfig ch[MC_MAX_CH];
-  char aux_name[8][21] = {};  // AUX relays: relays beyond the channels (names from the server)
+  char aux_name[16][21] = {};  // AUX relays: relays no channel uses (names from the server)
 };
 
 struct Reading {  // one channel
@@ -103,12 +107,13 @@ struct AppState {
   SessionState sess[MC_MAX_CH];
   uint32_t sidCounter = 0;     // session numbers, unique across channels
   bool everStarted = false;    // (unused since 0.7.2: sessions start with Renew)
-  uint8_t auxWant = 0;         // AUX relays: bit j = AUX j wanted ON (manual only, persisted)
+  uint16_t auxWant = 0;        // AUX relays: bit j = AUX j wanted ON (manual only, persisted)
   bool disabled = false;       // disabled by the server: relays off, no session (persisted)
   bool tamper = false;
   bool ac = true;
   bool sensorEverOk = false;
   bool voltOut = false;        // voltage outside the operating range (debounced)
+  bool tempHigh = false;       // a temperature sensor is above cfg.temp_max (until TEMP_HYST below)
   uint8_t sensorErr = SENS_OK; // set after cfg.sensor_to_s without a valid reading
   uint8_t lastReadErr = SENS_OK;
   NetStatus net = NET_SETUP_AP;
@@ -136,12 +141,9 @@ const char *sessStatusName(SessStatus s);
 // Config values are 32-bit floats: 0.05 would be sent as 0.050000001. Round to 4 decimals for JSON.
 inline double num4(float f) { return round((double)f * 10000.0) / 10000.0; }
 
-// AUX relays: relays on the board beyond the measuring channels. Manual ON / OFF only: not measured,
+// AUX relays: relays on the relay board(s) that no channel uses (CHANNELS in config.h). Manual ON / OFF only: not measured,
 // not tied to limits, sessions or protections (a disabled meter switches them off too).
-inline uint8_t auxCount() {
-  int n = (int)RELAY_COUNT - (int)g.nch;
-  return g.nch && n > 0 ? (uint8_t)n : 0;
-}
+inline uint8_t auxCount() { return hw::AUX < 16 ? hw::AUX : 16; }
 
 // Session slots in use: 1 in shared mode, one per channel in independent mode.
 inline uint8_t sessSlots() { return g.cfg.mode == MODE_INDEPENDENT ? (g.nch ? g.nch : 1) : 1; }

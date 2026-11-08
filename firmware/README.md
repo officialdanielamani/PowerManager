@@ -41,6 +41,30 @@ If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** 
 | WS2812 data | 48 (onboard LED on most Super Mini boards) |
 | DS3231 SDA / SCL (optional, set `HAS_DS3231 1`) | 8 / 9 |
 | Battery sense (optional, set `BATTERY_ENABLE 1`) | 1, through a divider (see `config.h`) |
+| DS18B20 temperature sensor(s) (optional, set `TEMP_ENABLE 1`) | 10, 4.7 kΩ pull-up to 3.3 V |
+
+**Optional parts** (`config.h`, 0 = not fitted): `HAS_DS3231`, `TAMPER_ENABLE`, `TEMP_ENABLE`, `BATTERY_ENABLE`,
+`MESH_ENABLE`. A part switched off is left out of the firmware completely, so the binary gets smaller; the server
+hides what the meter does not have (e.g. the tamper settings with `TAMPER_ENABLE 0`).
+
+What each switch costs (multi-channel firmware 0.8.0, ESP32-S3, measured):
+
+| Part | Flash |
+|---|---|
+| Mesh (`MESH_ENABLE`) | ~18 KB |
+| Battery sense (`BATTERY_ENABLE`, ADC calibration) | ~11 KB |
+| Temperature (`TEMP_ENABLE`) | ~5 KB |
+| DS3231 (`HAS_DS3231`) | ~1 KB |
+| Tamper switch (`TAMPER_ENABLE`) | < 1 KB |
+
+Default build ≈ 1.39 MB, everything optional off ≈ 1.37 MB. Most of the firmware is Wi-Fi, TLS, the web server
+and JSON, which every meter needs, so the switches save little: the *Minimal SPIFFS* partition scheme (1.9 MB
+app) is still required (the default scheme's 1.2 MB app space is too small either way).
+
+**Temperature (DS18B20):** up to `TEMP_MAX_SENSORS` (4) on one wire, numbered T1, T2 … by serial number (stable
+over a restart). Read every `TEMP_READ_MS` (10 s), sent with the readings, shown on the server (Info page, dashboard,
+history chart, Telegram) with an optional **Temperature Protection** (max °C, then run / relay off / end session).
+No extra Arduino library is needed.
 
 `HW_INFO` in `config.h` is free text (default `"AC Power Sensor 1Chn"` / `"DC Power Sensor 1Chn"`) shown by **Get meter info** on the server.
 

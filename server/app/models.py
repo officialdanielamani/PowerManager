@@ -206,6 +206,17 @@ class Measurement(db.Model):
     )
 
 
+class Temperature(db.Model):
+    """DS18B20 readings (firmware TEMP_ENABLE): sensor idx 0 = T1 ..., recorded every TEMP_READ_MS."""
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False)
+    idx = db.Column(db.Integer, nullable=False, default=0)
+    ts = db.Column(db.Integer, nullable=False)
+    c = db.Column(db.Float)
+
+    __table_args__ = (db.UniqueConstraint("device_fk", "idx", "ts", name="uq_temperature"),)
+
+
 class Rollup(db.Model):
     device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), primary_key=True)
     ch = db.Column(db.Integer, primary_key=True)

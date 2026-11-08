@@ -45,15 +45,15 @@ bool loadEverStarted();
 void saveEverStarted(bool b);
 
 // Per-channel relay wish and trip latch, one bit per channel.
-void loadFlags(uint8_t &wantMask, uint8_t &trippedMask);
-void saveFlags(uint8_t wantMask, uint8_t trippedMask);
+void loadFlags(uint16_t &wantMask, uint16_t &trippedMask);
+void saveFlags(uint16_t wantMask, uint16_t trippedMask);
 
 // Per-channel kWh counters (the rbAmp BASIC module does not keep energy).
 void loadEnergy(double e[MC_MAX_CH]);
 void saveEnergy(const double e[MC_MAX_CH]);
 uint8_t loadChannels();          // channel count of the module seen last time (0 = never)
-uint8_t loadAux();               // AUX relays wanted ON (bit mask)
-void saveAux(uint8_t mask);
+uint16_t loadAux();               // AUX relays wanted ON (bit mask)
+void saveAux(uint16_t mask);
 void saveChannels(uint8_t n);
 bool loadDisabled();
 void saveDisabled(bool disabled);

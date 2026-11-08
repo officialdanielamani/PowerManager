@@ -1,4 +1,4 @@
-// One I2C bus shared by the rbAmp module, the DS3231 and the relay board, used from several tasks.
+// One I2C bus shared by the rbAmp board(s), the DS3231 and the relay board(s), used from several tasks.
 #pragma once
 #include <Arduino.h>
 #include <Wire.h>
@@ -11,6 +11,7 @@ SemaphoreHandle_t mutex();
 bool readRegs(uint8_t addr, uint8_t reg, uint8_t *buf, size_t n);
 bool writeReg(uint8_t addr, uint8_t reg, uint8_t val);
 bool writeRaw(uint8_t addr, const uint8_t *data, size_t n);
+bool probe(uint8_t addr);  // something answers (ACK) at this address
 
 struct Lock {
   Lock() { xSemaphoreTakeRecursive(mutex(), portMAX_DELAY); }

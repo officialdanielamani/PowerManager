@@ -9,6 +9,7 @@
 #include "relays.h"
 #include "storage.h"
 #include "system.h"
+#include "temp.h"
 #include "timekeep.h"
 
 namespace control {
@@ -75,16 +76,16 @@ double slotKwh(uint8_t s) {
   return k > 0 ? k : 0;
 }
 
-static uint8_t wantMask() {
-  uint8_t m = 0;
-  for (uint8_t i = 0; i < MC_MAX_CH && i < 8; i++)
-    if (g.ch[i].wantOn) m |= 1 << i;
+static uint16_t wantMask() {
+  uint16_t m = 0;
+  for (uint8_t i = 0; i < MC_MAX_CH && i < 16; i++)
+    if (g.ch[i].wantOn) m |= 1u << i;
   return m;
 }
-static uint8_t tripMask() {
-  uint8_t m = 0;
-  for (uint8_t i = 0; i < MC_MAX_CH && i < 8; i++)
-    if (g.ch[i].tripped) m |= 1 << i;
+static uint16_t tripMask() {
+  uint16_t m = 0;
+  for (uint8_t i = 0; i < MC_MAX_CH && i < 16; i++)
+    if (g.ch[i].tripped) m |= 1u << i;
   return m;
 }
 static void saveFlags() { store::saveFlags(wantMask(), tripMask()); }
@@ -179,6 +180,7 @@ static const char *stopReasonName(uint8_t why) {
     case STOP_SENSOR: return "sensor";
     case STOP_MANUAL: return "stopped";
     case STOP_MODE: return "mode";
+    case STOP_TEMP: return "temp";
     default: return "disabled";
   }
 }
@@ -277,7 +279,7 @@ bool setAux(uint8_t i, bool on, const char *src, const char *&err) {
     err = "disabled";
     return false;
   }
-  uint8_t m = on ? (g.auxWant | (1 << i)) : (g.auxWant & ~(1 << i));
+  uint16_t m = on ? (g.auxWant | (1u << i)) : (g.auxWant & ~(1u << i));
   if (m != g.auxWant) {
     g.auxWant = m;
     store::saveAux(m);
@@ -285,7 +287,7 @@ bool setAux(uint8_t i, bool on, const char *src, const char *&err) {
       uint8_t i, relay;
       bool on;
       const char *src;
-    } ctx = {i, (uint8_t)(g.nch + i + 1), on, src};
+    } ctx = {i, hw::auxRelay(i), on, src};
     emitEvent("aux_relay", [](JsonObject o, void *p) {
       Ctx *c = (Ctx *)p;
       o["i"] = c->i;
@@ -293,7 +295,7 @@ bool setAux(uint8_t i, bool on, const char *src, const char *&err) {
       o["on"] = c->on;
       o["src"] = c->src;
     }, &ctx);
-    Serial.printf("[relay] AUX%u (relay %u) %s\n", i + 1, g.nch + i + 1, on ? "ON" : "OFF");
+    Serial.printf("[relay] AUX%u (relay %u) %s\n", i + 1, hw::auxRelay(i), on ? "ON" : "OFF");
     bump();
   }
   return true;
@@ -390,6 +392,7 @@ void stateJson(JsonObject o) {
   o["ac"] = g.ac;
   if (g.disabled) o["disabled"] = true;
   if (g.voltOut) o["volt_out"] = true;
+  if (g.tempHigh) o["temp_high"] = true;
   if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
   if (!g.nch) o["no_sensor"] = true;
   if (auxCount()) {
@@ -397,8 +400,8 @@ void stateJson(JsonObject o) {
     for (uint8_t j = 0; j < auxCount(); j++) {
       JsonObject a = ax.add<JsonObject>();
       a["i"] = j;
-      a["relay"] = g.nch + j + 1;
-      a["on"] = (bool)(g.auxWant & (1 << j)) && !g.disabled;
+      a["relay"] = hw::auxRelay(j);
+      a["on"] = (bool)(g.auxWant & (1u << j)) && !g.disabled;
     }
   }
   if (indep()) {
@@ -410,6 +413,67 @@ void stateJson(JsonObject o) {
 }
 
 // ------------------------------------------------------------------ telemetry
+
+// Temperatures ("t": [T1, T2 ...] degC, null = not readable) with the first reading after each new round.
+static bool tempsPending_ = false;
+static void addTemps(JsonDocument &doc) {
+  // caller holds StateLock
+  if (!tempsPending_ || !temp::count()) return;
+  tempsPending_ = false;
+  JsonArray t = doc["t"].to<JsonArray>();
+  for (uint8_t i = 0; i < temp::count(); i++) {
+    float c = temp::value(i);
+    if (isnan(c)) t.add(nullptr);
+    else t.add(serialized(String(c, 1)));
+  }
+}
+
+// Over-temperature: any sensor above cfg.temp_max triggers (event + action); every sensor back below
+// temp_max - TEMP_HYST clears. A sensor that cannot be read does not count either way.
+static void checkTemp() {
+  // caller holds StateLock
+  float hottest = NAN;
+  uint8_t which = 0;
+  for (uint8_t i = 0; i < temp::count(); i++) {
+    float c = temp::value(i);
+    if (!isnan(c) && (isnan(hottest) || c > hottest)) {
+      hottest = c;
+      which = i;
+    }
+  }
+  if (g.cfg.temp_max <= 0 || isnan(hottest)) {
+    if (g.tempHigh && g.cfg.temp_max <= 0) {
+      g.tempHigh = false;
+      emitEvent("temp_ok", [](JsonObject o, void *) { o["disabled"] = true; });
+      bump();
+    }
+    return;
+  }
+  struct Ctx {
+    uint8_t i;
+    float c, max;
+    const char *action;
+  } ctx = {which, hottest, g.cfg.temp_max, ACTION_NAME[g.cfg.temp_action % 3]};
+  if (!g.tempHigh && hottest > g.cfg.temp_max) {
+    g.tempHigh = true;
+    emitEvent("temp_high", [](JsonObject o, void *p) {
+      Ctx *c = (Ctx *)p;
+      o["i"] = c->i;
+      o["c"] = serialized(String(c->c, 1));
+      o["max"] = num4(c->max);
+      o["action"] = c->action;
+    }, &ctx);
+    if (g.cfg.temp_action == ACT_END) stopAll(STOP_TEMP);
+    bump();
+  } else if (g.tempHigh && hottest < g.cfg.temp_max - TEMP_HYST) {
+    g.tempHigh = false;
+    emitEvent("temp_ok", [](JsonObject o, void *p) {
+      o["i"] = ((Ctx *)p)->i;
+      o["c"] = serialized(String(((Ctx *)p)->c, 1));
+    }, &ctx);
+    bump();
+  }
+}
 
 // Session progress with every reading (the "state" message is only sent on changes).
 static void addSessionProgress(JsonDocument &doc) {
@@ -454,6 +518,7 @@ static void pushTelemetry() {
         c["e"] = serialized(String(g.ch[i].e, 4));
       }
     }
+    addTemps(doc);
     addSessionProgress(doc);
   }
   String s;
@@ -527,6 +592,7 @@ static void pushFrames() {
       }
     }
     nFrames_ = 0;
+    addTemps(doc);
     addSessionProgress(doc);
   }
   String s;
@@ -552,18 +618,24 @@ static void sensorFound() {
 }
 
 void begin() {
+#if TAMPER_ENABLE
   pinMode(PIN_TAMPER, INPUT_PULLUP);
+#endif
   relays::begin();  // all relays OFF first
   drdySem_ = xSemaphoreCreateBinary();
   pinMode(PIN_DRDY, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_DRDY), onDrdy, FALLING);
   {
     StateLock l;
+#if TAMPER_ENABLE
     g.tamper = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
-    g.nch = store::loadChannels();  // until the module answers (relays / sessions still work)
+#endif
+    g.nch = hw::NCH;  // from the CHANNELS table (relays / sessions work before the modules answer)
+    store::saveChannels(g.nch);
   }
+  temp::begin();
   if (rbamp::begin()) sensorFound();
-  else Serial.println("[rbamp] module not answering at start-up; retrying every 5 s");
+  else Serial.printf("[rbamp] not ready at start-up (%s); retrying every 5 s\n", rbamp::boardSummary().c_str());
 }
 
 // Sensor timeout: no valid reading for cfg.sensor_to_s seconds = sensor error (once), with the
@@ -837,6 +909,7 @@ static void checkRules(bool firstPass) {
   else if (g.cfg.tamper_protect && g.cfg.tamper_action == ACT_HOLD && g.tamper) meterBlock = "tamper";
   else if (g.cfg.volt_action == ACT_HOLD && g.voltOut) meterBlock = "voltage";
   else if (g.cfg.sensor_action == ACT_HOLD && g.sensorErr) meterBlock = "sensor";
+  else if (g.cfg.temp_action == ACT_HOLD && g.tempHigh) meterBlock = "temp";
   else if (g.paired && g.cfg.offline_off_min && g.offlineSinceMs &&
            millis() - g.offlineSinceMs >= g.cfg.offline_off_min * 60000UL)
     meterBlock = "offline";
@@ -883,19 +956,19 @@ static void checkRules(bool firstPass) {
   }
   // Write the board on a change, and every 2 s anyway (recovers from a glitch on the relay board).
   // AUX relays: only their manual ON / OFF (and OFF while the meter is disabled).
-  static uint8_t lastAux = 0xFF;
-  uint8_t aux = g.disabled ? 0 : g.auxWant;
+  static uint32_t lastAux = 0xFFFFFFFF;
+  uint16_t aux = g.disabled ? 0 : g.auxWant;
   if (aux != lastAux) {
     lastAux = aux;
     changed = true;
   }
   if (changed || millis() - lastWriteMs >= 2000) {
     lastWriteMs = millis();
-    uint8_t mask = 0;
-    for (uint8_t i = 0; i < g.nch && i < 8; i++)
-      if (g.ch[i].relayOn) mask |= 1 << i;
-    for (uint8_t j = 0; j < auxCount() && g.nch + j < 8; j++)
-      if (aux & (1 << j)) mask |= 1 << (g.nch + j);
+    uint32_t mask = 0;  // bit k = relay k+1 (CHANNELS in config.h says which relay a channel uses)
+    for (uint8_t i = 0; i < g.nch && i < hw::NCH; i++)
+      if (g.ch[i].relayOn && hw::CHANNEL[i].relay) mask |= 1UL << (hw::CHANNEL[i].relay - 1);
+    for (uint8_t j = 0; j < auxCount(); j++)
+      if (aux & (1u << j)) mask |= 1UL << (hw::auxRelay(j) - 1);
     bool ok = relays::write(mask);
     if (!ok && !relayErrSent) {
       relayErrSent = true;
@@ -909,6 +982,7 @@ static void checkRules(bool firstPass) {
 }
 
 static void checkTamper() {
+#if TAMPER_ENABLE
   static uint32_t changeSince = 0;
   bool open = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
   StateLock l;
@@ -928,6 +1002,7 @@ static void checkTamper() {
     emitEvent(open ? "tamper_open" : "tamper_close");
   }
   bump();
+#endif  // TAMPER_ENABLE (no switch fitted: never open)
 }
 
 void task(void *) {
@@ -972,6 +1047,15 @@ void task(void *) {
     }
     sys::crumb(sys::CR_CONTROL, "energy");
     energyTick();
+#if TEMP_ENABLE
+    sys::crumb(sys::CR_CONTROL, "temperature");
+    temp::poll();
+    if (temp::takeFresh()) {
+      StateLock l;
+      tempsPending_ = true;
+      checkTemp();
+    }
+#endif
     sys::crumb(sys::CR_CONTROL, "rules");
     checkTamper();
     checkRules(first);

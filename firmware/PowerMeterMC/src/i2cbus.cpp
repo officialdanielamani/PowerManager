@@ -31,6 +31,12 @@ bool readRegs(uint8_t addr, uint8_t reg, uint8_t *buf, size_t n) {
   return true;
 }
 
+bool probe(uint8_t addr) {
+  Lock l;
+  Wire.beginTransmission(addr);
+  return Wire.endTransmission() == 0;
+}
+
 bool writeReg(uint8_t addr, uint8_t reg, uint8_t val) {
   uint8_t d[2] = {reg, val};
   return writeRaw(addr, d, 2);

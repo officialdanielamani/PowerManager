@@ -2,7 +2,7 @@
 from sqlalchemy import text
 
 from ..extensions import db
-from ..models import Measurement, Rollup, RollupDirty, now
+from ..models import Measurement, Rollup, RollupDirty, Temperature, now
 from . import settings
 
 SPAN = {"h": 3600, "d": 86400}
@@ -115,6 +115,7 @@ def retention():
     days = max(1, settings.get_int("raw_retention_days", 90))
     cutoff = now() - days * 86400
     Measurement.query.filter(Measurement.ts < cutoff).delete(synchronize_session=False)
+    Temperature.query.filter(Temperature.ts < cutoff).delete(synchronize_session=False)  # kept like raw readings
     Rollup.query.filter(Rollup.period == "h", Rollup.bucket_start < now() - 730 * 86400) \
         .delete(synchronize_session=False)
     db.session.commit()

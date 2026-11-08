@@ -107,7 +107,7 @@ Other close codes: `1001` = server is shutting down (reconnect with backoff), `4
 | `state` | After any relay/session change, and in response to `get_state` | see 2.6 |
 | `cfg_ack` | After applying a config | `ver`, `ok`, `err?` |
 | `cmd_ack` | After a command | `ref` (copied from the `cmd`), `ok`, `err?` (`quota_exceeded`, `session_expired`, `tripped`, `unknown_cmd`) |
-| `info` | Reply to `get_info` | `ip`, `ssid`, `rssi`, `mac`, `heap`, `heap_min`, `psram`, `psram_free`, `fw`, `hw`, `hw_info` (config.h `HW_INFO`), `chip`, `flash`, `core`, `uptime`, `boot`, `outbox`, `time_src`, `stack` (free stack per task), `reset` (last reset reason, SAFE MODE), `clock` (meter clock, epoch; 0 = not set), `rtc` (DS3231 time; only with a DS3231, 0 = not readable), `sensor` / `kind` (AC/DC Power Sensor), and `bat_v` + `bat_pct` when `BATTERY_ENABLE` is on |
+| `info` | Reply to `get_info` | `ip`, `ssid`, `rssi`, `mac`, `heap`, `heap_min`, `psram`, `psram_free`, `fw`, `hw`, `hw_info` (config.h `HW_INFO`), `chip`, `flash`, `core`, `uptime`, `boot`, `outbox`, `time_src`, `stack` (free stack per task), `reset` (last reset reason, SAFE MODE), `clock` (meter clock, epoch; 0 = not set), `rtc` (DS3231 time; only with a DS3231, 0 = not readable), `sensor` / `kind` (AC/DC Power Sensor), `bat_v` + `bat_pct` when `BATTERY_ENABLE` is on, `temp_sensors` (serial number and value of each DS18B20) with `TEMP_ENABLE`; multi-channel: `clamps`, `sensor_boards`, `relay_board` |
 | `ping` | Every 30 s | – (server replies `pong`) |
 
 ### 2.3 Server → Device
@@ -161,6 +161,7 @@ Commands for an offline device are **queued** on the server and sent on reconnec
 | `tv` | 1 = clock was valid. 0 = the device had no valid time; then `ts` holds **uptime seconds** and the item also has `boot`. The server fixes the time using the `hello` (`up` + `ts` of that boot) when possible, otherwise marks the item `time_estimated`. |
 | `v` V, `a` A, `w` W, `pf` 0–1, `hz` Hz, `e` kWh | PZEM values. `e` is the PZEM's total energy register. |
 | channel missing / `null` values | No reading (e.g. AC lost: the PZEM measurement side is powered from AC) |
+| `t` | Only with temperature sensors (firmware `TEMP_ENABLE`), on the first item after each new round of readings (every `TEMP_READ_MS`): `[24.5, 31.0]` °C for T1, T2 …; `null` = that sensor could not be read |
 | `se` | Only when the item has no reading: `no_reply` (the sensor did not answer: sensor/wiring fault or no AC) or `bad` (garbled reply / CRC error). The server then shows "no current reading" instead of the old values; no `se` and no channel = no AC |
 
 **Ordering rule:** telemetry items and events share **one ordered queue** on the device (the offline buffer). Nothing bypasses it, not even a live event, so `seq` arrives in increasing order and an `ack` with `last_seq` safely confirms everything up to it.
@@ -181,6 +182,7 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch. With Tamper Protection on, `tamper_open` carries `action` |
 | `sensor_error` / `sensor_ok` | No valid reading for `sensor.timeout_s`: `{"kind": "no_reply"\|"bad", "after_s": 10, "action": "hold"}`; `sensor_ok` = first valid reading again |
+| `temp_high` / `temp_ok` | A temperature sensor went above `temp.max`: `i` (sensor, 0 = T1), `c` (°C), `max`, `action`; `temp_ok` = every sensor back 5 °C below the limit (`i`, `c`), or the limit was switched off (`disabled`) |
 | `voltage_out` / `voltage_ok` | Voltage left / returned to the operating range: `v`, `min`, `max`, `dir` (`low`/`high`), `action` |
 | `ac_lost` / `ac_restored` | V < 50 V or PZEM not responding for 3 reads / back to normal |
 | `trip_reset` | Over-current latch cleared (`src`: server/local, `by`: username) |
@@ -253,6 +255,8 @@ The server sends the whole config every time (no partial updates).
 | `tamper.action` | `run` / `hold` / `end` | `hold` | With protection on, when the panel opens: **run** = event only; **hold** = relay OFF while open; **end** = end the session (reason `tamper`) |
 | `sensor.timeout_s` | 0, 3–3600 s | 10 | No valid reading for this long = sensor error (`sensor_error` event); 0 = off. A power cut also stops the PZEM from answering |
 | `sensor.action` | `run` / `hold` / `end` | `hold` | **run** = event only; **hold** = relay OFF until readings return (`sensor_ok`); **end** = end the session (reason `sensor`) |
+| `temp.max` | 0–125 °C | 0 | Over-temperature (any DS18B20 sensor); 0 = off |
+| `temp.action` | `run` / `hold` / `end` | `hold` | **run** = event only; **hold** = relay(s) OFF until it cools down (`temp_ok`); **end** = end the session (reason `temp`) |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |
 
 The device checks every value. If anything is out of range it rejects the **whole** config (`cfg_ack ok:false err:"<field>"`) and keeps the old one.

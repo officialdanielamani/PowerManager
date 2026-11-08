@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.6.5"
+#define FW_VERSION "0.6.6"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -36,8 +36,20 @@
 #define RELAY_ACTIVE_HIGH 1
 #define TAMPER_OPEN_LEVEL HIGH   // with NC switch to GND + pull-up, HIGH = open
 
-// Set to 1 if a DS3231 RTC module is fitted.
-#define HAS_DS3231 0
+// ---------------------------------------------------------------- optional parts (0 = not fitted)
+// A part switched off here is left out of the firmware completely (smaller binary).
+#define HAS_DS3231 0        // DS3231 RTC module on PIN_I2C_SDA / PIN_I2C_SCL (keeps the time without Wi-Fi)
+#define TAMPER_ENABLE 1     // tamper / panel switch on PIN_TAMPER
+#define TEMP_ENABLE 0       // DS18B20 temperature sensor(s) on PIN_TEMP
+// (BATTERY_ENABLE and MESH_ENABLE are in their own sections below.)
+
+// ---------------------------------------------------------------- temperature (TEMP_ENABLE 1)
+// DS18B20 sensors on one 1-Wire pin (4.7 k pull-up to 3.3 V). Up to TEMP_MAX_SENSORS; T1, T2 ... are
+// sorted by the sensors' serial number, so they keep their numbers over a restart.
+#define PIN_TEMP 10
+#define TEMP_MAX_SENSORS 4
+#define TEMP_READ_MS 10000        // read (and record) the temperatures this often
+#define TEMP_HYST 5.0f            // over-temperature clears this many degC below the limit
 
 // ---------------------------------------------------------------- battery (optional)
 // Measures the DC UPS / backup battery through a resistor divider into an ADC pin:

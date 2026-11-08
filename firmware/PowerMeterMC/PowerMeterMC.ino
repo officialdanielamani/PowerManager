@@ -14,9 +14,11 @@
 #include "config.h"
 #include "src/app_state.h"
 #include "src/control.h"
+#include "src/i2cbus.h"
 #include "src/led.h"
 #include "src/net.h"
 #include "src/outbox.h"
+#include "src/rbamp.h"
 #include "src/relays.h"
 #include "src/storage.h"
 #include "src/system.h"
@@ -33,13 +35,13 @@ static void loadState() {
   for (uint8_t i = 0; i < MC_MAX_CH; i++) store::loadSession(i, g.sess[i]);
   g.sidCounter = store::loadSidCounter();
   g.everStarted = store::loadEverStarted();
-  uint8_t want, trip;
+  uint16_t want, trip;
   store::loadFlags(want, trip);
   double e[MC_MAX_CH];
   store::loadEnergy(e);
   for (uint8_t i = 0; i < MC_MAX_CH; i++) {
-    g.ch[i].wantOn = want & (1 << i);
-    g.ch[i].tripped = trip & (1 << i);
+    g.ch[i].wantOn = want & (1u << i);
+    g.ch[i].tripped = trip & (1u << i);
     g.ch[i].e = e[i];
   }
   g.disabled = store::loadDisabled();
@@ -59,9 +61,9 @@ static void printBanner() {
   Serial.printf(" PowerMeter %s (%s)   Device ID: %s\n", FW_VERSION, SENSOR_NAME, store::deviceId().c_str());
   {
     StateLock l;
-    Serial.printf(" Sensor: rbAmp %s, %u channel(s)%s   Relays: %s at 0x%02X %s   Mode: %s\n", g.variant, g.nch,
-                  g.nch ? "" : " (NOT FOUND)", relays::boardName(), RELAY_ADDRESS, relays::ok() ? "OK" : "NOT ANSWERING",
+    Serial.printf(" Sensor: rbAmp %s, %u channel(s)   Mode: %s\n", rbamp::boardSummary().c_str(), g.nch,
                   g.cfg.mode == MODE_INDEPENDENT ? "independent" : "shared");
+    Serial.printf(" Relays: %s%s\n", relays::summary().c_str(), auxCount() ? (String("   AUX relays: ") + auxCount()).c_str() : "");
   }
   Serial.printf(" Setup Wi-Fi: %s   password: %s   (%s)\n", net::apSsid().c_str(),
                 store::apPassword().c_str(), ap ? "ON now, open http://192.168.4.1" : "off");
@@ -72,8 +74,42 @@ static void printBanner() {
   Serial.printf(" Status: %s   Boot #%u   %u item(s) waiting to send\n", NET[st],
                 (unsigned)store::bootCount(), outbox::count());
   Serial.printf(" Free heap %u B, lowest %u B. %s\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), sys::stackReport().c_str());
-  Serial.println(" Type 'info' + Enter to show this again.");
+  Serial.println(" Type 'info' + Enter to show this again ('help' for more commands).");
   Serial.println("==============================================");
+}
+
+// Serial Monitor maintenance commands (rbAmp boards).
+static void serialCommand(const String &cmd) {
+  if (cmd.equalsIgnoreCase("i2c scan")) {
+    Serial.print("[i2c] answering:");
+    int n = 0;
+    for (uint8_t a = 0x08; a <= 0x77; a++)
+      if (i2cbus::probe(a)) {
+        Serial.printf(" 0x%02X", a);
+        n++;
+      }
+    Serial.println(n ? "" : " nothing (check SDA / SCL / power)");
+    return;
+  }
+  // rbamp addr <old> <new>   e.g. "rbamp addr 0x50 0x51" (only that module connected)
+  if (cmd.startsWith("rbamp addr ")) {
+    String rest = cmd.substring(11);
+    rest.trim();
+    int sp = rest.indexOf(' ');
+    long from = sp > 0 ? strtol(rest.substring(0, sp).c_str(), nullptr, 0) : -1;
+    long to = sp > 0 ? strtol(rest.substring(sp + 1).c_str(), nullptr, 0) : -1;
+    if (from < 0x08 || from > 0x77 || to < 0x08 || to > 0x77) {
+      Serial.println("[rbamp] usage: rbamp addr 0x50 0x51   (old address, new address; only that module connected)");
+      return;
+    }
+    Serial.printf("[rbamp] changing the address 0x%02lX -> 0x%02lX ...\n", from, to);
+    String msg;
+    bool ok = rbamp::changeAddress((uint8_t)from, (uint8_t)to, msg);
+    Serial.printf("[rbamp] %s%s\n", ok ? "" : "FAILED: ", msg.c_str());
+    if (ok) Serial.println("[rbamp] now set RBAMP_BOARDS in config.h to match (or connect the next module)");
+    return;
+  }
+  Serial.println("Commands: info | i2c scan | rbamp addr <old> <new>");
 }
 
 void setup() {
@@ -143,8 +179,9 @@ void loop() {
     if (c == '\n' || c == '\r') {
       line.trim();
       if (line.equalsIgnoreCase("info")) printBanner();
+      else if (line.length()) serialCommand(line);
       line = "";
-    } else if (line.length() < 32) {
+    } else if (line.length() < 40) {
       line += c;
     }
   }

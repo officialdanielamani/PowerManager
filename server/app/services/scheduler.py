@@ -32,7 +32,7 @@ def check_disconnected():
 
 def cleanup():
     """Per-user notification and per-meter data/event auto-delete (each only if enabled)."""
-    from ..models import Event, Measurement, Notification, Rollup, Session, User
+    from ..models import Event, Measurement, Notification, Rollup, Session, Temperature, User
     t = now()
     for u in User.query.filter_by(notif_autodel=True).all():
         Notification.query.filter(Notification.user_fk == u.id,
@@ -47,6 +47,7 @@ def cleanup():
             cut = t - d.data_autodel_days * 86400
             Measurement.query.filter(Measurement.device_fk == d.id, Measurement.ts < cut).delete(synchronize_session=False)
             Rollup.query.filter(Rollup.device_fk == d.id, Rollup.bucket_start < cut).delete(synchronize_session=False)
+            Temperature.query.filter(Temperature.device_fk == d.id, Temperature.ts < cut).delete(synchronize_session=False)
         if d.events_autodel:
             cut = t - d.events_autodel_days * 86400
             Incident.query.filter(Incident.device_fk == d.id, Incident.ended_at.isnot(None),

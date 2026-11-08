@@ -2,13 +2,13 @@
 // ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
 #pragma once
 
-#define FW_VERSION "0.7.3"
+#define FW_VERSION "0.8.0"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
 #define METER_KIND "ac"
 #define SENSOR_NAME "AC Power Sensor"
-#define MC_MAX_CH 7               // rbAmp BASIC: up to 7 current channels (UI7)
+#define MC_MAX_CH 16              // channels the firmware can hold (the CHANNELS table below sets how many are used)
 #define FW_TYPE "rbamp-mc"        // stored on the meter: a different firmware type clears old state
 
 // ---------------------------------------------------------------- pins (check your board)
@@ -22,27 +22,65 @@
 
 #define TAMPER_OPEN_LEVEL HIGH   // with NC switch to GND + pull-up, HIGH = open
 
-// Set to 1 if a DS3231 RTC module is fitted (used in this project).
-#define HAS_DS3231 1
+// ---------------------------------------------------------------- optional parts (0 = not fitted)
+// A part switched off here is left out of the firmware completely (smaller binary).
+#define HAS_DS3231 1        // DS3231 RTC module on the I2C bus (keeps the time without Wi-Fi)
+#define TAMPER_ENABLE 1     // tamper / panel switch on PIN_TAMPER
+#define TEMP_ENABLE 0       // DS18B20 temperature sensor(s) on PIN_TEMP (see "temperature" below)
+// (BATTERY_ENABLE and MESH_ENABLE are in their own sections below.)
 
-// ---------------------------------------------------------------- power sensor: rbAmp BASIC
-// The variant (UI1/UI2/UI3/UI5/UI7 or I1/I2/I3 = channels, with or without voltage) is read from
-// the module. Set the SCT-013 model of the clamp on each channel (written to the module at start-up):
-//   1 = SCT-013-005 (5 A)    2 = SCT-013-010 (10 A)   6 = SCT-013-020 (20 A)   3 = SCT-013-030 (30 A)
-//   4 = SCT-013-050 (50 A)   7 = SCT-013-060 (60 A)   5 = SCT-013-100 (100 A)  0 = leave as it is
-// (CT-series modules with factory-paired clamps: use 0 for every channel.)
-#define RBAMP_ADDRESS 0x50
-#define RBAMP_CT_MODELS {3, 3, 3, 3, 3, 3, 3}   // channel 1..7
-#define SUPPLY_LOST_VOLTAGE 50.0f // below this = AC lost (the module keeps answering: it has its own 5 V)
+// ---------------------------------------------------------------- power sensor boards: rbAmp BASIC
+// One entry per rbAmp module on the I2C bus: its I2C address. Board 1 = first entry, board 2 = second...
+// New modules all answer at 0x50: give every extra module its own address ONCE, with only that module
+// connected, by typing in the Serial Monitor:   rbamp addr 0x50 0x51
+// ("i2c scan" lists what answers on the bus.) DRDY is taken from board 1.
+#define RBAMP_BOARDS { 0x50 }              // e.g. { 0x50, 0x51 } = an rbAmp UI5 + an rbAmp I7
+#define SUPPLY_LOST_VOLTAGE 50.0f          // below this = AC lost (the module keeps answering: it has its own 5 V)
 
-// ---------------------------------------------------------------- relay board (I2C)
-// One relay per measuring channel: relay 1 = channel 1, ... Extra relays stay off.
-#define RELAY_PCF8574 1     // PCF8574 / PCF8574A I/O expander driving SSRs / a relay module
-#define RELAY_XL9535 2      // XL9535 (TCA9535-compatible) relay board, 1/2/4/8 relays
-#define RELAY_DRIVER RELAY_XL9535
-#define RELAY_ADDRESS 0x20  // PCF8574 0x20-0x27, PCF8574A 0x38-0x3F, XL9535 0x20-0x27 (A0-A2 jumpers)
-#define RELAY_COUNT 2       // relays on the board (1, 2, 4 or 8)
-#define RELAY_ACTIVE_HIGH 1 // XL9535 boards: 1. PCF8574 with low-side SSR / relay modules: usually 0
+// Clamp models (written to the module at start-up). CT-series modules with factory-paired clamps: SCT_KEEP.
+#define SCT_KEEP 0
+#define SCT_5A 1      // SCT-013-005
+#define SCT_10A 2     // SCT-013-010
+#define SCT_20A 6     // SCT-013-020
+#define SCT_30A 3     // SCT-013-030
+#define SCT_50A 4     // SCT-013-050
+#define SCT_60A 7     // SCT-013-060
+#define SCT_100A 5    // SCT-013-100
+
+// ---------------------------------------------------------------- relay boards (I2C)
+#define RELAY_PCF8574 1     // PCF8574 / PCF8574A I/O expander driving SSRs / a relay module (up to 8)
+#define RELAY_XL9535 2      // XL9535 (TCA9535-compatible) relay board (1/2/4/8 relays; up to 16 outputs)
+// One entry per relay board: { driver, I2C address, number of relays, active high }.
+//   Address: PCF8574 0x20-0x27, PCF8574A 0x38-0x3F, XL9535 0x20-0x27 (A0-A2 jumpers).
+//   Active high: XL9535 boards 1; PCF8574 with low-side SSR / relay modules usually 0.
+// Relays are numbered across the boards: board 1 = relays 1..n, board 2 continues with n+1 ...
+#define RELAY_BOARDS { {RELAY_XL9535, 0x20, 2, 1} }
+
+// ---------------------------------------------------------------- channels: what is wired where
+// One line per measured channel, in order: the first line is CH1, the second CH2 ...
+//   board: 1 = first rbAmp in RBAMP_BOARDS      input: current input on that board (1..7)
+//   clamp: SCT_* model of the clamp on it       relay: relay number switching it (0 = no relay)
+// Relays that no channel uses are AUX relays (manual ON / OFF from the server, not metered).
+// Voltage comes from the first board that has a voltage input (UI* variants).
+#define CHANNELS { \
+  /* board  input  clamp     relay */ \
+  {  1,     1,     SCT_30A,  1 },   /* CH1 */ \
+  {  1,     2,     SCT_30A,  2 },   /* CH2 */ \
+}
+// Example, rbAmp UI5 (0x50) + rbAmp I7 (0x51), 8 channels, two XL9535 8-relay boards (0x20, 0x21):
+//   #define RBAMP_BOARDS { 0x50, 0x51 }
+//   #define RELAY_BOARDS { {RELAY_XL9535, 0x20, 8, 1}, {RELAY_XL9535, 0x21, 8, 1} }
+//   #define CHANNELS { {1, 1, SCT_100A, 1}, {1, 2, SCT_30A, 2}, {1, 3, SCT_30A, 3}, {1, 4, SCT_30A, 4}, \
+//                      {1, 5, SCT_30A, 5}, {2, 1, SCT_20A, 9}, {2, 2, SCT_20A, 10}, {2, 3, SCT_20A, 11} }
+//   -> relays 6, 7, 8 and 12..16 are AUX relays.
+
+// ---------------------------------------------------------------- temperature (TEMP_ENABLE 1)
+// DS18B20 sensors on one 1-Wire pin (4.7 k pull-up to 3.3 V). Up to TEMP_MAX_SENSORS; T1, T2 ... are
+// sorted by the sensors' serial number, so they keep their numbers over a restart.
+#define PIN_TEMP 6
+#define TEMP_MAX_SENSORS 4
+#define TEMP_READ_MS 10000        // read (and record) the temperatures this often
+#define TEMP_HYST 5.0f            // over-temperature clears this many degC below the limit
 
 // ---------------------------------------------------------------- battery (optional)
 // Measures the DC UPS / backup battery through a resistor divider into an ADC pin:

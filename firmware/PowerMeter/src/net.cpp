@@ -18,6 +18,7 @@
 #include "outbox.h"
 #include "storage.h"
 #include "system.h"
+#include "temp.h"
 #include "timekeep.h"
 
 namespace net {
@@ -254,6 +255,14 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   }
   m.sensor_to_s = sto;
   m.sensor_action = action(se["action"] | "hold");
+  JsonObject tp = c["temp"];
+  float tmax = tp["max"] | 0.0f;
+  if (tmax < 0 || tmax > 125) {
+    err = "temp.max";
+    return false;
+  }
+  m.temp_max = tmax;
+  m.temp_action = action(tp["action"] | "hold");
   const char *act = ch["kwh_action"] | "";
   if (!strcmp(act, "hold")) m.kwh_action = KWH_HOLD;
   else if (!strcmp(act, "warn")) m.kwh_action = KWH_WARN;
@@ -306,6 +315,8 @@ static String pairBody(const PairRequest &r) {
   caps["relays"] = 1;
   caps["inputs"].to<JsonArray>().add("tamper");
   caps["rtc"] = (bool)HAS_DS3231;
+  caps["tamper"] = (bool)TAMPER_ENABLE;
+  if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
   caps["amp_rating"] = SENSOR_AMP_RATING;
   String payload;
   serializeJson(body, payload);
@@ -467,6 +478,8 @@ static void sendHello() {
   caps["mc"] = false;  // single-channel firmware (the server detects a change of hardware type)
   caps["channels"] = SENSOR_CHANNELS;
   caps["rtc"] = (bool)HAS_DS3231;
+  caps["tamper"] = (bool)TAMPER_ENABLE;
+  if (TEMP_ENABLE) caps["temp"] = temp::count();
   caps["amp_rating"] = SENSOR_AMP_RATING;
   control::stateJson(doc["state"].to<JsonObject>());
   sendJson(doc);
@@ -516,6 +529,7 @@ static void sendInfo() {
   doc["hw"] = HW_NAME;
   doc["hw_info"] = HW_INFO;
   doc["sensor"] = SENSOR_NAME;
+  if (TEMP_ENABLE) doc["temp_sensors"] = temp::summary();
   doc["kind"] = METER_KIND;
   doc["chip"] = ESP.getChipModel();
   doc["flash"] = ESP.getFlashChipSize();

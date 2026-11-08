@@ -187,12 +187,16 @@
       {{ action_radios('volt_action', val('volt_action', cfg.get('volt_action', 'hold')), protect_actions, 'hold', 'If out of range') }}
       <hr>
 
-      {# 5. tamper #}
+      {# 5. tamper (hidden when the firmware has no tamper switch: TAMPER_ENABLE 0) #}
+      {% set no_tamper = (d.caps or {}).get('tamper') == false %}
+      {% if no_tamper %}<div class="small text-body-secondary">Tamper switch: not fitted on this meter (TAMPER_ENABLE 0 in its config.h).</div>{% endif %}
+      <div class="{{ 'd-none' if no_tamper }}">
       <label class="form-label fw-semibold mb-1">Tamper Protection</label>
       <div class="form-check"><input class="form-check-input" type="checkbox" name="tamper_protect" id="tamper_protect" {{ chk('tamper_protect', cfg.get('tamper_protect')) }}>
         <label class="form-check-label" for="tamper_protect">Enable Tamper Protection</label>
         <div class="form-text">Off: panel open/close is only recorded and notified.</div></div>
       <div id="tamperOpts">{{ action_radios('tamper_action', val('tamper_action', cfg.get('tamper_action', 'hold')), protect_actions, 'hold', 'If tamper detected') }}</div>
+      </div>
       <hr>
 
       {# 6. sensor timeout #}
@@ -203,13 +207,27 @@
       </div>
       <div class="form-text">0 = off. {% if d.is_mc %}The power module has its own 5 V supply and keeps answering in a power cut (that shows as No AC), so this means a module or wiring fault.{% else %}The sensor is powered from the {{ 'DC supply' if d.kind == 'dc' else 'AC side' }}, so a power cut also looks like "no response".{% endif %} Readings coming back clear it.</div>
       {{ action_radios('sensor_action', val('sensor_action', cfg.get('sensor_action', 'hold')), protect_actions, 'hold', 'Then') }}
+
+      {# 7. temperature (DS18B20, firmware TEMP_ENABLE) #}
+      {% if (d.caps or {}).get('temp') is not none %}
+      <hr>
+      <label class="form-label fw-semibold mb-1">Temperature Protection</label>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span>If a temperature sensor goes above</span>
+        <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" step="0.5" min="0" max="125" name="temp_max" value="{{ val('temp_max', cfg.get('temp_max', 0)) }}"><span class="input-group-text">°C</span></div>
+      </div>
+      <div class="form-text">0 = off. {{ (d.caps or {}).get('temp') }} sensor(s) found by the meter. Clears 5 °C below the limit. Example: 70 °C for an SSR heat sink or the enclosure.</div>
+      {{ action_radios('temp_action', val('temp_action', cfg.get('temp_action', 'hold')), protect_actions, 'hold', 'Then') }}
+      {% else %}
+      <input type="hidden" name="temp_max" value="{{ cfg.get('temp_max', 0) }}"><input type="hidden" name="temp_action" value="{{ cfg.get('temp_action', 'hold') }}">
+      {% endif %}
     </div><div class="card-footer d-flex align-items-center gap-2"><span class="small text-warning-emphasis d-none pm-dirty-note"><i class="bi bi-exclamation-circle me-1"></i>Unsaved changes</span><button class="btn btn-sm btn-primary ms-auto"><i class="bi bi-save me-1"></i>Save</button></div></div>
   </div>
 
   {% if d.is_mc %}
   <div class="col-12">
     <div class="card"><div class="card-header fw-semibold">Channels</div><div class="card-body">
-      <p class="small text-body-secondary mb-2">One relay per channel (relay 1 = channel 1). Max current is per channel in both modes (it protects that circuit); 0 = off, the trip stays latched until Reset Trip.
+      <p class="small text-body-secondary mb-2">Which relay switches which channel is set in the meter's <code>config.h</code> (<code>CHANNELS</code>). Max current is per channel in both modes (it protects that circuit); 0 = off, the trip stays latched until Reset Trip.
         <span data-mc="independent">In <strong>Independent</strong> mode each channel also has its own kWh limit and session.</span></p>
       {% for c in cfg.get('ch', []) %}{% set i = loop.index0 %}
       {% set sm = val('sess_mode_' ~ i, c.get('sess_mode', 'none')) %}{% set dm = c.get('dur_min', 1440) %}

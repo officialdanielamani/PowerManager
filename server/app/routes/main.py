@@ -65,7 +65,11 @@ def meter_summary(d, show_price=None, user=None):
     cost_t = round(kwh_t * price, 4) if show_price and price is not None and kwh_t is not None else None
     rev = sorted(int(k) for k, v in (st.get("clamp_rev") or {}).items()
                  if v.get("flag") and (allowed is None or int(k) in allowed))
+    tvals = reading.get("t") or []
     out = {
+        "temps": [{"name": f"T{i + 1}", "c": c} for i, c in enumerate(tvals)],
+        "temps_at": settings.fmt_ts(reading.get("t_ts")) if reading.get("t_ts") else None,
+        "temp_high": bool(st.get("temp_high")),
         "clamp_rev": [d.channel_name(i) if d.is_mc else "" for i in rev],  # channels with a reversed clamp
         "clamp_rev_idx": rev,
         "tare": {"a": d.tare_a, "w": d.tare_w} if tare else None,

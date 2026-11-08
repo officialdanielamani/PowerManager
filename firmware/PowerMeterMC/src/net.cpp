@@ -20,6 +20,7 @@
 #include "relays.h"
 #include "storage.h"
 #include "system.h"
+#include "temp.h"
 #include "timekeep.h"
 
 namespace net {
@@ -254,6 +255,11 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (sto < 0 || sto > 3600) { err = "sensor.timeout_s"; return false; }
   m.sensor_to_s = sto;
   m.sensor_action = action3(se["action"] | "hold");
+  JsonObject tp = c["temp"];
+  float tmax = tp["max"] | 0.0f;
+  if (tmax < 0 || tmax > 125) { err = "temp.max"; return false; }
+  m.temp_max = tmax;
+  m.temp_action = action3(tp["action"] | "hold");
   for (JsonObject ch : c["ch"].as<JsonArray>()) {
     int i = ch["i"] | -1;
     if (i < 0 || i >= MC_MAX_CH) continue;
@@ -269,7 +275,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   }
   for (JsonObject a : c["aux"].as<JsonArray>()) {
     int i = a["i"] | -1;
-    if (i >= 0 && i < 8) strlcpy(m.aux_name[i], a["name"] | "", sizeof(m.aux_name[i]));
+    if (i >= 0 && i < 16) strlcpy(m.aux_name[i], a["name"] | "", sizeof(m.aux_name[i]));
   }
   out = m;
   return true;
@@ -312,11 +318,16 @@ static void fillCaps(JsonObject caps) {
   caps["sensor"] = "rbamp";
   caps["variant"] = g.variant;
   if (g.nch) caps["channels"] = n;  // unknown until the module answers (the server then waits)
-  caps["relays"] = min<int>(n, RELAY_COUNT);
+  int withRelay = 0;  // channels that have a relay (CHANNELS in config.h)
+  for (uint8_t i = 0; i < n && i < hw::NCH; i++) withRelay += hw::CHANNEL[i].relay ? 1 : 0;
+  caps["relays"] = withRelay;
+  if (hw::BOARDS > 1) caps["boards"] = hw::BOARDS;
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxCount();  // AUX relays (relays beyond the channels)
   caps["rtc"] = (bool)HAS_DS3231;
+  caps["tamper"] = (bool)TAMPER_ENABLE;
+  if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
   float maxA = 0;
   JsonArray r = caps["ratings"].to<JsonArray>();
   for (uint8_t i = 0; i < n; i++) {
@@ -545,7 +556,9 @@ static void sendInfo() {
     StateLock l;
     doc["sensor_detail"] = String("rbAmp ") + g.variant + ", " + g.nch + " channel(s)";
   }
-  doc["relay_board"] = String(relays::boardName()) + (relays::ok() ? " OK" : " NOT ANSWERING");
+  doc["relay_board"] = relays::summary();
+  doc["sensor_boards"] = rbamp::boardSummary();
+  if (TEMP_ENABLE) doc["temp_sensors"] = temp::summary();
   doc["clamps"] = rbamp::clampSummary();
   doc["kind"] = METER_KIND;
   doc["chip"] = ESP.getChipModel();

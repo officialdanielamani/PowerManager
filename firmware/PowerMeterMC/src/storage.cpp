@@ -146,13 +146,13 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 102) return false;  // older layout: use defaults, the server re-sends the config
+  if (b.version != 103) return false;  // older layout (0.8.0: 16 channels): use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 102;
+  b.version = 103;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }
@@ -188,24 +188,26 @@ void saveEverStarted(bool b) {
   if (pm.getBool("started", false) != b) pm.putBool("started", b);
 }
 
-void loadFlags(uint8_t &wantMask, uint8_t &trippedMask) {
-  wantMask = pm.getUChar("wantm", 0xFF);
-  trippedMask = pm.getUChar("tripm", 0);
+// 16 channels since 0.8.0 (16-bit masks); older firmware kept 8-bit masks under "wantm" / "tripm".
+void loadFlags(uint16_t &wantMask, uint16_t &trippedMask) {
+  wantMask = pm.isKey("wantw") ? pm.getUShort("wantw", 0xFFFF) : (uint16_t)(0xFF00 | pm.getUChar("wantm", 0xFF));
+  trippedMask = pm.isKey("tripw") ? pm.getUShort("tripw", 0) : pm.getUChar("tripm", 0);
 }
-void saveFlags(uint8_t wantMask, uint8_t trippedMask) {
-  if (pm.getUChar("wantm", 0xFF) != wantMask) pm.putUChar("wantm", wantMask);
-  if (pm.getUChar("tripm", 0) != trippedMask) pm.putUChar("tripm", trippedMask);
+void saveFlags(uint16_t wantMask, uint16_t trippedMask) {
+  if (pm.getUShort("wantw", 0xFFFF) != wantMask || !pm.isKey("wantw")) pm.putUShort("wantw", wantMask);
+  if (pm.getUShort("tripw", 0) != trippedMask || !pm.isKey("tripw")) pm.putUShort("tripw", trippedMask);
 }
 
 void loadEnergy(double e[MC_MAX_CH]) {
   for (int i = 0; i < MC_MAX_CH; i++) e[i] = 0;
-  if (pm.getBytesLength("energy") == sizeof(double) * MC_MAX_CH) pm.getBytes("energy", e, sizeof(double) * MC_MAX_CH);
+  size_t n = pm.getBytesLength("energy");  // older firmware saved 7 channels: keep their counters
+  if (n && n % sizeof(double) == 0 && n <= sizeof(double) * MC_MAX_CH) pm.getBytes("energy", e, n);
 }
 void saveEnergy(const double e[MC_MAX_CH]) { pm.putBytes("energy", e, sizeof(double) * MC_MAX_CH); }
 uint8_t loadChannels() { return pm.getUChar("nch", 0); }
-uint8_t loadAux() { return pm.getUChar("auxm", 0); }
-void saveAux(uint8_t mask) {
-  if (pm.getUChar("auxm", 0) != mask) pm.putUChar("auxm", mask);
+uint16_t loadAux() { return pm.isKey("auxw") ? pm.getUShort("auxw", 0) : pm.getUChar("auxm", 0); }
+void saveAux(uint16_t mask) {
+  if (pm.getUShort("auxw", 0) != mask || !pm.isKey("auxw")) pm.putUShort("auxw", mask);
 }
 void saveChannels(uint8_t n) {
   if (pm.getUChar("nch", 0) != n) pm.putUChar("nch", n);

@@ -13,7 +13,7 @@ from flask_login import current_user, login_required
 from ..extensions import db
 from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, User,
-                      PairingCode, Rollup, RollupDirty, Session, now)
+                      PairingCode, Rollup, RollupDirty, Session, Temperature, now)
 from ..services import access, commands, devconfig, history, hub, incidents, ingest, lifecycle, settings, validation
 from ..services import tare as tare_svc
 from .decorators import staff_required
@@ -339,7 +339,7 @@ def sessions_delete(pk):
 # ------------------------------------------------------------------ actions
 
 def _delete_history(device):
-    for model in (Measurement, Rollup, RollupDirty, Session, Incident, Command, Notification,
+    for model in (Measurement, Temperature, Rollup, RollupDirty, Session, Incident, Command, Notification,
                   NotificationRule, MeterViewer):
         model.query.filter_by(device_fk=device.id).delete(synchronize_session=False)
     PairingCode.query.filter_by(device_fk=device.id).update({"device_fk": None})
@@ -479,6 +479,12 @@ def incident_detail_text(inc):
             parts.append(f"after {d['after_s']} s")
         if d.get("action"):
             parts.append({"end": "session ended", "hold": "relay off", "run": "power kept on"}.get(d["action"], d["action"]))
+    if inc.type == "temp":
+        if d.get("c") is not None:
+            sensor = f"T{int(d['i']) + 1} " if str(d.get("i", "")).isdigit() else ""
+            parts.append(f"{sensor}{d.get('c')} °C > {d.get('max')} °C")
+        if d.get("action"):
+            parts.append({"end": "session ended", "hold": "relay off", "run": "power kept on"}.get(d["action"], d["action"]))
     if inc.type == "tamper" and d.get("action"):
         parts.append({"end": "session ended", "hold": "relay off", "run": "power kept on"}.get(d["action"], d["action"]))
     if d.get("opened_by") == "state_sync" or d.get("closed_by") == "state_sync":
@@ -591,6 +597,7 @@ def history_json(pk):
     data = history.query(device.id, ch, start, end)
     if request.args.get("tared") == "1":
         data = history.apply_tare(data, tare_svc.offsets(device))
+    data["temps"] = history.temps(device.id, start, end)
     data["start_local"] = settings.fmt_ts(start, False)
     data["end_local"] = settings.fmt_ts(end, False)
     data["tz_offset_s"] = _tz_offset_s()

@@ -57,7 +57,7 @@ var PM = (function () {
   var STATUS = {active: ['success', 'Active'], quota: ['warning', 'kWh limit reached'], expired: ['warning', 'Session ended'],
                 tripped: ['danger', 'Over-current trip'], unknown: ['secondary', 'No data yet'],
                 over: ['warning', 'Over kWh limit (power on)'], ended_voltage: ['danger', 'Session ended (voltage)'],
-                ended_tamper: ['danger', 'Session ended (tamper)'], ended_sensor: ['danger', 'Session ended (sensor error)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
+                ended_tamper: ['danger', 'Session ended (tamper)'], ended_sensor: ['danger', 'Session ended (sensor error)'], ended_temp: ['danger', 'Session ended (temperature)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
                 disabled: ['dark', 'Disabled'], none: ['warning', 'No session (Renew to start)'],
                 independent_mixed: ['info', 'Per channel'], ended_stopped: ['secondary', 'Session ended (End)'],
                 ended_mode: ['secondary', 'Session ended (mode changed)']};
@@ -65,7 +65,8 @@ var PM = (function () {
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
                   voltage: '<span class="badge pm-bg-orange"><i class="bi bi-activity"></i> Voltage</span>',
-                  sensor: '<span class="badge text-bg-danger"><i class="bi bi-cpu"></i> Sensor</span>'};
+                  sensor: '<span class="badge text-bg-danger"><i class="bi bi-cpu"></i> Sensor</span>',
+                  temp: '<span class="badge text-bg-danger"><i class="bi bi-thermometer-high"></i> Temperature</span>'};
 
   function set(root, field, fn) {
     root.querySelectorAll('[data-field="' + field + '"]').forEach(fn);
@@ -158,6 +159,12 @@ var PM = (function () {
       el.style.width = pct + '%'; el.classList.toggle('bg-warning', pct >= 100);
     });
     set(root, 'status', function (el) { var s = STATUS[m.status] || ['secondary', m.status]; el.innerHTML = '<span class="badge text-bg-' + s[0] + '">' + esc(s[1]) + '</span>'; });
+    set(root, 'temps', function (el) {
+      var t = m.temps || [];
+      el.classList.toggle('d-none', !t.length);
+      el.classList.toggle('text-danger', !!m.temp_high);
+      el.innerHTML = t.length ? '<i class="bi bi-thermometer-half me-1"></i>' + t.map(function (x) { return esc(x.name) + ' ' + (x.c == null ? '–' : fmt(x.c, 1)) + ' °C'; }).join(' · ') : '';
+    });
     set(root, 'clamp', function (el) {
       var r = m.clamp_rev || [];
       el.innerHTML = r.length ? '<span class="badge text-bg-danger" title="Negative power with real current: the current clamp may be fitted the wrong way round (its kWh is not counted)">' +
@@ -261,6 +268,13 @@ var PM = (function () {
   // ------------------------------------------------------------ meter info page
   function fmt(v, d) { return v == null ? '–' : Number(v).toFixed(d); }
 
+  function tempTiles(m) {  // DS18B20 temperatures (T1, T2 ...)
+    if (!m.temps || !m.temps.length) return '';
+    return '<div class="row g-2 mt-0">' + m.temps.map(function (t) {
+      return '<div class="col-6 col-md-3"><div class="pm-stat' + (m.temp_high ? ' border border-danger' : '') + '"><div class="small text-body-secondary"><i class="bi bi-thermometer-half me-1"></i>Temperature ' + esc(t.name) + '</div>' +
+        '<div class="pm-big">' + (t.c == null ? '–' : fmt(t.c, 1)) + ' <small class="fs-6 text-body-secondary">°C</small></div></div></div>';
+    }).join('') + '</div>' + (m.temp_high ? '<div class="small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>Temperature above the limit</div>' : '');
+  }
   function renderLatest(m) {
     var box = document.getElementById('latest');
     var html = '';
@@ -298,6 +312,7 @@ var PM = (function () {
     html += '<div class="row g-2"><div class="' + col + '"><div class="pm-stat"><div class="small text-body-secondary">Session used</div><div class="pm-big">' + fmt(m.kwh, 3) + ' <small class="fs-6 text-body-secondary">kWh</small></div></div></div>' +
       '<div class="' + col + '"><div class="pm-stat"><div class="small text-body-secondary">Balance</div><div class="pm-big">' + (remain == null ? '∞' : remain.toFixed(3)) + ' <small class="fs-6 text-body-secondary">kWh</small></div></div></div>' +
       (m.cost ? '<div class="col-12 col-md-4"><div class="pm-stat"><div class="small text-body-secondary">Session cost</div><div class="pm-big">' + esc(m.cost) + '</div></div></div>' : '') + '</div>';
+    html += tempTiles(m);
     box.innerHTML = html;
   }
 
@@ -391,7 +406,7 @@ var PM = (function () {
         ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
         ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],
         ['Sensor', i.sensor ? i.sensor + (i.sensor_detail ? ' · ' + i.sensor_detail : '') : null], ['Clamps in use', i.clamps || null],
-        ['Relay board', i.relay_board || null], ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
+        ['Power modules', i.sensor_boards || null], ['Relay board', i.relay_board || null], ['Temperature sensors', i.temp_sensors || null], ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
         ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Relay switches since boot', i.relay_sw], ['Last reset', i.reset], ['Meter clock', i.clock_local ? i.clock_local + (i.time_src ? ' (from ' + i.time_src + ')' : '') : (i.clock === 0 ? 'not set' : null)],
         ['RTC (DS3231)', i.clock == null ? null : (i.rtc == null ? 'not fitted' : (i.rtc_local || 'not readable'))], ['Waiting to send', i.outbox != null ? i.outbox + ' item(s)' : null], ['Memory', i.stack]];
       return '<table class="table table-sm mb-2">' + rows.filter(function (r) { return r[1] != null && r[1] !== ''; })
@@ -472,6 +487,7 @@ var PM = (function () {
     var chart = null, last = null;
     var colors = {w: '#0d6efd', a: '#fd7e14', v: '#198754', kwh: '#6f42c1'};
     var units = {w: 'W', a: 'A', v: 'V', kwh: 'kWh'};
+    var tempColors = ['#dc3545', '#20c997', '#6610f2', '#fd7e14', '#0dcaf0', '#d63384', '#6c757d', '#198754'];
 
     function query() {
       var q = 'range=' + state.range + '&ch=' + state.ch + (tared ? '&tared=1' : '');
@@ -515,7 +531,14 @@ var PM = (function () {
       var s = state.series, span = last.end - last.start, off = last.tz_offset_s;
       var pts = last.points, labels = pts.map(function (p) { return label(p.t, span, off); });
       var datasets;
-      if (s === 'kwh') {
+      if (s === 'temp') {
+        var tp = last.temps || {t: [], series: [], names: []};
+        labels = tp.t.map(function (t) { return label(t, span, off); });
+        datasets = tp.series.map(function (vals, i) {
+          var c = tempColors[i % tempColors.length];
+          return {label: tp.names[i] + ' (°C)', data: vals, borderColor: c, backgroundColor: c, pointRadius: 0, borderWidth: 2, tension: .2, spanGaps: true};
+        });
+      } else if (s === 'kwh') {
         if (last.source === 'raw') {
           datasets = [{label: 'Energy used since range start (kWh)', data: pts.map(function (p) { return p.kwh_cum; }), borderColor: colors.kwh, backgroundColor: colors.kwh + '22', fill: true, pointRadius: 0, borderWidth: 2}];
         } else {
@@ -532,7 +555,7 @@ var PM = (function () {
       chart = new Chart(document.getElementById('chart'), {
         type: 'line', data: {labels: labels, datasets: datasets},
         options: {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'index', intersect: false},
-                  scales: {x: {ticks: {maxTicksLimit: 10, autoSkip: true}}, y: {beginAtZero: s !== 'v'}},
+                  scales: {x: {ticks: {maxTicksLimit: 10, autoSkip: true}}, y: {beginAtZero: s !== 'v' && s !== 'temp'}},
                   plugins: {legend: {display: true, labels: {boxWidth: 12}}}}
       });
       var st = last.stats, html = '';
@@ -542,6 +565,10 @@ var PM = (function () {
           '<div>min <b>' + fmt(k.min, x[3]) + '</b> · max <b>' + fmt(k.max, x[3]) + '</b> · avg <b>' + fmt(k.avg, x[3]) + '</b></div></div></div>';
       });
       html += '<div class="col-6 col-md-3"><div class="pm-stat"><div class="text-body-secondary">Energy used</div><div><b>' + fmt(st.kwh, 3) + '</b> kWh' + (last.cost ? ' · <b>' + esc(last.cost) + '</b>' : '') + ' · ' + (st.n || 0) + ' samples</div></div></div>';
+      ((last.temps || {}).stats || []).forEach(function (k, i) {
+        html += '<div class="col-6 col-md-3"><div class="pm-stat"><div class="text-body-secondary">Temperature ' + esc(last.temps.names[i]) + ' (°C)</div>' +
+          '<div>min <b>' + fmt(k.min, 1) + '</b> · max <b>' + fmt(k.max, 1) + '</b> · avg <b>' + fmt(k.avg, 1) + '</b></div></div></div>';
+      });
       document.getElementById('stats').innerHTML = html;
       document.getElementById('rangeLabel').textContent = last.start_local + ' → ' + last.end_local + ' (' + {raw: 'raw', h: 'hourly', d: 'daily'}[last.source] + ')';
     }
