@@ -76,7 +76,13 @@ rbamp addr 0x50 0x51
 ```
 
 The module stores the new address and restarts. Then put it in `RBAMP_BOARDS`. Do this once per extra module.
-Type `help` for the list of serial commands.
+Type `help` for the list of serial commands. **`relay test`** switches every relay output ON for 1.5 s in turn,
+whatever the rules say (wiring check: works without the rbAmp, without a session and with a sensor error), then
+hands the relays back to the rules.
+
+Why a channel relay stays OFF in normal use: no session yet (press **Renew** on the server), the **Sensor Timeout**
+(no reading for 10 s → relay off by default; set it to 0 or "run as usual" for bench tests without a module), a trip,
+the kWh / time limit, tamper or voltage protection. The Info page shows the reason on each channel ("Off: sensor").
 
 ## 4. How it works
 

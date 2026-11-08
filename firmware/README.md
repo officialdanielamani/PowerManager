@@ -61,6 +61,10 @@ switches the measured line; every other relay is an **AUX relay** with manual / 
 server (see `docs/multichannel.md` § AUX relays). Mistakes (too many outputs on a board, a GPIO relay without a pin)
 stop the compile with a message.
 
+**Wiring check:** type `relay test` in the Serial Monitor: every relay output switches ON for 1.5 s in turn, whatever
+the rules (session, sensor timeout, trip) say. Without that, the line relay stays OFF until a session is started with
+**Renew** and while the sensor gives no reading (Sensor Timeout, default action "relay off").
+
 **Temperature / humidity:** DS18B20 (`TEMP_DS18B20`) and SHT20 / SHT3x / SHT4x on the I²C bus (`TEMP_SHT`,
 `SHT_SENSORS { {SHT_4X, 0x44} }`) can be used together; T1, T2 … = the SHTs in config order, then the DS18B20s.
 SHTs add humidity (%RH), shown next to the temperature and usable in AUX event rules.

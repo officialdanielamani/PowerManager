@@ -15,7 +15,8 @@ bool setRelay(uint8_t ch, bool on, const char *src, const char *&err);
 void renew(int8_t ch, const char *reason);  // shared: the session; independent: that channel / all
 void endSessions(int8_t ch);                // End / End all (relay off until renewed)
 bool resetTrip(int8_t ch, const char *src, const char *by);
-void bumpState();           // the state changed (also used by auxrelay)
+void bumpState();
+void relayTest(bool on);    // serial "relay test": the rules stop writing the relays while it runs           // the state changed (also used by auxrelay)
 void applyConfig(const MeterConfig &c);
 void setDisabled(bool disabled);  // server "disable" / "enable"
 void reportNow();           // record a reading now and send everything now ("Get Data Now")

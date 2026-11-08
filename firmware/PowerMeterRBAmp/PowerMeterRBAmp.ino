@@ -91,6 +91,23 @@ static void serialCommand(const String &cmd) {
     Serial.println(n ? "" : " nothing (check SDA / SCL / power)");
     return;
   }
+  // relay test: every relay output ON for 1.5 s in turn, whatever the rules say (wiring check)
+  if (cmd.equalsIgnoreCase("relay test")) {
+    control::relayTest(true);
+    relays::write(0);
+    Serial.printf("[relay test] %u relay output(s): %s\n", hw::RELAYS, relays::summary().c_str());
+    for (uint8_t k = 0; k < hw::RELAYS; k++) {
+      Serial.printf("[relay test] relay %u ON\n", k + 1);
+      bool ok = relays::write(1UL << k);
+      if (!ok) Serial.println("[relay test]   board not answering (I2C address / wiring)");
+      delay(1500);
+      relays::write(0);
+      delay(300);
+    }
+    control::relayTest(false);
+    Serial.println("[relay test] done: the relays follow the rules again");
+    return;
+  }
   // rbamp addr <old> <new>   e.g. "rbamp addr 0x50 0x51" (only that module connected)
   if (cmd.startsWith("rbamp addr ")) {
     String rest = cmd.substring(11);
@@ -109,7 +126,7 @@ static void serialCommand(const String &cmd) {
     if (ok) Serial.println("[rbamp] now set RBAMP_BOARDS in config.h to match (or connect the next module)");
     return;
   }
-  Serial.println("Commands: info | i2c scan | rbamp addr <old> <new>");
+  Serial.println("Commands: info | i2c scan | relay test | rbamp addr <old> <new>");
 }
 
 void setup() {

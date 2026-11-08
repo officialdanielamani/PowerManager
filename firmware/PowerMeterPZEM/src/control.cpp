@@ -514,6 +514,12 @@ static void noteRelaySwitch(const char *block) {
   }
 }
 
+static std::atomic<bool> relayTest_{false}, relayForce_{false};
+void relayTest(bool on) {
+  relayTest_ = on;
+  if (!on) relayForce_ = true;  // put back what the rules want right away
+}
+
 static void writeRelays(bool force);
 
 static void checkRules(bool firstPass) {
@@ -651,6 +657,8 @@ static void writeRelays(bool force) {
   if (CHANNEL_RELAY && g.relayOn) mask |= 1UL << (CHANNEL_RELAY - 1);
   bool i2c = false;
   for (uint8_t i = 0; i < hw::RELAY_BOARD_COUNT; i++) i2c |= hw::RELAY_BOARD[i].driver != RELAY_GPIO;
+  if (relayTest_) return;  // serial "relay test" owns the outputs
+  if (relayForce_.exchange(false)) force = true;
   if (!force && mask == lastMask && !(i2c && millis() - lastWriteMs >= 2000)) return;
   lastMask = mask;
   lastWriteMs = millis();

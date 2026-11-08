@@ -31,6 +31,7 @@ double sessionKwhLimit();  // the value the kWh limit uses (tared if "tare_limit
 void stateJson(JsonObject o);   // protocol "state" body
 uint32_t stateVersion();        // changes whenever the state changes
 uint32_t relaySwitches();       // relay output changes since boot (diagnostics)
-void bumpState();               // the state changed (also used by auxrelay)
+void bumpState();
+void relayTest(bool on);    // serial "relay test": the rules stop writing the relays while it runs               // the state changed (also used by auxrelay)
 
 }  // namespace control

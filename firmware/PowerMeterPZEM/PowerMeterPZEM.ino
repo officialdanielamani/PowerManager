@@ -14,6 +14,7 @@
 #include "src/app_state.h"
 #include "src/auxrelay.h"
 #include "src/control.h"
+#include "src/hwmap.h"
 #include "src/relays.h"
 #include "src/led.h"
 #include "src/net.h"
@@ -64,8 +65,30 @@ static void printBanner() {
   Serial.printf(" Status: %s   Boot #%u   %u item(s) waiting to send\n", NET[st],
                 (unsigned)store::bootCount(), outbox::count());
   Serial.printf(" Free heap %u B, lowest %u B. %s\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), sys::stackReport().c_str());
-  Serial.println(" Type 'info' + Enter to show this again.");
+  Serial.println(" Type 'info' + Enter to show this again ('help' for more commands).");
   Serial.println("==============================================");
+}
+
+// Serial Monitor maintenance commands.
+static void serialCommand(const String &cmd) {
+  // relay test: every relay output ON for 1.5 s in turn, whatever the rules say (wiring check)
+  if (cmd.equalsIgnoreCase("relay test")) {
+    control::relayTest(true);
+    relays::write(0);
+    Serial.printf("[relay test] %u relay output(s): %s\n", hw::RELAYS, relays::summary().c_str());
+    for (uint8_t k = 0; k < hw::RELAYS; k++) {
+      Serial.printf("[relay test] relay %u ON\n", k + 1);
+      bool ok = relays::write(1UL << k);
+      if (!ok) Serial.println("[relay test]   board not answering (I2C address / wiring)");
+      delay(1500);
+      relays::write(0);
+      delay(300);
+    }
+    control::relayTest(false);
+    Serial.println("[relay test] done: the relays follow the rules again");
+    return;
+  }
+  Serial.println("Commands: info | relay test");
 }
 
 void setup() {
@@ -137,6 +160,7 @@ void loop() {
     if (c == '\n' || c == '\r') {
       line.trim();
       if (line.equalsIgnoreCase("info")) printBanner();
+      else if (line.length()) serialCommand(line);
       line = "";
     } else if (line.length() < 32) {
       line += c;

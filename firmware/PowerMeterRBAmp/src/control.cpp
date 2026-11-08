@@ -269,6 +269,12 @@ bool setRelay(uint8_t ch, bool on, const char *src, const char *&err) {
   return true;
 }
 
+static std::atomic<bool> relayTest_{false}, relayForce_{false};
+void relayTest(bool on) {
+  relayTest_ = on;
+  if (!on) relayForce_ = true;  // put back what the rules want right away
+}
+
 void bumpState() { bump(); }
 
 bool resetTrip(int8_t ch, const char *src, const char *by) {
@@ -934,7 +940,8 @@ static void checkRules(bool firstPass) {
     lastAux = aux;
     changed = true;
   }
-  if (changed || millis() - lastWriteMs >= 2000) {
+  if (relayTest_) return;  // serial "relay test" owns the outputs
+  if (changed || relayForce_.exchange(false) || millis() - lastWriteMs >= 2000) {
     lastWriteMs = millis();
     uint32_t mask = 0;  // bit k = relay k+1 (CHANNELS in config.h says which relay a channel uses)
     for (uint8_t i = 0; i < g.nch && i < hw::NCH; i++)
