@@ -95,6 +95,9 @@ def create_app(overrides=None):
     from .services import incidents, settings
     app.jinja_env.filters["dt"] = settings.fmt_ts
     app.jinja_env.filters["duration"] = incidents.fmt_duration
+    from .services import access as _access
+    from flask_login import current_user as _cu
+    app.jinja_env.globals["can_manage"] = lambda d: _access.can_manage(_cu, d)
     app.jinja_env.globals["tz_label"] = lambda: f"{settings.get('timezone')} ({settings.utc_offset_str()})"
 
     @app.errorhandler(404)

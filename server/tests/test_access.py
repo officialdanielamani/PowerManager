@@ -155,8 +155,8 @@ def test_out_of_range_readings_are_dropped(app):
 def test_csv_and_price_permissions(app, admin):
     with app.app_context():
         a = _meter("Dryer A", "AAAA1111")
-        settings.set_many({"currency": "MYR", "price_per_kwh": "0.21"})
         d = db.session.get(Device, a)
+        d.currency, d.price_per_kwh = "MYR", 0.21
         d.last_state = {"sess": {"sid": 1, "kwh": 10.0, "status": "active"}}
         db.session.commit()
     _viewer(admin, "tenant1", [a])

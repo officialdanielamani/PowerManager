@@ -13,12 +13,17 @@ def healthz():
     return jsonify(ok=True)
 
 
-def meter_summary(d, show_price=None):
-    """Data for a dashboard card / live update (shared with meters.live)."""
+def meter_summary(d, show_price=None, user=None):
+    """Data for a dashboard card / live update (shared with meters.live). A viewer limited to some
+    channels of a multi-channel meter only gets those channels (and no whole-meter kWh / cost)."""
+    user = user if user is not None else current_user
+    allowed = access.allowed_channels(user, d)
     st = d.last_state or {}
     sess = st.get("sess") or {}
     reading = d.last_reading or {}
     chans = reading.get("ch") or []
+    if allowed is not None:
+        chans = [c for c in chans if c.get("i", 0) in allowed]
     w_total = sum((c.get("w") or 0) for c in chans) if chans else None
     relays = st.get("relay") or []
     ongoing = [i.type for i in Incident.query.filter_by(device_fk=d.id, ended_at=None).all()]
@@ -40,8 +45,8 @@ def meter_summary(d, show_price=None):
         cur = Session.query.filter_by(device_fk=d.id, gen=d.pair_gen, sid=sess["sid"]).first()
     sess_start = sess.get("start") or (cur.started_at if cur else None)
     if show_price is None:
-        show_price = access.can_price(current_user)
-    currency, price = settings.price(d.kind)
+        show_price = access.can_price(user)
+    currency, price = settings.price(d)
     kwh_now = sess.get("kwh")
     if cur is not None and cur.price_per_kwh is not None:
         currency, price = cur.currency or "", cur.price_per_kwh
@@ -101,11 +106,13 @@ def meter_summary(d, show_price=None):
         "auto": bool((d.cfg or {}).get("auto")),
     }
     if d.is_mc:
-        out.update(_mc_summary(d, out, show_price))
+        out.update(_mc_summary(d, out, show_price, allowed))
+        if allowed is not None and d.mc_mode != "independent":  # whole-meter session totals: hidden
+            out.update({"kwh": None, "kwh_max": None, "kwh_tared": None, "cost": None, "cost_tared": None})
     return out
 
 
-def _mc_summary(d, base, show_price):
+def _mc_summary(d, base, show_price, allowed=None):
     """Multi-channel meter: one entry per channel (reading, relay, and in independent mode its session)."""
     st = d.last_state or {}
     cfg = d.cfg or {}
@@ -117,6 +124,8 @@ def _mc_summary(d, base, show_price):
     t = now()
     channels, totals, costs, maxes = [], 0.0, [], []
     for i in range(devconfig.channel_count(d)):
+        if allowed is not None and i not in allowed:
+            continue
         rd, rl = readings.get(i) or {}, relays.get(i) or {}
         c = {"i": i, "name": d.channel_name(i), "label": (ccfg[i].get("name") if i < len(ccfg) else "") or "",
              "w": rd.get("w"), "a": rd.get("a"), "pf": rd.get("pf"), "e": rd.get("e"),
@@ -135,7 +144,7 @@ def _mc_summary(d, base, show_price):
             if not ss.get("sid"):
                 status = "none"
             kwh = ss.get("kwh")
-            cur, price = settings.price(d.kind)
+            cur, price = settings.price(d)
             if rec is not None and rec.price_per_kwh is not None:
                 cur, price = rec.currency or "", rec.price_per_kwh
             cost = round(float(kwh) * price, 4) if show_price and price is not None and kwh is not None else None
@@ -159,8 +168,9 @@ def _mc_summary(d, base, show_price):
     aux = [{"i": a.get("i"), "relay": a.get("relay"), "on": bool(a.get("on")),
             "name": f"AUX{a.get('i', 0) + 1}" + (f" {names[a['i']].get('name')}" if isinstance(a.get("i"), int)
                                                   and a["i"] < len(names) and names[a["i"]].get("name") else "")}
-           for a in st.get("aux") or [] if isinstance(a, dict)]
+           for a in st.get("aux") or [] if isinstance(a, dict) and allowed is None]
     out = {"mc": True, "mode": d.mc_mode, "channels": channels, "aux": aux, "drdy": bool(cfg.get("drdy")),
+           "limited": allowed is not None,
            "relay_on": any(c["relay_on"] for c in channels)}
     if indep:
         statuses = {c["status"] for c in channels}
@@ -226,7 +236,7 @@ def notifications_read_all():
 @bp.get("/firmware")
 @login_required
 def firmware():
-    if not current_user.is_admin:
+    if not current_user.is_staff:
         from flask import abort
         abort(403)
     return render_template("firmware.html")

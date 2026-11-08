@@ -22,21 +22,27 @@ def test_dc_meter_detected_at_pairing(app, admin):
     assert ">DC</span>" in html
 
 
-def test_separate_ac_and_dc_price(app, admin):
-    r = admin.post("/settings/server", data={"timezone": "UTC", "raw_retention_days": "90",
-                                             "currency": "MYR", "price_per_kwh": "0.21",
-                                             "dc_currency": "MYR", "dc_price_per_kwh": "0.35"})
-    assert r.status_code in (200, 302)
-    assert settings.price("ac") == ("MYR", 0.21)
-    assert settings.price("dc") == ("MYR", 0.35)
-
-
-def test_dc_session_uses_dc_price_and_csv_has_no_pf(app, admin):
-    with app.app_context():
-        settings.set_many({"currency": "MYR", "price_per_kwh": "0.21", "dc_currency": "MYR", "dc_price_per_kwh": "0.35"})
+def test_price_is_per_meter(app, admin):
+    """Settings -> Server has no price any more; each meter has its own (default 0.25)."""
     _pair_dc(admin, _code(admin))
     with app.app_context():
         d = Device.query.filter_by(device_id="DCM23H4R").one()
+        assert settings.price(d) == ("", 0.25)
+        pk = d.id
+    html = admin.get("/settings/?tab=server").get_data(as_text=True)
+    assert "price_per_kwh" not in html
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        d.price_per_kwh = None
+        db.session.commit()
+        assert settings.price(db.session.get(Device, pk)) == (None, None)
+
+
+def test_dc_session_uses_dc_price_and_csv_has_no_pf(app, admin):
+    _pair_dc(admin, _code(admin))
+    with app.app_context():
+        d = Device.query.filter_by(device_id="DCM23H4R").one()
+        d.currency, d.price_per_kwh = "MYR", 0.35
         conn = FakeConn()
         t = now() - 100
         ingest.handle(conn, d, {"t": "evt", "seq": 1, "ts": t, "tv": 1, "e": "session_start", "sid": 1, "max": 0})

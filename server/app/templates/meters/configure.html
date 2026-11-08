@@ -52,6 +52,24 @@
         <input class="form-control" name="name" required maxlength="40" value="{{ val('name', d.name) }}"></div>
       <div class="mb-3"><label class="form-label">Info</label>
         <input class="form-control" name="info" maxlength="200" value="{{ val('info', d.info) }}" placeholder="e.g. Basement"></div>
+      {% if current_user.is_admin %}
+      <div class="mb-3"><label class="form-label">Owner</label>
+        {% set own = val('owner', d.owner_fk or '')|string %}
+        <select class="form-select" name="owner" style="max-width:320px">
+          <option value="">Admin</option>
+          {% for mg in managers %}<option value="{{ mg.id }}" {{ 'selected' if own == mg.id|string }}>Manager {{ mg.username }}</option>{% endfor %}
+        </select>
+        <div class="form-text">The owner manages this meter (configuration, control, delete) and links its own view-only users. Transferring it removes the links of the previous manager's view-only users.</div></div>
+      {% endif %}
+      <div class="mb-3"><label class="form-label">Electricity price</label>
+        <div class="input-group" style="max-width:340px">
+          <input class="form-control" name="currency" maxlength="8" placeholder="MYR" value="{{ val('currency', d.currency) }}" style="max-width:100px">
+          <input class="form-control" name="price_per_kwh" inputmode="decimal" placeholder="0.25" value="{{ val('price_per_kwh', '' if d.price_per_kwh is none else ('%.4f'|format(d.price_per_kwh)).rstrip('0').rstrip('.')) }}">
+          <span class="input-group-text">/ kWh</span></div>
+        <div class="form-text">Cost of each session and of the history range. Locked in when a session starts (changing it does not change past or running sessions). Empty = no cost shown.</div></div>
+      <div class="mb-3"><div class="form-check"><input class="form-check-input" type="checkbox" name="positive_only" id="positive_only" {{ chk('positive_only', d.positive_only) }}>
+        <label class="form-check-label" for="positive_only">Positive watt only</label></div>
+        <div class="form-text">A negative power reading (e.g. a clamp fitted the wrong way round, or noise with no load) is recorded as 0 W.</div></div>
       <div class="mb-3"><label class="form-label">Data</label>
         {% set has_drdy = d.is_mc and (d.caps or {}).get('drdy', true) %}
         {% set dmode = 'drdy' if (val('drdy', 'on' if cfg.get('drdy') else 'off') == 'on' and has_drdy) else 'normal' %}
@@ -270,11 +288,23 @@
 
   <div class="col-12">
     <div class="card"><div class="card-header fw-semibold">Link this meter to users</div><div class="card-body">
-      <p class="small text-body-secondary mb-2">View-only users only see meters linked to them. This list stays on the server; it is never sent to the meter.</p>
+      <p class="small text-body-secondary mb-2">View-only users only see meters linked to them.{% if d.is_mc %} Tick channels to show a user only those channels (none ticked = the whole meter).{% endif %} This list stays on the server; it is never sent to the meter.</p>
       {% for v in viewers %}
-        <div class="form-check form-check-inline">
-          <input class="form-check-input" type="checkbox" name="viewers" value="{{ v.id }}" id="v{{ v.id }}" {{ 'checked' if v.id in linked or v.view_all }} {{ 'disabled' if v.view_all }}>
-          <label class="form-check-label" for="v{{ v.id }}">{{ v.username }}{% if v.view_all %} <span class="badge text-bg-light">sees all meters</span>{% endif %}{% if not v.is_enabled %} <span class="badge text-bg-dark">disabled</span>{% endif %}</label>
+        {% set link = linked.get(v.id) %}
+        {% set sees_all = v.view_all and (v.manager_fk is none or v.manager_fk == d.owner_fk) %}
+        <div class="d-flex flex-wrap align-items-center gap-2 py-1 {{ 'border-bottom' if d.is_mc and not loop.last }}">
+          <div class="form-check mb-0" style="min-width:180px">
+            <input class="form-check-input" type="checkbox" name="viewers" value="{{ v.id }}" id="v{{ v.id }}" {{ 'checked' if link or sees_all }} {{ 'disabled' if sees_all }}>
+            <label class="form-check-label" for="v{{ v.id }}">{{ v.username }}{% if sees_all %} <span class="badge text-bg-light">sees all meters</span>{% endif %}{% if not v.is_enabled %} <span class="badge text-bg-dark">disabled</span>{% endif %}</label>
+          </div>
+          {% if d.is_mc and not sees_all %}
+          <input type="hidden" name="vch_set_{{ v.id }}" value="1">
+          <span class="small text-body-secondary">Channels:</span>
+          {% for i in range(n_channels) %}
+          <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" name="vch_{{ v.id }}" value="{{ i }}" id="vch{{ v.id }}_{{ i }}" {{ 'checked' if link and link.channels and i in link.channels }}>
+            <label class="form-check-label small" for="vch{{ v.id }}_{{ i }}">{{ d.channel_name(i) }}</label></div>
+          {% endfor %}
+          {% endif %}
         </div>
       {% else %}
         <div class="small text-body-secondary">No view-only users yet. Create them in <a href="{{ url_for('settings.index', tab='users') }}">Settings → Users</a>.</div>

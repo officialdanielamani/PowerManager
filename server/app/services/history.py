@@ -155,10 +155,33 @@ def apply_tare(data, tare):
     return data
 
 
-def csv_wide(device, start, end):
+def _only_channels(header, rows, first, n, allowed):
+    """Keep only the columns of the allowed channels (4 columns per channel from index `first`),
+    and drop rows that have no value for any of them."""
+    keep = [i for i in range(len(header)) if not first <= i < first + 4 * n or (i - first) // 4 in allowed]
+    chan_cols = [k for k, i in enumerate(keep) if first <= i < first + 4 * n]
+    out = []
+    for ts, vals in rows:
+        v = [vals[i] for i in keep]
+        if any(v[k] is not None for k in chan_cols):
+            out.append((ts, v))
+    return [header[i] for i in keep], out
+
+
+def csv_wide(device, start, end, channels=None):
     """Multi-channel meters: one CSV row per reading with every channel side by side.
     Returns (source, header, rows) with rows = [(ts, [values...])]; channel columns are named like
-    the meter's channels ("CH1 Kitchen A", "CH1 Kitchen W", ...)."""
+    the meter's channels ("CH1 Kitchen A", "CH1 Kitchen W", ...). channels: a set of channel indexes
+    to keep (None = all)."""
+    source, header, rows = _csv_wide(device, start, end)
+    if channels is not None:
+        from . import devconfig
+        first = 3 if source == "raw" else 2
+        header, rows = _only_channels(header, rows, first, devconfig.channel_count(device), channels)
+    return source, header, rows
+
+
+def _csv_wide(device, start, end):
     from . import devconfig
     n = devconfig.channel_count(device)
     names = [device.channel_name(i) for i in range(n)]

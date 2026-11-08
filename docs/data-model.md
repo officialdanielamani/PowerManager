@@ -10,22 +10,23 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | id | int PK | |
 | username | str(32) unique | stored **lower-case** (case-insensitive login) |
 | password_hash | str | Werkzeug scrypt/pbkdf2 |
-| role | enum `admin` / `viewer` | exactly one `admin` |
+| role | enum `admin` / `manager` / `viewer` | exactly one `admin` |
+| manager_fk | int FK user, null | viewer only: the manager that owns this account (null = the admin's) |
 | email | str(254) | |
 | phone | str(16) | E.164, e.g. `+60123456789` |
 | created_at, last_login_at | int | |
 | is_enabled | bool | admin can disable viewers (also logs them out) |
-| view_all | bool | viewer sees every meter |
+| view_all | bool | viewer sees every meter (of its manager, for a manager's viewer) |
 | failed_logins, locked_until | int | viewer login lockout; `locked_until = -1` = until admin unlocks |
 | telegram_chat_id | str | this user's Telegram chat (bot token is global) |
-| can_csv, show_price | bool | viewer permissions (default off; admin always has both) |
+| can_csv, show_price | bool | viewer permissions (default off; admin and managers always have both) |
 | notif_autodel, notif_autodel_days | bool, int | delete own notifications older than N days (default off, 30) |
 
 ### `meter_viewer`
-`device_fk, user_fk` (PK together). Which view-only users may see which meter. Server-only; never sent to meters.
+`device_fk, user_fk` (PK together), `channels` (JSON list of channel indexes, null = the whole meter). Which view-only users may see which meter. Server-only; never sent to meters.
 
 ### `setting` (key/value)
-`server_address`, `server_port`, `server_tls`, `timezone` (IANA name, e.g. `Asia/Kuala_Lumpur`), `raw_retention_days` (default 90), `telegram_enabled`, `telegram_bot_token`, `login_max_attempts` (5), `login_lock_minutes` (15), `currency` (e.g. MYR), `price_per_kwh` (e.g. 0.21; empty = no cost shown).
+`server_address`, `server_port`, `server_tls`, `timezone` (IANA name, e.g. `Asia/Kuala_Lumpur`), `raw_retention_days` (default 90), `telegram_enabled`, `telegram_bot_token`, `login_max_attempts` (5), `login_lock_minutes` (15). (The electricity price moved to the meter in v0.8: the old `currency` / `price_per_kwh` / `dc_*` settings are copied to every meter of that type on upgrade.)
 
 ### `pairing_code`
 | Column | Notes |
@@ -57,6 +58,9 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | data_autodel(_days), events_autodel(_days) | per-meter clean-up (default off, 120 days) |
 | last_info, last_info_at | last answer to Get meter info |
 | tare_a, tare_w | own-consumption offsets (A, W) for tared views; raw data is never changed |
+| owner_fk | manager that owns the meter (null = the admin); set from the pairing code's creator, changed by the admin |
+| currency, price_per_kwh | electricity price of this meter (default `""`, 0.25; null price = no cost shown) |
+| positive_only | default true: negative W readings are stored as 0 |
 
 ### `channel`
 | Column | Notes |
@@ -93,7 +97,7 @@ SQLite (WAL mode) through SQLAlchemy. All `*_at` / `ts` columns are **UTC epoch 
 | kwh_used, kwh_max | |
 | end_reason | `quota` / `expired` / `manual` / `voltage` / `tamper` / `sensor` / `disabled` / `stopped` (End) / `mode` (mode changed) / null (active) |
 | auto | started by auto-renew |
-| price_per_kwh, currency | electricity price **locked in when the session starts** (Settings → Server). Cost = kwh_used × price. Changing the price affects new sessions only. |
+| price_per_kwh, currency | electricity price **locked in when the session starts** (meter Configuration → Electricity price). Cost = kwh_used × price. Changing the price affects new sessions only. |
 
 ### `event`
 `id, device_fk, seq, ts, type, ch, data (JSON), notified_at`. Includes server-made events: `disconnected`, `reconnected`, `config_applied`, `config_rejected`, `server_started`.

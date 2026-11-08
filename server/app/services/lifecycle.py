@@ -107,7 +107,8 @@ def hardware_changed(device, new_caps, new_sig):
                           info=device.info, caps=device.caps, cfg=device.cfg, fw=device.fw, hw=device.hw,
                           hw_sig=old_sig, pair_gen=device.pair_gen, paired_at=device.paired_at,
                           last_seen_at=device.last_seen_at, removed_at=t, last_reading=device.last_reading,
-                          tare_a=device.tare_a, tare_w=device.tare_w,
+                          tare_a=device.tare_a, tare_w=device.tare_w, owner_fk=device.owner_fk,
+                          currency=device.currency, price_per_kwh=device.price_per_kwh,
                           last_state={"archive": {"reason": "hardware", "at": t, "from": old_label,
                                                   "to": devconfig.hw_label(new_sig), "live": device.id}})
         db.session.add(archived)
@@ -157,7 +158,8 @@ def resync_as_new(device):
     archived = Device(device_id=f"{device.device_id}~{n}", name=device.name, info=device.info,
                       caps=device.caps, cfg=device.cfg, fw=device.fw, hw=device.hw, pair_gen=device.pair_gen - 1,
                       paired_at=device.paired_at, last_seen_at=device.last_seen_at, removed_at=now(),
-                      last_state={}, last_reading=device.last_reading)
+                      last_state={}, last_reading=device.last_reading, owner_fk=device.owner_fk,
+                      currency=device.currency, price_per_kwh=device.price_per_kwh)
     db.session.add(archived)
     db.session.flush()
     for c in device.channels:

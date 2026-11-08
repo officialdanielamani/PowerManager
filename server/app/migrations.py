@@ -67,6 +67,28 @@ def run():
         _add_column("device", "sessions_autodel_days INTEGER NOT NULL DEFAULT 120")
         db.session.execute(text("UPDATE device SET sessions_autodel = data_autodel, sessions_autodel_days = data_autodel_days"))
 
+    # v0.8: manager accounts, meter owner, per-meter price, positive power only, per-channel viewers
+    _add_column("user", "manager_fk INTEGER REFERENCES user(id)")
+    _add_column("meter_viewer", "channels JSON")
+    cols = _columns("device")
+    if cols is not None and "price_per_kwh" not in cols:
+        _add_column("device", "owner_fk INTEGER REFERENCES user(id)")
+        _add_column("device", "currency VARCHAR(8) NOT NULL DEFAULT ''")
+        _add_column("device", "price_per_kwh FLOAT DEFAULT 0.25")
+        _add_column("device", "positive_only BOOLEAN NOT NULL DEFAULT 1")
+        # The price used to be one setting per meter type: give each meter the rate of its type.
+        old = {r[0]: r[1] for r in db.session.execute(text(
+            "SELECT key, value FROM setting WHERE key IN ('currency','price_per_kwh','dc_currency','dc_price_per_kwh')"))}
+        for pre, cond in (("", "COALESCE(json_extract(caps, '$.kind'), 'ac') != 'dc'"),
+                          ("dc_", "json_extract(caps, '$.kind') = 'dc'")):
+            try:
+                price = float(old.get(pre + "price_per_kwh") or "")
+            except ValueError:
+                price = 0.25
+            db.session.execute(text(f"UPDATE device SET currency = :c, price_per_kwh = :p WHERE {cond}"),
+                               {"c": (old.get(pre + "currency") or "").strip()[:8], "p": price})
+        log.info("Migration: electricity price is now set per meter")
+
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:
         # Old rules were per meter; give them to the admin, then rebuild with the new key.

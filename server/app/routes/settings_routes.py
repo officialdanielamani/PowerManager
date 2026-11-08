@@ -4,9 +4,9 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 from flask_login import current_user, login_required, login_user
 
 from ..extensions import db
-from ..models import Device, MeterViewer, NotificationRule, User, now
-from ..services import devconfig, hub, notify, settings, validation
-from .decorators import admin_required
+from ..models import Device, MeterViewer, Notification, NotificationRule, PairingCode, User, now
+from ..services import access, devconfig, hub, notify, settings, validation
+from .decorators import admin_required, staff_required
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
@@ -17,19 +17,29 @@ TABS = ("account", "server", "users", "notifications")
 @login_required
 def index():
     tab = request.args.get("tab", "account")
-    if tab not in TABS or (tab != "account" and not current_user.is_admin):
+    allowed = {"account"} | ({"users"} if current_user.is_staff else set()) | (set(TABS) if current_user.is_admin else set())
+    if tab not in allowed:
         tab = "account"
     host, port, tls, configured = settings.public_server(request)
+    meters = access.managed_devices(current_user).all()
     names = {d.id: d.name for d in Device.query.filter(Device.removed_at.is_(None))}
-    user_meters = {}
+    users = access.managed_users(current_user).order_by(User.role, User.username).all()
+    user_meters, links = {}, {}
     for link in MeterViewer.query.all():
         if link.device_fk in names:
-            user_meters.setdefault(link.user_fk, []).append(names[link.device_fk])
+            label = names[link.device_fk]
+            if link.channels:
+                label += " (" + ", ".join(f"CH{int(c) + 1}" for c in link.channels) + ")"
+            user_meters.setdefault(link.user_fk, []).append(label)
+            links[(link.user_fk, link.device_fk)] = link
+    owned = {}
+    for d in Device.query.filter(Device.removed_at.is_(None), Device.owner_fk.isnot(None)):
+        owned.setdefault(d.owner_fk, []).append(d.name)
+    mgrs = access.managers() if current_user.is_admin else []
     return render_template(
-        "settings/index.html", tab=tab, users=User.query.order_by(User.role, User.username).all(),
-        meters=Device.query.filter(Device.removed_at.is_(None)).order_by(Device.name).all(),
-        links={(m.user_fk, m.device_fk) for m in MeterViewer.query.all()}, now=now(),
-        user_meters={k: sorted(v) for k, v in user_meters.items()},
+        "settings/index.html", tab=tab, users=users, meters=meters, links=links, now=now(),
+        user_meters={k: sorted(v) for k, v in user_meters.items()}, owned={k: sorted(v) for k, v in owned.items()},
+        managers=mgrs, manager_names={m.id: m.username for m in mgrs},
         zones=settings.zone_names(), s=settings, detected=(host, port, tls), configured=configured)
 
 
@@ -125,28 +135,12 @@ def server():
     retention = (f.get("raw_retention_days") or "90").strip()
     if not retention.isdigit() or not 7 <= int(retention) <= 3650:
         errs.append("Raw data retention must be 7–3650 days")
-    prices = {}
-    for pre, label in (("", "AC"), ("dc_", "DC")):
-        currency = (f.get(pre + "currency") or "").strip().upper()
-        if len(currency) > 8 or any(c in currency for c in "<>\"'&"):
-            errs.append(f"{label} currency: up to 8 characters, e.g. MYR")
-        price = (f.get(pre + "price_per_kwh") or "").strip()
-        if price:
-            try:
-                pv = float(price)
-                if not 0 <= pv <= 1000:
-                    raise ValueError
-                price = f"{pv:.4f}".rstrip("0").rstrip(".")  # 0.2100 -> 0.21
-            except ValueError:
-                errs.append(f"{label} price per kWh must be a number between 0 and 1000, e.g. 0.21")
-        prices[pre + "currency"], prices[pre + "price_per_kwh"] = currency, price
     if errs:
         return _errors("server", errs)
     old_zone = settings.get("timezone")
     settings.set_many({"server_address": address, "server_port": port,
                        "server_tls": "1" if f.get("server_tls") == "on" else "0",
-                       "timezone": zone, "raw_retention_days": retention,
-                       **prices})
+                       "timezone": zone, "raw_retention_days": retention})
     if zone != old_zone:
         _repush_daily_configs()
     return _back("server", "Server settings saved.")
@@ -162,24 +156,50 @@ def _repush_daily_configs():
 
 
 def _set_access(user, view_all, meter_ids):
+    """Links of `user` to the meters the current account manages are replaced by `meter_ids`; links to
+    other meters (made by the admin) stay. A kept link keeps its channel selection."""
     user.view_all = view_all
-    MeterViewer.query.filter_by(user_fk=user.id).delete()
-    valid = {d.id for d in Device.query.all()}
+    scope = {d.id for d in access.managed_devices(current_user)}
+    existing = {link.device_fk: link for link in MeterViewer.query.filter_by(user_fk=user.id)}
+    for mid, link in existing.items():
+        if mid in scope and mid not in meter_ids:
+            db.session.delete(link)
     for mid in meter_ids:
-        if mid in valid:
+        if mid in scope and mid not in existing:
             db.session.add(MeterViewer(device_fk=mid, user_fk=user.id))
-    if not view_all:  # drop notification options for meters the user can no longer see
-        (NotificationRule.query.filter(NotificationRule.user_fk == user.id,
-                                       NotificationRule.device_fk.notin_(meter_ids or [-1]))
-         .delete(synchronize_session=False))
+    db.session.flush()
+    _drop_unseen_rules(user)
+
+
+def _drop_unseen_rules(user):
+    """Notification options of meters the user can no longer see are dropped."""
+    for r in NotificationRule.query.filter_by(user_fk=user.id).all():
+        d = db.session.get(Device, r.device_fk)
+        if d is not None and not access.can_view(user, d):
+            db.session.delete(r)
 
 
 def _ids(name):
     return {int(x) for x in request.form.getlist(name) if x.isdigit()}
 
 
+def _role_label(u):
+    return "Manager" if u.role == "manager" else "Viewer"
+
+
+def _delete_user(user):
+    if user.role == "manager":  # its meters go back to the admin, its viewers become the admin's
+        Device.query.filter_by(owner_fk=user.id).update({"owner_fk": None})
+        User.query.filter_by(manager_fk=user.id).update({"manager_fk": None})
+        PairingCode.query.filter_by(created_by=user.id).update({"created_by": None})
+    MeterViewer.query.filter_by(user_fk=user.id).delete()
+    NotificationRule.query.filter_by(user_fk=user.id).delete()
+    Notification.query.filter_by(user_fk=user.id).delete()
+    db.session.delete(user)
+
+
 @bp.post("/users")
-@admin_required
+@staff_required
 def users():
     f = request.form
     what = f.get("what")
@@ -195,19 +215,28 @@ def users():
         errs += [err] if err else []
         phone, err = validation.phone(f.get("phone"), required=False)
         errs += [err] if err else []
+        role = f.get("role") if current_user.is_admin and f.get("role") in ("viewer", "manager") else "viewer"
+        manager_fk = current_user.id if current_user.is_manager else None
+        if current_user.is_admin and role == "viewer" and f.get("manager", type=int):
+            m = db.session.get(User, f.get("manager", type=int))
+            if m is None or m.role != "manager":
+                errs.append("Unknown manager")
+            else:
+                manager_fk = m.id
         if errs:
             return _errors("users", errs)
-        u = User(username=username, role="viewer", email=email, phone=phone,
+        u = User(username=username, role=role, email=email, phone=phone, manager_fk=manager_fk,
                  can_csv=f.get("can_csv") == "on", show_price=f.get("show_price") == "on")
         u.set_password(f["password"])
         db.session.add(u)
         db.session.flush()
-        _set_access(u, f.get("view_all") == "on", _ids("meters"))
+        if role == "viewer":
+            _set_access(u, f.get("view_all") == "on", _ids("meters"))
         db.session.commit()
-        return _back("users", f"Viewer '{username}' created.")
+        return _back("users", f"{_role_label(u)} '{username}' created.")
     if what == "bulk":
         action = f.get("action")
-        q = User.query.filter_by(role="viewer")
+        q = access.managed_users(current_user)
         if f.get("scope") != "all":
             q = q.filter(User.id.in_(_ids("user_ids") or {-1}))
         n = 0
@@ -223,29 +252,39 @@ def users():
                 abort(400)
             n += 1
         db.session.commit()
-        return _back("users", f"{action.capitalize()}d {n} viewer account(s)." if n else "No accounts selected.",
+        return _back("users", f"{action.capitalize()}d {n} account(s)." if n else "No accounts selected.",
                      "success" if n else "warning")
     if what == "login_policy":
+        if not current_user.is_admin:
+            abort(403)
         attempts, minutes = (f.get("login_max_attempts") or "").strip(), (f.get("login_lock_minutes") or "").strip()
         if not attempts.isdigit() or int(attempts) > 100 or not minutes.isdigit() or int(minutes) > 10080:
             return _errors("users", ["Attempts must be 0–100 and minutes 0–10080"])
         settings.set_many({"login_max_attempts": attempts, "login_lock_minutes": minutes})
         return _back("users", "Login protection saved.")
     user = db.session.get(User, f.get("user_id", type=int))
-    if user is None or user.role != "viewer":
+    if not access.can_manage_user(current_user, user):
         abort(404)
+    label = f"{_role_label(user)} '{user.username}'"
     if what == "toggle":
         user.is_enabled = not user.is_enabled
         if not user.is_enabled:
             user.session_token = secrets.token_hex(16)
-        msg = f"Viewer '{user.username}' {'enabled' if user.is_enabled else 'disabled'}."
+        msg = f"{label} {'enabled' if user.is_enabled else 'disabled'}."
     elif what == "unlock":
         user.failed_logins, user.locked_until = 0, None
-        msg = f"Viewer '{user.username}' unlocked."
+        msg = f"{label} unlocked."
     elif what == "access":
-        _set_access(user, f.get("view_all") == "on", _ids("meters"))
-        user.can_csv = f.get("can_csv") == "on"
-        user.show_price = f.get("show_price") == "on"
+        if user.role == "viewer":
+            if current_user.is_admin and "manager" in f:  # move the viewer to another manager / the admin
+                mid = f.get("manager", type=int)
+                m = db.session.get(User, mid) if mid else None
+                if mid and (m is None or m.role != "manager"):
+                    abort(400)
+                user.manager_fk = m.id if m else None
+            _set_access(user, f.get("view_all") == "on", _ids("meters"))
+            user.can_csv = f.get("can_csv") == "on"
+            user.show_price = f.get("show_price") == "on"
         msg = f"Access for '{user.username}' saved."
     elif what == "reset_password":
         err = validation.password(f.get("password"), f.get("confirm"))
@@ -255,12 +294,8 @@ def users():
         user.failed_logins, user.locked_until = 0, None
         msg = f"Password for '{user.username}' changed (account unlocked, logged out everywhere)."
     elif what == "delete":
-        MeterViewer.query.filter_by(user_fk=user.id).delete()
-        NotificationRule.query.filter_by(user_fk=user.id).delete()
-        from ..models import Notification
-        Notification.query.filter_by(user_fk=user.id).delete()
-        db.session.delete(user)
-        msg = f"Viewer '{user.username}' deleted."
+        _delete_user(user)
+        msg = f"{label} deleted."
     else:
         abort(400)
     db.session.commit()

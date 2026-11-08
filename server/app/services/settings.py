@@ -12,10 +12,6 @@ DEFAULTS = {
     "server_tls": "1",
     "timezone": "UTC",
     "raw_retention_days": "90",
-    "currency": "",                 # e.g. MYR
-    "price_per_kwh": "",            # e.g. 0.21; empty = no cost shown (AC meters)
-    "dc_currency": "",              # DC meters have their own rate
-    "dc_price_per_kwh": "",
     "login_max_attempts": "5",      # viewer accounts; 0 = no lockout
     "login_lock_minutes": "15",     # 0 = locked until the admin unlocks
     "telegram_enabled": "0",
@@ -130,18 +126,15 @@ def public_server(request=None):
     return host, port, tls, configured
 
 
-def price(kind="ac"):
-    """(currency, price per kWh) for AC or DC meters, or (None, None) when no price is set."""
-    pre = "dc_" if kind == "dc" else ""
-    try:
-        p = float(get(pre + "price_per_kwh"))
-    except (TypeError, ValueError):
+def price(device):
+    """(currency, price per kWh) of a meter (set in its Configuration), or (None, None) when none is set."""
+    if device is None or device.price_per_kwh is None:
         return None, None
-    return (get(pre + "currency") or "").strip(), p
+    return (device.currency or "").strip(), float(device.price_per_kwh)
 
 
 def money(amount, currency=None):
     if amount is None:
         return None
-    cur = currency if currency is not None else (get("currency") or "")
+    cur = currency or ""
     return f"{cur} {amount:,.2f}".strip()

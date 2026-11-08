@@ -178,11 +178,11 @@ def test_hold_action_keeps_session_open(app, device):
 
 def test_session_price_locked_at_start(app, device):
     from app.models import Session
-    settings.set_many({"currency": "MYR", "price_per_kwh": "0.21"})
+    device.currency, device.price_per_kwh = "MYR", 0.21
     conn = FakeConn()
     _start(conn, device, 3, now() - 100)
     ingest.handle(conn, device, {"t": "tel", "items": [{**tel(31, now() - 50, 5.0), "s": {"sid": 3, "kwh": 10.0}}]})
-    settings.set_many({"price_per_kwh": "0.50"})  # price change does not touch a running session
+    device.price_per_kwh = 0.50  # price change does not touch a running session
     s = Session.query.filter_by(sid=3).one()
     assert s.price_per_kwh == 0.21 and s.currency == "MYR" and s.cost() == 2.1
 

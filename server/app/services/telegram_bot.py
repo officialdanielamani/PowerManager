@@ -74,7 +74,7 @@ def _fmt(v, nd):
 def reading_text(device, user):
     """The latest reading of a meter as a Telegram message."""
     from ..routes.main import meter_summary
-    m = meter_summary(device, show_price=access.can_price(user))
+    m = meter_summary(device, show_price=access.can_price(user), user=user)
     lines = [f"⚡ {device.name} ({device.device_id}) · {device.kind.upper()}",
              f"{'🟢 online' if m['online'] else '🔴 offline'} · relay {'ON' if m['relay_on'] else 'OFF'}"]
     if m.get("reading_err"):
@@ -174,7 +174,7 @@ def handle_update(upd, wait_s=WAIT_READING_S):
             from ..routes.main import meter_summary
             rows = []
             for d in meters:
-                m = meter_summary(d, show_price=False)
+                m = meter_summary(d, show_price=False, user=user)
                 w = f"{m['w']:g} W" if m.get("w") is not None else "–"
                 rows.append(f"{'🟢' if m['online'] else '🔴'} {d.device_id} · {d.name} · {d.kind.upper()} · {w}")
             out.append(("sendMessage", {"chat_id": chat_id, "text": f"Your meters ({len(meters)}):\n" + "\n".join(rows)}))

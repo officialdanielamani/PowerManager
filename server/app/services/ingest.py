@@ -239,6 +239,10 @@ def h_tel(conn, device, msg):
                 lo, hi = LIMITS[f]
                 row[f] = val if val is not None and lo <= val <= hi else None
             rows.append(row)
+        if rows and device.positive_only:  # "Positive watt only": negative power is recorded as 0
+            for row in rows:
+                if row["w"] is not None and row["w"] < 0:
+                    row["w"] = 0.0
         if rows:
             db.session.execute(sqlite_insert(Measurement).values(rows).on_conflict_do_nothing())
             for row in rows:
@@ -550,7 +554,7 @@ def process_event(device, ev):
             s = _session(device, sid, mch, authoritative=True)
             s.started_at = ev.ts
             s.auto = bool(d.get("auto"))
-            cur, price = settings.price(device.kind)
+            cur, price = settings.price(device)
             if price is not None and s.price_per_kwh is None:
                 s.price_per_kwh, s.currency = price, cur
             s.kwh_max = _r4(_f(d.get("max"))) or s.kwh_max

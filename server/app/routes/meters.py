@@ -16,7 +16,7 @@ from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer
                       PairingCode, Rollup, RollupDirty, Session, now)
 from ..services import access, commands, devconfig, history, hub, incidents, ingest, lifecycle, settings, validation
 from ..services import tare as tare_svc
-from .decorators import admin_required
+from .decorators import staff_required
 from .device_api import ensure_device_defaults
 from .main import meter_summary
 
@@ -28,11 +28,9 @@ CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
 
 def _device(pk, allow_removed=False):
-    """Admin pages: any meter. Shared pages use access.device_for_current_user()."""
-    d = db.session.get(Device, pk)
-    if d is None or (d.removed_at and not allow_removed):
-        abort(404)
-    return d
+    """Management pages: the admin (any meter) or the manager that owns it. Shared pages use
+    access.device_for_current_user()."""
+    return access.device_for_manager(pk, allow_removed)
 
 
 # ------------------------------------------------------------------ add / pairing
@@ -43,7 +41,7 @@ def _qr_svg(payload):
 
 
 @bp.get("/add")
-@admin_required
+@staff_required
 def add():
     PairingCode.query.filter(PairingCode.expires_at < now() - 86400).delete()
     code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
@@ -60,10 +58,10 @@ def add():
 
 
 @bp.get("/pairing/<code>/status")
-@admin_required
+@staff_required
 def pairing_status(code):
     pc = db.session.get(PairingCode, code)
-    if pc is None:
+    if pc is None or (not current_user.is_admin and pc.created_by != current_user.id):
         return jsonify(status="unknown")
     if pc.used_at and pc.device_fk:
         return jsonify(status="paired", url=url_for("meters.configure", pk=pc.device_fk, new=1))
@@ -91,24 +89,90 @@ def _rules(device, user):
 
 
 def _viewers():
-    return User.query.filter_by(role="viewer").order_by(User.username).all()
+    """View-only accounts the current user may link: admin -> all, manager -> its own."""
+    return access.managed_users(current_user).filter(User.role == "viewer").order_by(User.username).all()
 
 
-def _set_viewers(device, user_ids):
-    MeterViewer.query.filter_by(device_fk=device.id).delete()
-    valid = {u.id for u in _viewers()}
+def _set_viewers(device, user_ids, channels=None):
+    """Replace the links of `device` to the viewers the current user manages (links of other
+    viewers stay). channels: {user id: [channel indexes]} (missing / empty = the whole meter)."""
+    channels = channels or {}
+    scope = {u.id for u in _viewers()}
+    existing = {v.user_fk: v for v in MeterViewer.query.filter_by(device_fk=device.id)}
+    for uid, link in existing.items():
+        if uid in scope and uid not in user_ids:
+            db.session.delete(link)
     for uid in user_ids:
-        if uid in valid:
-            db.session.add(MeterViewer(device_fk=device.id, user_fk=uid))
-    # Notification rules of users who can no longer see the meter are dropped.
+        if uid not in scope:
+            continue
+        link = existing.get(uid)
+        if link is None:
+            link = MeterViewer(device_fk=device.id, user_fk=uid)
+            db.session.add(link)
+        if uid in channels:
+            link.channels = channels[uid] or None
+    db.session.flush()
+    _drop_unseen_rules(device)
+
+
+def _drop_unseen_rules(device):
+    """Notification rules of users who can no longer see the meter are dropped."""
     for r in NotificationRule.query.filter_by(device_fk=device.id).all():
         u = db.session.get(User, r.user_fk)
-        if u is not None and u.role == "viewer" and not u.view_all and r.user_fk not in user_ids:
+        if u is not None and not access.can_view(u, device):
             db.session.delete(r)
 
 
+def _viewer_channels(form, device):
+    """Per-viewer channel selection of a multi-channel meter (Configuration -> Linked users)."""
+    if not device.is_mc:
+        return {}
+    n = devconfig.channel_count(device)
+    out = {}
+    for u in _viewers():
+        if form.get(f"vch_set_{u.id}") is not None:
+            out[u.id] = sorted({int(x) for x in form.getlist(f"vch_{u.id}") if x.isdigit() and int(x) < n})
+            if len(out[u.id]) == n:
+                out[u.id] = []  # every channel = the whole meter
+    return out
+
+
+def _parse_price(form):
+    """(currency, price or None, error) from the Configuration form."""
+    currency = (form.get("currency") or "").strip().upper()
+    if len(currency) > 8 or any(c in currency for c in "<>\"'&"):
+        return currency, None, "Currency: up to 8 characters, e.g. MYR"
+    raw = (form.get("price_per_kwh") or "").strip()
+    if not raw:
+        return currency, None, None
+    try:
+        price = float(raw)
+        if not 0 <= price <= 1000:
+            raise ValueError
+    except ValueError:
+        return currency, None, "Price per kWh must be a number between 0 and 1000, e.g. 0.25"
+    return currency, round(price, 4), None
+
+
+def transfer_owner(device, new_owner_id):
+    """Give the meter to a manager (or back to the admin: None). Links of the old manager's viewers
+    are dropped (they belong to the old manager); the admin's own viewers keep theirs."""
+    old = device.owner_fk
+    if old == new_owner_id:
+        return False
+    device.owner_fk = new_owner_id
+    if old is not None:
+        for link in MeterViewer.query.filter_by(device_fk=device.id).all():
+            u = db.session.get(User, link.user_fk)
+            if u is not None and u.manager_fk == old:
+                db.session.delete(link)
+    db.session.flush()
+    _drop_unseen_rules(device)
+    return True
+
+
 @bp.route("/<int:pk>/configure", methods=["GET", "POST"])
-@admin_required
+@staff_required
 def configure(pk):
     device = _device(pk)
     if device.disabled_at:
@@ -124,6 +188,15 @@ def configure(pk):
         errors += [err] if err else []
         cfg, cfg_errors = devconfig.parse_form(form, device)
         errors += cfg_errors
+        currency, price, err = _parse_price(form)
+        errors += [err] if err else []
+        owner = device.owner_fk
+        if current_user.is_admin and "owner" in form:
+            oid = form.get("owner", type=int)
+            mgr = db.session.get(User, oid) if oid else None
+            if oid and (mgr is None or mgr.role != "manager"):
+                errors.append("Unknown manager")
+            owner = mgr.id if mgr else None
         retention = {}
         for key, label in (("sessions", "Sessions"), ("events", "Historical events"), ("data", "Historical data")):
             raw = (form.get(f"{key}_autodel_days") or "120").strip()
@@ -137,9 +210,16 @@ def configure(pk):
             device.sessions_autodel, device.sessions_autodel_days = retention["sessions"]
             device.events_autodel, device.events_autodel_days = retention["events"]
             device.name, device.info = name, info
+            device.currency, device.price_per_kwh = currency, price
+            device.positive_only = form.get("positive_only") == "on"
             config_changed = cfg != device.cfg
             device.cfg = cfg
-            _set_viewers(device, {int(x) for x in form.getlist("viewers") if x.isdigit()})
+            if owner != device.owner_fk:
+                transfer_owner(device, owner)
+                ingest.server_event(device, "owner_changed", {"by": current_user.username,
+                                                              "to": mgr.username if owner else "admin"})
+            _set_viewers(device, {int(x) for x in form.getlist("viewers") if x.isdigit()},
+                         _viewer_channels(form, device))
             if config_changed or not device.synced:
                 if config_changed:
                     device.cfg_ver_wanted += 1
@@ -156,7 +236,9 @@ def configure(pk):
     return render_template("meters/configure.html", d=device, cfg=cfg, errors=errors,
                            waiting=waiting, online=hub.is_online(device.id), kwh_actions=devconfig.KWH_ACTIONS,
                            protect_actions=devconfig.PROTECT_ACTIONS, kwh_action_of=devconfig.kwh_action,
-                           viewers=_viewers(), linked={v.user_fk for v in MeterViewer.query.filter_by(device_fk=device.id)},
+                           viewers=_viewers(), linked={v.user_fk: v for v in MeterViewer.query.filter_by(device_fk=device.id)},
+                           managers=access.managers() if current_user.is_admin else [],
+                           n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
                            form=request.form if errors else None)
@@ -198,7 +280,7 @@ def sync_status(pk):
 
 
 @bp.post("/<int:pk>/resync")
-@admin_required
+@staff_required
 def resync(pk):
     """Re-paired hardware that was unsynced before: continue its history, or start as a new meter."""
     device = _device(pk)
@@ -215,7 +297,7 @@ def resync(pk):
 
 
 @bp.get("/<int:pk>/device-info")
-@admin_required
+@staff_required
 def device_info(pk):
     d = _device(pk)
     info = dict(d.last_info or {})
@@ -228,7 +310,7 @@ def device_info(pk):
 
 
 @bp.post("/<int:pk>/incidents/delete")
-@admin_required
+@staff_required
 def incidents_delete(pk):
     device = _device(pk, allow_removed=True)
     body = request.get_json(silent=True) or {}
@@ -240,7 +322,7 @@ def incidents_delete(pk):
 
 
 @bp.post("/<int:pk>/sessions/delete")
-@admin_required
+@staff_required
 def sessions_delete(pk):
     """Delete selected session records (ended ones only). Session numbers are not renumbered and
     the power readings are kept."""
@@ -265,7 +347,7 @@ def _delete_history(device):
 
 
 @bp.post("/<int:pk>/action")
-@admin_required
+@staff_required
 def action(pk):
     device = _device(pk)
     body = request.get_json(silent=True) or request.form
@@ -362,6 +444,9 @@ def _incident_filters():
 
 def _incident_query(device, types, start, end):
     q = Incident.query.filter(Incident.device_fk == device.id, Incident.type.in_(types))
+    allowed = access.allowed_channels(current_user, device)
+    if allowed is not None:
+        q = q.filter((Incident.ch.is_(None)) | (Incident.ch.in_(allowed)))
     if start:
         q = q.filter((Incident.ended_at.is_(None)) | (Incident.ended_at >= start))
     if end:
@@ -408,14 +493,18 @@ def info(pk):
     types, start, end = _incident_filters()
     page = request.args.get("page", 1, type=int)
     pagination = _incident_query(device, types, start, end).paginate(page=page, per_page=25, error_out=False)
-    sessions = (Session.query.filter_by(device_fk=device.id)
-                .order_by(Session.started_at.desc()).limit(50).all())
-    return render_template("meters/info.html", d=device, m=meter_summary(device),
+    allowed = access.allowed_channels(current_user, device)
+    q = Session.query.filter_by(device_fk=device.id)
+    if allowed is not None:  # a viewer limited to some channels: their sessions, and the shared ones
+        q = q.filter((Session.ch.is_(None)) | (Session.ch.in_(allowed)))
+    sessions = q.order_by(Session.started_at.desc()).limit(50).all()
+    return render_template("meters/info.html", d=device, m=meter_summary(device), manage=access.can_manage(current_user, device),
                            pagination=pagination, incident_types=incidents.TYPES, sel_types=types,
                            f_from=request.args.get("from", ""), f_to=request.args.get("to", ""),
                            detail_text=incident_detail_text, sessions=sessions, now=now(),
-                           cfg=device.cfg or {}, channels=device.channels,
-                           price=settings.price(device.kind) if access.can_price(current_user) else (None, None),
+                           cfg=device.cfg or {}, allowed=allowed,
+                           channels=[c for c in device.channels if allowed is None or c.idx in allowed],
+                           price=settings.price(device) if access.can_price(current_user) else (None, None),
                            money=settings.money, can_csv=access.can_csv(current_user),
                            tare_kwh=lambda sess: (round(tare_svc.kwh(sess.kwh_used or 0, (sess.ended_at or now()) - sess.started_at,
                                                                      tare_svc.offsets(device)), 4)
@@ -462,7 +551,7 @@ DELETE_UNITS = {"minutes": 60, "hours": 3600, "days": 86400}
 
 
 @bp.post("/<int:pk>/history/delete")
-@admin_required
+@staff_required
 def history_delete(pk):
     """Delete Historical Data (power readings and their summaries): a date range, the last N
     minutes / hours / days, or everything (with confirmation). Sessions and events stay."""
@@ -498,18 +587,29 @@ def history_delete(pk):
 def history_json(pk):
     device = access.device_for_current_user(pk, allow_removed=True)
     start, end = _range_args(device)
-    ch = request.args.get("ch", 0, type=int)
+    ch = _channel_arg(device)
     data = history.query(device.id, ch, start, end)
     if request.args.get("tared") == "1":
         data = history.apply_tare(data, tare_svc.offsets(device))
     data["start_local"] = settings.fmt_ts(start, False)
     data["end_local"] = settings.fmt_ts(end, False)
     data["tz_offset_s"] = _tz_offset_s()
-    currency, price = settings.price(device.kind)
+    currency, price = settings.price(device)
     kwh = data["stats"].get("kwh")
     data["cost"] = (settings.money(kwh * price, currency)
                     if access.can_price(current_user) and price is not None and kwh is not None else None)
     return jsonify(data)
+
+
+def _channel_arg(device):
+    """?ch= of history / CSV requests; a viewer limited to some channels gets only those."""
+    allowed = access.allowed_channels(current_user, device)
+    ch = request.args.get("ch", type=int)
+    if ch is None:
+        ch = min(allowed) if allowed else 0
+    if allowed is not None and ch not in allowed:
+        abort(404)
+    return ch
 
 
 def _tz_offset_s():
@@ -578,15 +678,18 @@ def export_csv(pk):
     device = access.device_for_current_user(pk, allow_removed=True)
     if not access.can_csv(current_user):
         abort(403)
-    ch = request.args.get("ch", 0, type=int)
+    ch = _channel_arg(device)
+    allowed = access.allowed_channels(current_user, device)
     sess_id = request.args.get("session", type=int)
     if sess_id:  # one session: from its start to its end (or now, if still running)
         sess = db.session.get(Session, sess_id)
         if sess is None or sess.device_fk != device.id or not sess.started_at:
             abort(404)
+        if allowed is not None and sess.ch is not None and sess.ch not in allowed:
+            abort(404)
         start, end = sess.started_at, sess.ended_at or now()
         if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
-            source, header, rows = history.csv_wide(device, start, end)
+            source, header, rows = history.csv_wide(device, start, end, allowed)
             out = [[_utc(ts), settings.fmt_ts(ts)] + [("" if v is None else v) for v in vals] for ts, vals in rows]
             hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
             return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
@@ -598,7 +701,7 @@ def export_csv(pk):
         return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
     start, end = _range_args(device)
     if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
-        source, header, rows = history.csv_wide(device, start, end)
+        source, header, rows = history.csv_wide(device, start, end, allowed)
         out = [[_utc(ts), settings.fmt_ts(ts)] + [("" if v is None else v) for v in vals] for ts, vals in rows]
         hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
         return _csv_response(f"{device.device_id}_{_fname_ts(start)}_{_fname_ts(end)}.csv", hdr, out)
@@ -633,7 +736,8 @@ def incidents_csv(pk):
 # ------------------------------------------------------------------ bulk actions (dashboard)
 
 def _bulk_devices(ids):
-    devices = [d for d in (db.session.get(Device, i) for i in ids) if d is not None and not d.removed_at]
+    devices = [d for d in (db.session.get(Device, i) for i in ids)
+               if d is not None and not d.removed_at and access.can_manage(current_user, d)]
     return sorted(devices, key=lambda d: d.name.lower())
 
 
@@ -642,7 +746,7 @@ def _ids_arg(raw):
 
 
 @bp.post("/bulk/renew")
-@admin_required
+@staff_required
 def bulk_renew():
     body = request.get_json(silent=True) or {}
     devices = _bulk_devices([int(i) for i in body.get("ids", []) if str(i).isdigit()])
@@ -671,6 +775,7 @@ BULK_GROUPS = {
     "voltage": "Operating Voltage Range",
     "tamper": "Tamper Protection",
     "sensor": "Sensor Timeout",
+    "price": "Electricity price",
     "viewers": "Linked users",
 }
 
@@ -708,7 +813,7 @@ def _differs(devices, fn):
 
 
 @bp.route("/bulk/configure", methods=["GET", "POST"])
-@admin_required
+@staff_required
 def bulk_configure():
     devices = _bulk_devices(_ids_arg(request.values.get("ids")))
     mc = [d for d in devices if d.is_mc]
@@ -732,6 +837,9 @@ def bulk_configure():
         probe = Device(device_id="BULK", name="bulk", caps={"channels": 1, "amp_rating": rating}, cfg={})
         new, cfg_errors = devconfig.parse_form(form, probe)
         errors += [e.replace("CH1 ", "") for e in cfg_errors]
+        currency, price, err = _parse_price(form)
+        if err and "price" in groups:
+            errors.append(err)
         if not errors:
             viewer_mode = form.get("viewer_mode", "add")
             viewer_ids = {int(x) for x in form.getlist("viewers") if x.isdigit()}
@@ -743,6 +851,8 @@ def bulk_configure():
                     d.cfg = cfg
                     d.cfg_ver_wanted += 1
                     d.cfg_error = None
+                if "price" in groups:
+                    d.currency, d.price_per_kwh = currency, price
                 if "viewers" in groups:
                     current = {v.user_fk for v in MeterViewer.query.filter_by(device_fk=d.id)}
                     target = (current | viewer_ids if viewer_mode == "add" else
@@ -767,6 +877,7 @@ def bulk_configure():
         "voltage": _differs(devices, lambda c: (c.get("volt_min", 0), c.get("volt_max", 0), c.get("volt_action", "hold"))),
         "tamper": _differs(devices, lambda c: (bool(c.get("tamper_protect")), c.get("tamper_action", "hold"))),
         "sensor": _differs(devices, lambda c: (c.get("sensor_to_s", 10), c.get("sensor_action", "hold"))),
+        "price": len({(d.currency, d.price_per_kwh) for d in devices}) > 1,
     }
     return render_template("meters/bulk.html", devices=devices, ids=",".join(str(d.id) for d in devices),
                            cfg=cfg, ch0=ch0, dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,

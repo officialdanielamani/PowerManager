@@ -16,7 +16,10 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(32), unique=True, nullable=False)  # stored lower-case
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(10), nullable=False, default="viewer")  # admin | viewer
+    role = db.Column(db.String(10), nullable=False, default="viewer")  # admin | manager | viewer
+    # Viewer only: the manager who owns this account (null = the admin's). A manager's viewers can
+    # only be linked to that manager's meters by the manager (the admin can link them anywhere).
+    manager_fk = db.Column(db.Integer, db.ForeignKey("user.id"))
     email = db.Column(db.String(254), nullable=False, default="")
     phone = db.Column(db.String(16), nullable=False, default="")
     created_at = db.Column(db.Integer, nullable=False, default=now)
@@ -37,7 +40,9 @@ class User(UserMixin, db.Model):
     notif_autodel_days = db.Column(db.Integer, nullable=False, default=30)
 
     meters = db.relationship("Device", secondary="meter_viewer", lazy="dynamic",
-                             backref=db.backref("viewers", lazy="dynamic"))
+                             backref=db.backref("viewers", lazy="dynamic"),
+                             primaryjoin="User.id == MeterViewer.user_fk",
+                             secondaryjoin="Device.id == MeterViewer.device_fk")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -56,6 +61,15 @@ class User(UserMixin, db.Model):
     @property
     def is_admin(self):
         return self.role == "admin"
+
+    @property
+    def is_manager(self):
+        return self.role == "manager"
+
+    @property
+    def is_staff(self):
+        """Admin or manager: may add, configure and delete meters (a manager only its own)."""
+        return self.role in ("admin", "manager")
 
 
 class Setting(db.Model):
@@ -116,6 +130,13 @@ class Device(db.Model):
     # Tare: the meter's own consumption, subtracted when showing "tared" values (server-only).
     tare_a = db.Column(db.Float, nullable=False, default=0.0)
     tare_w = db.Column(db.Float, nullable=False, default=0.0)
+    # Owner: a manager account (null = the admin). The owner manages the meter and its viewers.
+    owner_fk = db.Column(db.Integer, db.ForeignKey("user.id"))
+    # Electricity price of this meter (null = no cost shown). Locked into each session when it starts.
+    currency = db.Column(db.String(8), nullable=False, default="")
+    price_per_kwh = db.Column(db.Float, default=0.25)
+    # Negative power (e.g. a clamp fitted the wrong way round) is recorded as 0.
+    positive_only = db.Column(db.Boolean, nullable=False, default=True)
     # Last answer to "Get meter info".
     last_info = db.Column(db.JSON, nullable=False, default=dict)
     last_info_at = db.Column(db.Integer)
@@ -270,6 +291,8 @@ class MeterViewer(db.Model):
     __tablename__ = "meter_viewer"
     device_fk = db.Column(db.Integer, db.ForeignKey("device.id", ondelete="CASCADE"), primary_key=True)
     user_fk = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
+    # Multi-channel meters: the channel indexes this viewer may see (null = the whole meter).
+    channels = db.Column(db.JSON)
 
 
 class NotificationRule(db.Model):

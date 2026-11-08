@@ -41,10 +41,10 @@ def setup():
 
 
 def is_locked(user):
-    """Viewer accounts lock after too many failed logins (Settings → Users → Login protection).
+    """Manager and viewer accounts lock after too many failed logins (Settings → Users → Login protection).
     The admin is never locked (an attacker could otherwise lock you out); the per-IP rate
     limit still applies to everyone."""
-    if user.role != "viewer" or not user.locked_until:
+    if user.role == "admin" or not user.locked_until:
         return False
     if user.locked_until == -1:
         return True
@@ -56,7 +56,7 @@ def is_locked(user):
 
 
 def register_failure(user):
-    if user.role != "viewer":
+    if user.role == "admin":
         return
     limit = settings.get_int("login_max_attempts", 5)
     user.failed_logins = (user.failed_logins or 0) + 1

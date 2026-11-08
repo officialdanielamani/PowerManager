@@ -85,14 +85,20 @@ def test_drdy_frames_and_wide_csv(app, admin, mc):
     assert ",1.000,230.0,0.99," in csv[1]  # same decimals as on screen (A 3, W 1, PF 2)
 
 
-def test_negative_power_is_kept(app, admin, mc):
+def test_negative_power_positive_only(app, admin, mc):
+    """Default "Positive watt only": negative W is stored as 0; switched off, it is kept."""
     from app.models import Measurement
     with app.app_context():
         d = db.session.get(Device, mc)
+        assert d.positive_only
         ingest.handle(FakeConn(), d, {"t": "tel", "items": [{"seq": 70, "ts": now() - 5, "tv": 1,
                                       "ch": [{"i": 0, "v": 230, "a": 0.5, "w": -110.5, "pf": -0.96}]}]})
         m = Measurement.query.filter_by(device_fk=d.id, seq=70).one()
-        assert m.w == -110.5 and m.pf == -0.96  # clamp reversed: visible, not dropped
+        assert m.w == 0.0 and m.pf == -0.96 and d.last_reading["ch"][0]["w"] == 0.0
+        d.positive_only = False
+        ingest.handle(FakeConn(), d, {"t": "tel", "items": [{"seq": 71, "ts": now() - 4, "tv": 1,
+                                      "ch": [{"i": 0, "v": 230, "a": 0.5, "w": -110.5, "pf": -0.96}]}]})
+        assert Measurement.query.filter_by(device_fk=d.id, seq=71).one().w == -110.5
 
 
 def test_independent_sessions_quota_and_display(app, admin, mc):

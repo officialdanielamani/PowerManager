@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 from simple_websocket import ConnectionClosed
 
 from ..extensions import db, limiter, sock
-from ..models import Channel, Device, PairingCode, now
+from ..models import Channel, Device, PairingCode, User, now
 from ..services import devconfig, hub, ingest, mesh, notify
 
 bp = Blueprint("device_api", __name__)
@@ -75,6 +75,17 @@ def pair_device(body):
         device.last_seq = 0
 
     device.hw_sig = devconfig.hw_signature(caps)
+    # Owner: the manager who made the pairing code (an admin's code = the admin's meter).
+    creator = db.session.get(User, pc.created_by) if pc.created_by else None
+    new_owner = creator.id if creator is not None and creator.role == "manager" else None
+    if device.owner_fk != new_owner:
+        if device.owner_fk is not None:  # hardware of another owner paired again: its viewers lose it
+            from ..models import MeterViewer
+            for link in MeterViewer.query.filter_by(device_fk=device.id).all():
+                u = db.session.get(User, link.user_fk)
+                if u is not None and u.manager_fk == device.owner_fk:
+                    db.session.delete(link)
+        device.owner_fk = new_owner
     secret = secrets.token_urlsafe(32)
     device.set_secret(secret)
     device.link_key = secrets.token_hex(16)  # mesh signing key (32 hex chars)

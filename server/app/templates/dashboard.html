@@ -5,7 +5,7 @@
 <div class="d-flex align-items-center mb-3">
   <h1 class="h4 mb-0">Meters</h1>
   <span class="ms-2 text-body-secondary small">{{ meters|length }} meter{{ '' if meters|length == 1 else 's' }} · times in {{ tz_label() }}</span>
-  {% if current_user.is_admin %}
+  {% if current_user.is_staff %}
   <a href="{{ url_for('meters.add') }}" class="btn btn-primary btn-sm ms-auto"><i class="bi bi-plus-lg me-1"></i>Add New Meter</a>
   {% endif %}
 </div>
@@ -15,12 +15,12 @@
   <div class="card-body">
     <i class="bi bi-plug display-5 text-body-tertiary"></i>
     <p class="mt-3 mb-3">No meters yet.</p>
-    {% if current_user.is_admin %}<a href="{{ url_for('meters.add') }}" class="btn btn-primary">Add your first meter</a>{% endif %}
+    {% if current_user.is_staff %}<a href="{{ url_for('meters.add') }}" class="btn btn-primary">Add your first meter</a>{% endif %}
   </div>
 </div>
 {% endif %}
 
-{% if current_user.is_admin and meters %}
+{% if current_user.is_staff and meters %}
 <div class="pm-selbar card shadow-sm mb-3 d-none" id="selBar">
   <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
     <span class="fw-semibold"><span id="selCount">0</span> selected</span>
@@ -40,7 +40,7 @@
     <div class="card meter-card h-100 position-relative {{ 'pm-disabled' if m.disabled }}" data-meter="{{ m.id }}">
       <div class="card-body">
         <div class="d-flex align-items-start gap-2 mb-2">
-          {% if current_user.is_admin %}
+          {% if current_user.is_staff %}
           <input class="form-check-input pm-sel mt-1 position-relative" type="checkbox" value="{{ m.id }}" aria-label="Select {{ m.name }}" style="z-index:2">
           {% endif %}
           <div class="me-auto">

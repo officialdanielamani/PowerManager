@@ -138,6 +138,14 @@
       {{ action_radios('sensor_action', val('sensor_action', cfg.get('sensor_action', 'hold')), protect_actions, 'hold', 'Then') }}
     {% endcall %}
 
+    {% call section('price', groups.price) %}
+      <div class="input-group" style="max-width:340px">
+        <input class="form-control" name="currency" maxlength="8" placeholder="MYR" value="{{ val('currency', devices[0].currency) }}" style="max-width:100px">
+        <input class="form-control" name="price_per_kwh" inputmode="decimal" placeholder="0.25" value="{{ val('price_per_kwh', '' if devices[0].price_per_kwh is none else '%g'|format(devices[0].price_per_kwh)) }}">
+        <span class="input-group-text">/ kWh</span></div>
+      <div class="form-text">Locked in when a session starts. Empty = no cost shown.</div>
+    {% endcall %}
+
     {% call section('viewers', groups.viewers) %}
       {% if viewers %}
       <div class="mb-2">

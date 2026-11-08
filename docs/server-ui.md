@@ -102,12 +102,11 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 | Tab | Content |
 |-----|---------|
 | Account | Change username, password, phone, email (current password required) · My Telegram chat ID + [Send test] |
-| Server (admin) | Public address, port, TLS · Display timezone (IANA list, shows its UTC offset) · Raw data retention · **Electricity price**: [Currency][Price] / kWh (e.g. MYR 0.21) |
-| Users (admin) | View-only accounts (per user: **Enable download .csv**, **Show price**, both off by default; enforced on the server): select + Enable/Disable/Unlock selected, Enable all / Disable all · per user: meters they can see (or *View all meters*), reset password (also unlocks), enable/disable, delete · Add account (with meters) · Login protection (max failed logins, lock minutes) |
-| Server (admin): Electricity price | Two rates: **AC meters** [currency][price] / kWh and **DC meters** [currency][price] / kWh. Each meter uses the rate of its type |
+| Server (admin) | Public address, port, TLS · Display timezone (IANA list, shows its UTC offset) · Raw data retention. (The electricity price is set per meter.) |
+| Users (admin, manager) | Admin: every manager and view-only account; Add account with **Role** (Viewer / Manager) and, for a viewer, **Belongs to** (Admin / a manager). Manager: only its own view-only accounts, linked only to its meters. View-only accounts (per user: **Enable download .csv**, **Show price**, both off by default; enforced on the server): select + Enable/Disable/Unlock selected, Enable all / Disable all · per user: meters they can see (or *View all meters*), reset password (also unlocks), enable/disable, delete · Add account (with meters) · Login protection (max failed logins, lock minutes) |
 | Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID). The token is write-only like a password: after saving the field is empty with a `••••` placeholder; leave it empty to keep the saved token, or tick *Remove the saved token* |
 
-### Firmware (admin)
+### Firmware (admin, manager)
 Placeholder page for future OTA updates. The meter's own page has a greyed-out **Check OTA Update** button.
 
 ## Password fields
@@ -167,3 +166,13 @@ Detected from the meter firmware at pairing (`caps.mc`); see [multichannel.md](m
 
 **Delete data…** next to Export CSV: a date range, the past N minutes / hours / days, or (Danger zone, with a confirmation tick) all Historical Data of the meter. Sessions and Historical Events are not touched; summaries are rebuilt from the readings that remain.
 
+
+## Managers, per-meter price, per-channel viewers
+
+- **Manager** accounts (see architecture.md § Roles): own meters + own view-only accounts; no server settings.
+- **Configuration → General** has **Owner** (admin only: Admin or a manager), **Electricity price** [currency][price] / kWh
+  (default 0.25 for AC and DC; empty = no cost shown; locked into each session when it starts) and **Positive watt only**
+  (default on: a negative power reading is stored as 0 W). Bulk Configuration can set the price too.
+- **Link this meter to users** on a multi-channel meter: tick channels per user to show only those channels (none = the
+  whole meter). Such a viewer sees only those channels on the dashboard, Info, history, CSV and Telegram; whole-meter session
+  totals of a shared session are hidden.

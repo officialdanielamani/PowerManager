@@ -11,7 +11,11 @@
   <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'account' }}" href="?tab=account">Account</a></li>
   {% if current_user.is_admin %}
   <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'server' }}" href="?tab=server">Server</a></li>
+  {% endif %}
+  {% if current_user.is_staff %}
   <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'users' }}" href="?tab=users">Users</a></li>
+  {% endif %}
+  {% if current_user.is_admin %}
   <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'notifications' }}" href="?tab=notifications">Notifications</a></li>
   {% endif %}
 </ul>
@@ -90,70 +94,75 @@
     <div class="col-md-4"><label class="form-label">Keep raw readings</label>
       <div class="input-group"><input class="form-control" type="number" min="7" max="3650" name="raw_retention_days" value="{{ s.get('raw_retention_days') }}"><span class="input-group-text">days</span></div>
       <div class="form-text">Hourly summaries: 2 years. Daily: forever.</div></div>
-  </div>
-  <div class="card-header fw-semibold border-top">Electricity price</div>
-  <div class="card-body row g-3">
-    {% for pre, label in (('', 'AC meters'), ('dc_', 'DC meters')) %}
-    <div class="col-md-6"><label class="form-label">{{ label }}</label><div class="input-group" style="max-width:360px">
-      <input class="form-control" name="{{ pre }}currency" maxlength="8" placeholder="MYR" value="{{ s.get(pre ~ 'currency') }}" style="max-width:100px">
-      <input class="form-control" name="{{ pre }}price_per_kwh" inputmode="decimal" placeholder="0.21" value="{{ s.get(pre ~ 'price_per_kwh') }}">
-      <span class="input-group-text">/ kWh</span></div></div>
-    {% endfor %}
-    <div class="col-12">
-      <div class="form-text">Each meter uses the rate of its type (AC or DC, detected when it pairs). Shows the cost of each session and of the history range. The price is locked in when a session starts, so changing it does not change past or running sessions. Empty = no cost shown.</div></div>
+    <div class="col-12 small text-body-secondary"><i class="bi bi-info-circle me-1"></i>The electricity price is set per meter (meter → Configuration → General).</div>
   </div>
   <div class="card-footer text-end"><button class="btn btn-primary">Save</button></div>
 </form>
 
 {% elif tab == 'users' %}
-{% set viewers = users|selectattr('role', 'equalto', 'viewer')|list %}
+{% set admin = current_user.is_admin %}
 <div class="row g-3">
   <div class="col-12 col-xxl-8">
     <form class="card" method="post" action="{{ url_for('settings.users') }}" id="bulkForm">{{ csrf() }}
       <input type="hidden" name="what" value="bulk"><input type="hidden" name="scope" id="bulkScope" value="selected">
       <div class="card-header d-flex flex-wrap gap-2 align-items-center">
-        <span class="fw-semibold me-auto">View-only accounts ({{ viewers|length }})</span>
+        <span class="fw-semibold me-auto">{{ 'Accounts' if admin else 'My view-only accounts' }} ({{ users|length }})</span>
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-secondary" name="action" value="enable" onclick="bulk('selected')">Enable selected</button>
           <button class="btn btn-outline-secondary" name="action" value="disable" onclick="bulk('selected')">Disable selected</button>
           <button class="btn btn-outline-secondary" name="action" value="unlock" onclick="bulk('selected')">Unlock selected</button>
         </div>
         <div class="btn-group btn-group-sm">
-          <button class="btn btn-outline-success" name="action" value="enable" onclick="return bulk('all', 'Enable ALL view-only accounts?')">Enable all</button>
-          <button class="btn btn-outline-danger" name="action" value="disable" onclick="return bulk('all', 'Disable ALL view-only accounts? They are logged out immediately.')">Disable all</button>
+          <button class="btn btn-outline-success" name="action" value="enable" onclick="return bulk('all', 'Enable ALL accounts listed here?')">Enable all</button>
+          <button class="btn btn-outline-danger" name="action" value="disable" onclick="return bulk('all', 'Disable ALL accounts listed here? They are logged out immediately.')">Disable all</button>
         </div>
       </div>
       <div class="table-responsive"><table class="table table-sm align-middle mb-0">
         <thead><tr><th style="width:1%"><input class="form-check-input" type="checkbox" onclick="document.querySelectorAll('[name=user_ids]').forEach(function(c){c.checked=this.checked}.bind(this))"></th>
-          <th>Username</th><th>Status</th><th>Meters</th><th>Last login</th><th></th></tr></thead>
+          <th>Username</th>{% if admin %}<th>Role</th>{% endif %}<th>Status</th><th>Meters</th><th>Last login</th><th></th></tr></thead>
         <tbody>
-        {% for u in viewers %}
+        {% for u in users %}
           {% set locked = u.locked_until and (u.locked_until == -1 or u.locked_until > now) %}
           <tr class="{{ 'text-body-tertiary' if not u.is_enabled }}">
             <td><input class="form-check-input" type="checkbox" name="user_ids" value="{{ u.id }}"></td>
             <td>{{ u.username }}<div class="small text-body-secondary">{{ u.email or '' }}</div></td>
+            {% if admin %}<td class="small">{% if u.role == 'manager' %}<span class="badge text-bg-warning">manager</span>{% else %}viewer{% if u.manager_fk %}<div class="text-body-secondary">of {{ manager_names.get(u.manager_fk, '?') }}</div>{% endif %}{% endif %}</td>{% endif %}
             <td>{% if not u.is_enabled %}<span class="badge text-bg-dark">disabled</span>{% elif locked %}<span class="badge text-bg-danger">locked</span>{% else %}<span class="badge text-bg-success">active</span>{% endif %}
               {% if u.failed_logins and not locked %}<span class="small text-body-secondary">{{ u.failed_logins }} failed</span>{% endif %}</td>
-            <td class="small">{% if u.can_csv %}<span class="badge text-bg-light border me-1" title="Can download CSV">CSV</span>{% endif %}{% if u.show_price %}<span class="badge text-bg-light border me-1" title="Sees prices">Price</span>{% endif %}{% if u.view_all %}<span class="badge text-bg-info">all meters</span>{% else %}{{ user_meters.get(u.id, [])|join(', ') or '–' }}{% endif %}</td>
+            <td class="small">{% if u.role == 'manager' %}<span class="text-body-secondary">owns:</span> {{ owned.get(u.id, [])|join(', ') or '–' }}{% else %}{% if u.can_csv %}<span class="badge text-bg-light border me-1" title="Can download CSV">CSV</span>{% endif %}{% if u.show_price %}<span class="badge text-bg-light border me-1" title="Sees prices">Price</span>{% endif %}{% if u.view_all %}<span class="badge text-bg-info">{{ 'all meters of its manager' if u.manager_fk else 'all meters' }}</span> {% endif %}{{ user_meters.get(u.id, [])|join(', ') or ('' if u.view_all else '–') }}{% endif %}</td>
             <td class="small">{{ u.last_login_at|dt }}</td>
             <td class="text-end text-nowrap"><button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#u{{ u.id }}">Manage</button></td>
           </tr>
-          <tr class="collapse" id="u{{ u.id }}"><td colspan="6" class="bg-body-tertiary">
+          <tr class="collapse" id="u{{ u.id }}"><td colspan="{{ 7 if admin else 6 }}" class="bg-body-tertiary">
             <div class="row g-3 p-2">
               <div class="col-lg-6">
+              {% if u.role == 'manager' %}
+                <div class="fw-semibold small mb-1">Manager</div>
+                <div class="small text-body-secondary">Manages its own meters ({{ owned.get(u.id, [])|length }}) and the view-only accounts it creates. Give it a meter in that meter's Configuration → Owner. Managers always see prices and can download CSV.</div>
+              {% else %}
+                {% if admin %}
+                <div class="fw-semibold small mb-1">Belongs to</div>
+                <select class="form-select form-select-sm mb-3" form="acc{{ u.id }}" name="manager" style="max-width:260px">
+                  <option value="">Admin</option>
+                  {% for mg in managers %}<option value="{{ mg.id }}" {{ 'selected' if u.manager_fk == mg.id }}>Manager {{ mg.username }}</option>{% endfor %}
+                </select>
+                {% endif %}
                 <div class="fw-semibold small mb-1">Meters this user can see</div>
                 <div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="view_all" id="va{{ u.id }}" {{ 'checked' if u.view_all }}>
-                  <label class="form-check-label" for="va{{ u.id }}">View all meters</label></div>
+                  <label class="form-check-label" for="va{{ u.id }}">View all meters{{ ' of its manager' if u.manager_fk else '' }}</label></div>
                 {% for m in meters %}
-                <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="meters" value="{{ m.id }}" id="m{{ u.id }}_{{ m.id }}" {{ 'checked' if (u.id, m.id) in links }}>
-                  <label class="form-check-label small" for="m{{ u.id }}_{{ m.id }}">{{ m.name }}</label></div>
+                {% set link = links.get((u.id, m.id)) %}
+                <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="meters" value="{{ m.id }}" id="m{{ u.id }}_{{ m.id }}" {{ 'checked' if link }}>
+                  <label class="form-check-label small" for="m{{ u.id }}_{{ m.id }}">{{ m.name }}{% if link and link.channels %} <span class="text-body-secondary">({% for c in link.channels %}CH{{ c|int + 1 }}{{ ', ' if not loop.last }}{% endfor %})</span>{% endif %}</label></div>
                 {% else %}<div class="small text-body-secondary">No meters yet.</div>{% endfor %}
+                <div class="form-text">Per-channel access of a multi-channel meter is set in that meter's Configuration → Linked users.</div>
                 <div class="fw-semibold small mt-3 mb-1">Permissions</div>
                 <div class="form-check form-switch"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="can_csv" id="csv{{ u.id }}" {{ 'checked' if u.can_csv }}>
                   <label class="form-check-label small" for="csv{{ u.id }}">Enable download .csv</label></div>
                 <div class="form-check form-switch"><input class="form-check-input" type="checkbox" form="acc{{ u.id }}" name="show_price" id="pr{{ u.id }}" {{ 'checked' if u.show_price }}>
                   <label class="form-check-label small" for="pr{{ u.id }}">Show price</label></div>
                 <div class="mt-2"><button class="btn btn-sm btn-primary" form="acc{{ u.id }}">Save access</button></div>
+              {% endif %}
               </div>
               <div class="col-lg-6">
                 <div class="fw-semibold small mb-1">Reset password</div>
@@ -171,48 +180,61 @@
             </div>
           </td></tr>
         {% else %}
-          <tr><td colspan="6" class="text-body-secondary">No view-only accounts yet.</td></tr>
+          <tr><td colspan="{{ 7 if admin else 6 }}" class="text-body-secondary">No accounts yet.</td></tr>
         {% endfor %}
         </tbody>
       </table></div>
     </form>
     {# Per-user forms live outside the bulk form (forms cannot be nested); inputs use form="…". #}
-    {% for u in viewers %}
+    {% for u in users %}
     <form id="acc{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="access"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
     <form id="pw{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="reset_password"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
     <form id="un{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="unlock"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
     <form id="tg{{ u.id }}" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="toggle"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
-    <form id="del{{ u.id }}" method="post" action="{{ url_for('settings.users') }}" onsubmit="return confirm('Delete view-only account {{ u.username }}? This cannot be undone.')">{{ csrf() }}<input type="hidden" name="what" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
+    <form id="del{{ u.id }}" method="post" action="{{ url_for('settings.users') }}" onsubmit="return confirm({{ ('Delete manager ' ~ u.username ~ '? Its meters go back to the admin and its view-only accounts become the admin\'s. This cannot be undone.' if u.role == 'manager' else 'Delete view-only account ' ~ u.username ~ '? This cannot be undone.')|tojson|forceescape }})">{{ csrf() }}<input type="hidden" name="what" value="delete"><input type="hidden" name="user_id" value="{{ u.id }}"></form>
     {% endfor %}
   </div>
   <div class="col-12 col-xxl-4">
     <form class="card mb-3" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="add">
-      <div class="card-header fw-semibold">Add view-only account</div>
+      <div class="card-header fw-semibold">Add account</div>
       <div class="card-body row g-2">
+        {% if admin %}
+        <div class="col-md-6"><label class="form-label">Role</label>
+          <select class="form-select" name="role" id="newRole">
+            <option value="viewer">Viewer (view only)</option>
+            <option value="manager">Manager</option>
+          </select></div>
+        <div class="col-md-6 pm-viewer-only"><label class="form-label">Belongs to</label>
+          <select class="form-select" name="manager"><option value="">Admin</option>
+            {% for mg in managers %}<option value="{{ mg.id }}">Manager {{ mg.username }}</option>{% endfor %}</select></div>
+        {% endif %}
         <div class="col-12"><label class="form-label">Username</label><input class="form-control" name="username" required maxlength="32"></div>
         {{ pw_fields('Password') }}
         <div class="col-md-6"><label class="form-label">Email <span class="text-body-tertiary">(optional)</span></label><input class="form-control" type="email" name="email" maxlength="254"></div>
         <div class="col-md-6"><label class="form-label">Phone <span class="text-body-tertiary">(optional)</span></label><input class="form-control" name="phone" maxlength="20" placeholder="+60…"></div>
-        <div class="col-12"><label class="form-label">Meters</label>
-          <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="view_all" id="newVa"><label class="form-check-label" for="newVa">View all meters</label></div>
+        <div class="col-12 pm-viewer-only"><label class="form-label">Meters</label>
+          <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="view_all" id="newVa"><label class="form-check-label" for="newVa">View all meters{{ '' if admin else ' (of mine)' }}</label></div>
           {% for m in meters %}<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" name="meters" value="{{ m.id }}" id="nm{{ m.id }}"><label class="form-check-label small" for="nm{{ m.id }}">{{ m.name }}</label></div>{% endfor %}
         </div>
-        <div class="col-12"><label class="form-label">Permissions</label>
+        <div class="col-12 pm-viewer-only"><label class="form-label">Permissions</label>
           <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="can_csv" id="newCsv"><label class="form-check-label" for="newCsv">Enable download .csv</label></div>
           <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="show_price" id="newPrice"><label class="form-check-label" for="newPrice">Show price</label></div></div>
-        <div class="col-12 form-text">View-only users see only their meters (info, history, events) and choose their own notifications. They cannot change anything. CSV download and prices are off unless enabled here.</div>
+        <div class="col-12 form-text pm-viewer-only">View-only users see only their meters (info, history, events) and choose their own notifications. They cannot change anything. CSV download and prices are off unless enabled here.</div>
+        {% if admin %}<div class="col-12 form-text pm-manager-only d-none">A manager adds, configures and deletes its own meters (the ones it pairs, or that you give it in a meter's Configuration → Owner) and creates its own view-only accounts. Server settings stay admin-only.</div>{% endif %}
       </div>
       <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Add account</button></div>
     </form>
+    {% if admin %}
     <form class="card" method="post" action="{{ url_for('settings.users') }}">{{ csrf() }}<input type="hidden" name="what" value="login_policy">
-      <div class="card-header fw-semibold">Login protection (view-only accounts)</div>
+      <div class="card-header fw-semibold">Login protection (manager &amp; view-only accounts)</div>
       <div class="card-body row g-2">
         <div class="col-6"><label class="form-label">Max failed logins</label><input class="form-control" type="number" min="0" max="100" name="login_max_attempts" value="{{ s.get('login_max_attempts') }}"><div class="form-text">0 = no lock</div></div>
-        <div class="col-6"><label class="form-label">Lock for</label><div class="input-group"><input class="form-control" type="number" min="0" max="10080" name="login_lock_minutes" value="{{ s.get('login_lock_minutes') }}"><span class="input-group-text">min</span></div><div class="form-text">0 = until you unlock</div></div>
+        <div class="col-6"><label class="form-label">Lock for</label><div class="input-group"><input class="form-control" type="number" min="0" max="10080" name="login_lock_minutes" value="{{ s.get('login_lock_minutes') }}"><span class="input-group-text">min</span></div><div class="form-text">0 = until unlocked</div></div>
         <div class="col-12 form-text">The admin account is never locked (so nobody can lock you out), but every login form is limited to 5 tries per minute per IP address.</div>
       </div>
       <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Save</button></div>
     </form>
+    {% endif %}
   </div>
 </div>
 
@@ -233,6 +255,12 @@
 {% endblock %}
 {% block scripts %}
 <script>
+var nr = document.getElementById('newRole');
+if (nr) nr.addEventListener('change', function () {
+  var mgr = nr.value === 'manager';
+  document.querySelectorAll('.pm-viewer-only').forEach(function (e) { e.classList.toggle('d-none', mgr); });
+  document.querySelectorAll('.pm-manager-only').forEach(function (e) { e.classList.toggle('d-none', !mgr); });
+});
 function bulk(scope, question) {
   document.getElementById('bulkScope').value = scope;
   return question ? confirm(question) : true;

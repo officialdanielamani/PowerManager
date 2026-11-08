@@ -25,19 +25,19 @@
     </a>
     <ul class="nav nav-pills flex-column gap-1 mb-auto">
       <li><a class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}" href="{{ url_for('main.dashboard') }}"><i class="bi bi-grid me-2"></i>Dashboard</a></li>
-      {% if current_user.is_admin %}
+      {% if current_user.is_staff %}
       <li><a class="nav-link {% if request.endpoint == 'meters.add' %}active{% endif %}" href="{{ url_for('meters.add') }}"><i class="bi bi-plus-circle me-2"></i>Add New Meter</a></li>
       {% endif %}
       <li><a class="nav-link {% if request.endpoint == 'main.notifications' %}active{% endif %}" href="{{ url_for('main.notifications') }}"><i class="bi bi-bell me-2"></i>Notifications
         {% if unread_notifications %}<span class="badge text-bg-danger ms-1">{{ unread_notifications }}</span>{% endif %}</a></li>
-      {% if current_user.is_admin %}
+      {% if current_user.is_staff %}
       <li><a class="nav-link {% if request.endpoint == 'main.firmware' %}active{% endif %}" href="{{ url_for('main.firmware') }}"><i class="bi bi-cpu me-2"></i>Firmware</a></li>
       {% endif %}
       <li><a class="nav-link {% if request.blueprint == 'settings' %}active{% endif %}" href="{{ url_for('settings.index') }}"><i class="bi bi-gear me-2"></i>Settings</a></li>
     </ul>
     <hr>
     <div class="small text-body-secondary mb-2"><i class="bi bi-person-circle me-1"></i>{{ current_user.username }}
-      <span class="badge text-bg-{{ 'primary' if current_user.is_admin else 'secondary' }}">{{ current_user.role }}</span></div>
+      <span class="badge text-bg-{{ 'primary' if current_user.is_admin else ('warning' if current_user.is_manager else 'secondary') }}">{{ current_user.role }}</span></div>
     <div class="d-flex gap-2">
       <button class="btn btn-sm btn-outline-secondary" id="themeToggle" title="Toggle theme"><i class="bi bi-circle-half"></i></button>
       <form method="post" action="{{ url_for('auth.logout') }}" class="flex-grow-1">
