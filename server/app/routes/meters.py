@@ -14,7 +14,7 @@ from ..extensions import db
 from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, User,
                       PairingCode, Rollup, RollupDirty, Session, Temperature, now)
-from ..services import access, commands, devconfig, history, hub, incidents, ingest, lifecycle, settings, validation
+from ..services import access, auxcfg, commands, devconfig, history, hub, incidents, ingest, lifecycle, settings, validation
 from ..services import tare as tare_svc
 from .decorators import staff_required
 from .device_api import ensure_device_defaults
@@ -238,6 +238,11 @@ def configure(pk):
                            protect_actions=devconfig.PROTECT_ACTIONS, kwh_action_of=devconfig.kwh_action,
                            viewers=_viewers(), linked={v.user_fk: v for v in MeterViewer.query.filter_by(device_fk=device.id)},
                            managers=access.managers() if current_user.is_admin else [],
+                           aux_relays={a.get("i"): a.get("relay") for a in (device.last_state or {}).get("aux") or []
+                                       if isinstance(a, dict)},
+                           n_temp=max(int((device.caps or {}).get("temp") or 0), len((device.last_reading or {}).get("t") or []), 1),
+                           aux_sources=auxcfg.SOURCES, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
+                           aux_cfg=auxcfg.fit(cfg.get("aux"), devconfig.aux_count(device)),
                            n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
@@ -359,10 +364,15 @@ def action(pk):
         if device.is_mc:
             params["ch"] = ch or 0
         cmd, err = commands.issue(device, "relay", params, current_user)
-    elif act in ("aux_on", "aux_off"):  # AUX relay (multi-channel: relays beyond the channels)
+    elif act in ("aux_on", "aux_off"):  # AUX relay (relay outputs no measured channel uses)
         i = body.get("i")
-        if not device.is_mc or not str(i).isdigit() or int(i) >= int((device.caps or {}).get("aux", 0) or 0):
+        if not str(i).isdigit() or int(i) >= devconfig.aux_count(device):
             return jsonify(ok=False, error="bad_aux", message="No such AUX relay."), 400
+        a = ((device.cfg or {}).get("aux") or [{}] * (int(i) + 1))[int(i)] or {}
+        if a.get("mode", "manual") != "manual" and not a.get("override"):
+            return jsonify(ok=False, error="automation",
+                           message="This AUX relay runs on its schedule / event. Tick \"Enable override\" in its configuration "
+                                   "to switch it by hand."), 409
         cmd, err = commands.issue(device, "aux", {"i": int(i), "on": act == "aux_on"}, current_user)
     elif act in ("renew", "end", "reset_trip", "send_now"):
         params = {"by": current_user.username} if act == "reset_trip" else {}

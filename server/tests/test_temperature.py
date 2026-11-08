@@ -29,14 +29,17 @@ def test_temperatures_stored_and_shown(app, admin):
         ingest.handle(FakeConn(), d, _tel(2, t0 + 10))             # no new round: latest values kept
         assert Temperature.query.filter_by(device_fk=pk).count() == 1
         assert d.last_reading["t"] == [24.5, None]
-        ingest.handle(FakeConn(), d, _tel(3, t0 + 20, [26.0, 31.5]))
+        msg = _tel(3, t0 + 20, [26.0, 31.5])
+        msg["items"][0]["rh"] = [55, None]  # T1 = SHT sensor (humidity), T2 = DS18B20
+        ingest.handle(FakeConn(), d, msg)
         db.session.commit()
+        assert Temperature.query.filter_by(device_fk=pk, idx=0, ts=t0 + 20).one().rh == 55
     live = admin.get(f"/meters/{pk}/live").get_json()
-    assert live["temps"] == [{"name": "T1", "c": 26.0}, {"name": "T2", "c": 31.5}]
+    assert live["temps"] == [{"name": "T1", "c": 26.0, "rh": 55.0}, {"name": "T2", "c": 31.5, "rh": None}]
     h = admin.get(f"/meters/{pk}/history?range=1h").get_json()["temps"]
     assert h["names"] == ["T1", "T2"] and h["stats"][0]["max"] == 26.0 and h["stats"][1]["avg"] == 31.5
     page = admin.get(f"/meters/{pk}").get_data(as_text=True)
-    assert 'data-series="temp"' in page
+    assert 'data-series="temp"' in page and 'data-series="hum"' in page
     conf = admin.get(f"/meters/{pk}/configure").get_data(as_text=True)
     assert "Temperature Protection" in conf and "not fitted on this meter" in conf  # tamper: TAMPER_ENABLE 0
 

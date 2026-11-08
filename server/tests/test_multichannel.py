@@ -217,14 +217,14 @@ def test_aux_relays(app, admin):
     assert admin.post(f"/meters/{pk}/action", json={"action": "aux_on", "i": 2}).status_code == 400  # no AUX3
     with app.app_context():
         d = db.session.get(Device, pk)
-        assert devconfig.to_device(d.cfg, 1)["cfg"]["aux"] == [{"i": 0, "name": "Pump"}, {"i": 1, "name": "Fan"}]
+        assert [(a["i"], a["name"], a["mode"]) for a in devconfig.to_device(d.cfg, 1)["cfg"]["aux"]] == [(0, "Pump", "manual"), (1, "Fan", "manual")]
         assert ("aux", {"i": 1, "on": True}) in [(c.c, c.params) for c in Command.query.filter_by(device_fk=pk)]
         ingest.handle(FakeConn(), d, {"t": "state", "mode": "shared", "relay": [{"i": 0, "on": False, "tripped": False}],
                                       "sess": {"sid": 0, "status": "active"},
                                       "aux": [{"i": 0, "relay": 3, "on": False}, {"i": 1, "relay": 4, "on": True}]})
         with app.test_request_context():
             m = meter_summary(d, show_price=False)
-        assert m["aux"][1] == {"i": 1, "relay": 4, "on": True, "name": "AUX2 Fan"}
+        assert {k: m["aux"][1][k] for k in ("i", "relay", "on", "name", "mode")} == {"i": 1, "relay": 4, "on": True, "name": "AUX2 Fan", "mode": "manual"}
         assert m["status"] == "none"  # paired, no session until Renew
 
 

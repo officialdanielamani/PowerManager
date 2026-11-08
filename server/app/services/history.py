@@ -163,7 +163,7 @@ def query(device_pk, ch, start, end):
 
 
 _TEMP_SQL = text("""
-    SELECT (ts - :s) / :bs AS b, idx, MAX(ts), AVG(c), MIN(c), MAX(c)
+    SELECT (ts - :s) / :bs AS b, idx, MAX(ts), AVG(c), MIN(c), MAX(c), AVG(rh)
     FROM temperature WHERE device_fk = :d AND ts >= :s AND ts <= :e AND c IS NOT NULL
     GROUP BY b, idx ORDER BY b, idx""")
 
@@ -179,12 +179,13 @@ def temps(device_pk, start, end):
     n = max(r[1] for r in rows) + 1
     buckets, order = {}, []
     stats = [[None, None, 0.0, 0] for _ in range(n)]
-    for b, idx, t, avg, mn, mx in rows:
+    for b, idx, t, avg, mn, mx, rh in rows:
         if b not in buckets:
-            buckets[b] = [t, [None] * n]
+            buckets[b] = [t, [None] * n, [None] * n]
             order.append(b)
         buckets[b][0] = max(buckets[b][0], t)
         buckets[b][1][idx] = round(avg, 1)
+        buckets[b][2][idx] = round(rh, 1) if rh is not None else None
         st = stats[idx]
         st[0] = mn if st[0] is None else min(st[0], mn)
         st[1] = mx if st[1] is None else max(st[1], mx)
@@ -192,6 +193,8 @@ def temps(device_pk, start, end):
         st[3] += 1
     return {"names": [f"T{i + 1}" for i in range(n)], "t": [buckets[b][0] for b in order],
             "series": [[buckets[b][1][i] for b in order] for i in range(n)],
+            "rh": [[buckets[b][2][i] for b in order] for i in range(n)],
+            "has_rh": any(buckets[b][2][i] is not None for b in order for i in range(n)),
             "stats": [{"min": _r(s[0], 1), "max": _r(s[1], 1), "avg": _r(s[2] / s[3], 1) if s[3] else None}
                       for s in stats]}
 

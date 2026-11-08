@@ -179,6 +179,8 @@ def h_hello(conn, device, msg):
             for i in range(devconfig.channel_count(device)):
                 if i not in have:
                     device.channels.append(Channel(idx=i, label=f"CH{i + 1}"))
+        elif not device.is_mc and devconfig.fit_aux(device):  # single-channel meter: AUX relays known / changed
+            device.cfg_ver_wanted = (device.cfg_ver_wanted or 0) + 1
     state = msg.get("state")
     if isinstance(state, dict):
         _apply_state(device, state)
@@ -251,7 +253,7 @@ def h_tel(conn, device, msg):
                 _mark_dirty(device.id, ch, ts0)
         temps = _store_temps(device, item, ts)
         if temps is not None and (latest_t is None or ts >= latest_t[1]):
-            latest_t = (temps, ts)
+            latest_t = (temps[0], ts, temps[1])
         _bump_seq(device, seq)
         if newest is None or ts >= newest["ts"]:
             last = [r for r in rows if r["seq"] == rows[-1]["seq"]] if rows else []  # (DRDY: the last window)
@@ -262,9 +264,13 @@ def h_tel(conn, device, msg):
     prev = device.last_reading or {}
     if newest is not None:  # temperatures come every TEMP_READ_MS only: keep the latest ones
         if latest_t is not None and latest_t[1] >= prev.get("t_ts", 0):
-            newest["t"], newest["t_ts"] = latest_t
+            newest["t"], newest["t_ts"] = latest_t[0], latest_t[1]
+            if latest_t[2] is not None:
+                newest["rh"] = latest_t[2]
         elif prev.get("t") is not None:
             newest["t"], newest["t_ts"] = prev["t"], prev.get("t_ts")
+            if prev.get("rh") is not None:
+                newest["rh"] = prev["rh"]
     if newest is not None and newest["ts"] >= prev.get("ts", 0):
         if not newest["ch"]:
             # Show that there is no current reading (not the old values), and keep when the last good one was.
@@ -324,10 +330,13 @@ def _store_temps(device, item, ts):
     for v in t[:8]:
         c = _f(v)
         vals.append(c if c is not None and -60 <= c <= 130 else None)
-    rows = [{"device_fk": device.id, "idx": i, "ts": ts, "c": c} for i, c in enumerate(vals) if c is not None]
+    hum = item.get("rh") if isinstance(item.get("rh"), list) else []
+    rhs = [(_f(hum[i]) if i < len(hum) else None) for i in range(len(vals))]
+    rhs = [h if h is not None and 0 <= h <= 100 else None for h in rhs]
+    rows = [{"device_fk": device.id, "idx": i, "ts": ts, "c": c, "rh": rhs[i]} for i, c in enumerate(vals) if c is not None]
     if rows:  # a re-sent item (no ack yet) is stored once
         db.session.execute(sqlite_insert(Temperature).values(rows).on_conflict_do_nothing())
-    return vals
+    return vals, (rhs if any(h is not None for h in rhs) else None)
 
 
 FRAMES_PER_ITEM = 64

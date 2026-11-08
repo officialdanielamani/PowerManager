@@ -10,7 +10,7 @@ Self-hosted energy meter system: ESP32 meters measure and switch loads, and a Do
 |------|------|--------|
 | Server | Python 3.11, Flask, SQLite, WebSocket, runs in Docker — see [server/README.md](server/README.md) | `server/` |
 | Meter firmware | ESP32-S3 Super Mini, Arduino IDE (Arduino-ESP32 core 3.x). AC meter (PZEM-004T) and DC meter (PZEM-017) from one source — see [firmware/README.md](firmware/README.md) | `firmware/PowerMeter/` |
-| Multi-channel AC meter firmware | ESP32-S3 + rbAmp BASIC (1–7 SCT-013 channels) + I²C relay board — see [firmware/PowerMeterMC/README.md](firmware/PowerMeterMC/README.md) | `firmware/PowerMeterMC/` |
+| Multi-channel AC meter firmware | ESP32-S3 + one or more rbAmp BASIC modules (1–16 SCT-013 channels) + relays (GPIO / PCF8574 / XL9535) — see [firmware/PowerMeterRBAmp/README.md](firmware/PowerMeterRBAmp/README.md) | `firmware/PowerMeterRBAmp/` |
 | Docs | Markdown | `docs/` |
 
 ## Documents

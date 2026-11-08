@@ -179,8 +179,8 @@ Reference core: Arduino-ESP32 **3.3.5** (used on the hardware). Also compiles on
 ## 11. Sketch layout
 
 ```
-firmware/PowerMeter/
-  PowerMeter.ino      setup(): init + start tasks; loop(): BOOT button + soft watchdog
+firmware/PowerMeterPZEM/
+  PowerMeterPZEM.ino  setup(): init + start tasks; loop(): BOOT button + soft watchdog
   config.h            pins, limits, timings, defaults
   src/
     app_state.*       shared state + mutex

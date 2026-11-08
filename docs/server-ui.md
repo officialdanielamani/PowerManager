@@ -184,3 +184,13 @@ channel's kWh limit cannot trigger. The server checks every reading **before** *
 power ≤ −30 W with current ≥ 0.3 A for about 60 s flags the channel. It then shows a red **clamp reversed?** badge on
 the dashboard card and the Info page (with a hint to turn the clamp over), and sends one **Meter status** notification.
 Clear positive power (> 30 W) clears the flag. No-load noise (a few negative watts at ~0 A) is ignored.
+
+## AUX relay automation
+
+Configuration → **AUX relays** (any meter with AUX relays): per relay a name and the mode **Manual**, **Schedule**
+(up to 4 windows: ON / OFF, start → end, days with *All* / Mon … Sun, plus the state outside them) or **Event**
+(When [Temperature / Humidity / Current / Power / kWh balance / Session] [sensor / channel] is [≥ / ≤] [value] —
+or the session is [running / ended] — the relay is [ON / OFF], otherwise the opposite), and **Enable override**.
+The Info page shows each AUX relay with its mode, a one-line description of the automation, *overridden* while a
+manual switch wins, and ON / OFF buttons (hidden for automated relays without override). Details:
+docs/multichannel.md § AUX relays.

@@ -213,6 +213,7 @@ class Temperature(db.Model):
     idx = db.Column(db.Integer, nullable=False, default=0)
     ts = db.Column(db.Integer, nullable=False)
     c = db.Column(db.Float)
+    rh = db.Column(db.Float)  # humidity %RH (SHT sensors), else null
 
     __table_args__ = (db.UniqueConstraint("device_fk", "idx", "ts", name="uq_temperature"),)
 

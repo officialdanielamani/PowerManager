@@ -2,6 +2,16 @@
 
 Firmware for the PowerManager meter: ESP32-S3 Super Mini + power sensor + solid-state relay + WS2812 LED + tamper switch.
 
+Two sketches (open the folder's `.ino` in Arduino IDE):
+
+| Sketch | Meter |
+|---|---|
+| `PowerMeterPZEM/PowerMeterPZEM.ino` | single channel: PZEM-004T (AC) or PZEM-017 (DC) — this page |
+| `PowerMeterRBAmp/PowerMeterRBAmp.ino` | multi-channel AC: one or more rbAmp modules — see [`PowerMeterRBAmp/README.md`](PowerMeterRBAmp/README.md) |
+
+(Until 0.8 they were called `PowerMeter` and `PowerMeterMC`. The firmware type stored on the meter is unchanged, so
+flashing the renamed sketch keeps the meter's data, pairing and history.) Example configurations: [`examples/`](examples/).
+
 **AC or DC meter:** one sketch, two firmwares. In `config.h` set `METER_DC 0` for the **AC meter** (PZEM-004T) or `METER_DC 1` for the **DC meter** (PZEM-017). Everything else (limits, sessions, mesh, offline buffer, local page) is the same. The meter tells the server its type when it pairs, so the server shows it as AC or DC automatically and uses the matching price. Design: [`../docs/firmware.md`](../docs/firmware.md), protocol: [`../docs/protocol.md`](../docs/protocol.md).
 
 ## 1. Arduino IDE setup (once)
@@ -25,7 +35,7 @@ Firmware for the PowerManager meter: ESP32-S3 Super Mini + power sensor + solid-
 | Flash Size | 4MB |
 | Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** |
 
-Open `firmware/PowerMeter/PowerMeter.ino`, check the pins in `config.h`, then Upload.
+Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h`, then Upload.
 
 If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** for game controllers), the Tools → Board menu has an "ESP32S3 Dev Module" in each of them. Pick the one under **esp32**. Bluepad32's package is based on the older 2.0.x core. The sketch builds on it too, but it is meant for Bluetooth controllers, not tested here, and stays behind on fixes.
 
@@ -36,14 +46,26 @@ If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** 
 | PZEM TX → ESP RX (DC: RS485 module RO/RXD) | 5 |
 | PZEM RX ← ESP TX (DC: RS485 module DI/TXD) | 6 |
 | DC only: MAX485 DE+RE (set `PIN_RS485_DE`; `-1` for auto-direction modules) | – |
-| SSR input (+) | 7 |
+| SSR input (+) (`RELAY_GPIO_PINS`) | 7 |
 | Tamper switch (NC, other side to GND) | 4 |
 | WS2812 data | 48 (onboard LED on most Super Mini boards) |
-| DS3231 SDA / SCL (optional, set `HAS_DS3231 1`) | 8 / 9 |
+| I²C SDA / SCL (optional: DS3231, PCF8574 / XL9535 relay boards, SHT sensors) | 8 / 9 |
 | Battery sense (optional, set `BATTERY_ENABLE 1`) | 1, through a divider (see `config.h`) |
-| DS18B20 temperature sensor(s) (optional, set `TEMP_ENABLE 1`) | 10, 4.7 kΩ pull-up to 3.3 V |
+| DS18B20 temperature sensor(s) (optional, set `TEMP_DS18B20 1`) | 10, 4.7 kΩ pull-up to 3.3 V |
 
-**Optional parts** (`config.h`, 0 = not fitted): `HAS_DS3231`, `TAMPER_ENABLE`, `TEMP_ENABLE`, `BATTERY_ENABLE`,
+**Relay outputs** (both sketches, `RELAY_BOARDS` in `config.h`): ESP32 pins (`RELAY_GPIO` + `RELAY_GPIO_PINS`),
+PCF8574 (up to 8 outputs) and XL9535 (up to 16) boards, mixed, e.g. `{ {RELAY_GPIO, 0, 1, 1}, {RELAY_PCF8574, 0x20, 6, 0} }`
+= an SSR on GPIO 7 plus 6 outputs of a PCF8574, or PCF8574 (0-4) + PCF8574 (0-6) = `{ {RELAY_PCF8574, 0x20, 5, 0},
+{RELAY_PCF8574, 0x21, 7, 0} }`. Relays are numbered across the entries. On the PZEM meter `CHANNEL_RELAY` (default 1)
+switches the measured line; every other relay is an **AUX relay** with manual / schedule / event control from the
+server (see `docs/multichannel.md` § AUX relays). Mistakes (too many outputs on a board, a GPIO relay without a pin)
+stop the compile with a message.
+
+**Temperature / humidity:** DS18B20 (`TEMP_DS18B20`) and SHT20 / SHT3x / SHT4x on the I²C bus (`TEMP_SHT`,
+`SHT_SENSORS { {SHT_4X, 0x44} }`) can be used together; T1, T2 … = the SHTs in config order, then the DS18B20s.
+SHTs add humidity (%RH), shown next to the temperature and usable in AUX event rules.
+
+**Optional parts** (`config.h`, 0 = not fitted): `HAS_DS3231`, `TAMPER_ENABLE`, `TEMP_DS18B20`, `TEMP_SHT`, `BATTERY_ENABLE`,
 `MESH_ENABLE`. A part switched off is left out of the firmware completely, so the binary gets smaller; the server
 hides what the meter does not have (e.g. the tamper settings with `TAMPER_ENABLE 0`).
 
@@ -53,7 +75,7 @@ What each switch costs (multi-channel firmware 0.8.0, ESP32-S3, measured):
 |---|---|
 | Mesh (`MESH_ENABLE`) | ~18 KB |
 | Battery sense (`BATTERY_ENABLE`, ADC calibration) | ~11 KB |
-| Temperature (`TEMP_ENABLE`) | ~5 KB |
+| Temperature (`TEMP_DS18B20`) | ~5 KB |
 | DS3231 (`HAS_DS3231`) | ~1 KB |
 | Tamper switch (`TAMPER_ENABLE`) | < 1 KB |
 

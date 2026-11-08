@@ -30,6 +30,36 @@ def check_disconnected():
     db.session.commit()
 
 
+def uses_local_time(cfg):
+    """Config that the meter evaluates in local time: daily session resets, AUX schedules."""
+    cfg = cfg or {}
+    return (cfg.get("sess_mode") == "daily" or any((c or {}).get("sess_mode") == "daily" for c in cfg.get("ch") or [])
+            or any((a or {}).get("mode") == "schedule" for a in cfg.get("aux") or []))
+
+
+def repush_local_time():
+    """Daily reset times are sent in UTC and AUX schedules with the UTC offset: after a time zone (or DST)
+    change those meters get a new config."""
+    from . import devconfig, hub
+    for d in Device.query.filter(Device.removed_at.is_(None), Device.disabled_at.is_(None)).all():
+        if uses_local_time(d.cfg):
+            d.cfg_ver_wanted += 1
+            db.session.commit()
+            hub.send(d.id, {"t": "cfg", **devconfig.to_device(d.cfg, d.cfg_ver_wanted)})
+
+
+def check_tz_offset():
+    """The display time zone's UTC offset changed (daylight saving time): send the new offset."""
+    from . import auxcfg, settings
+    now_off = str(auxcfg.tz_minutes())
+    if settings.get("tz_min_sent") != now_off:
+        first = settings.get("tz_min_sent") == ""
+        settings.set_many({"tz_min_sent": now_off})
+        if not first:
+            log.info("UTC offset of the display time zone is now %s min: re-sending local-time configs", now_off)
+            repush_local_time()
+
+
 def cleanup():
     """Per-user notification and per-meter data/event auto-delete (each only if enabled)."""
     from ..models import Event, Measurement, Notification, Rollup, Session, Temperature, User
@@ -81,6 +111,7 @@ def start(app):
         return job
 
     sch = BackgroundScheduler(timezone="UTC", daemon=True)
+    sch.add_job(wrap(check_tz_offset), "interval", minutes=30, id="tz_offset")
     sch.add_job(wrap(check_disconnected), "interval", seconds=60, id="disconnected")
     sch.add_job(wrap(run_rollups), "interval", minutes=5, id="rollups")
     sch.add_job(wrap(rollup.retention), "cron", hour=3, minute=17, id="retention")

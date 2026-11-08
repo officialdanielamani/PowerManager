@@ -48,6 +48,10 @@
   <span class="ms-auto small text-body-secondary fw-normal">{{ (d.caps or {}).get('variant', '') }} {{ d.sensor_name }}</span></div>
   <div class="card-body" id="mcChannels"><div class="text-body-secondary small">Loading…</div></div></div>
 {% endif %}
+{% if not d.removed_at %}
+<div class="card mb-3 {{ '' if m.aux else 'd-none' }}"><div class="card-header fw-semibold">AUX relays <span class="fw-normal small text-body-secondary">(not metered)</span></div>
+  <div class="card-body" id="auxBox"><div class="text-body-secondary small">Loading…</div></div></div>
+{% endif %}
 <div class="row g-3 mb-3">
   <div class="col-12 col-lg-5">
     <div class="card h-100"><div class="card-header fw-semibold d-flex align-items-center">Meter
@@ -123,6 +127,7 @@
       <button class="btn btn-sm btn-outline-secondary" data-series="v">Voltage (V)</button>
       <button class="btn btn-sm btn-outline-secondary" data-series="kwh">Energy (kWh)</button>
       {% if (d.caps or {}).get('temp') is not none or m.temps %}<button class="btn btn-sm btn-outline-secondary" data-series="temp">Temperature (°C)</button>{% endif %}
+      {% if m.temps|selectattr('rh', 'ne', none)|list %}<button class="btn btn-sm btn-outline-secondary" data-series="hum">Humidity (%RH)</button>{% endif %}
       <span class="ms-auto text-body-secondary" id="rangeLabel"></span>
     </div>
     <div class="pm-chart"><canvas id="chart"></canvas></div>

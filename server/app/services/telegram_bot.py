@@ -103,7 +103,8 @@ def reading_text(device, user):
         lines.append(f"Session used {_fmt(m['kwh'], 3)} kWh{limit}" + (f" · {m['cost']}" if m.get("cost") else ""))
     if m.get("temps"):
         lines.append(("🔥 " if m.get("temp_high") else "🌡 ") + " · ".join(
-            f"{t['name']} {_fmt(t['c'], 1)} °C" for t in m["temps"]))
+            f"{t['name']} {_fmt(t['c'], 1)} °C" + (f" {_fmt(t['rh'], 0)} %RH" if t.get("rh") is not None else "")
+            for t in m["temps"]))
     lines.append(f"Reading at {m.get('reading_at') or '–'} ({settings.get('timezone')})")
     return "\n".join(lines)
 

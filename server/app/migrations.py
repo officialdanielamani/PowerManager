@@ -89,6 +89,9 @@ def run():
                                {"c": (old.get(pre + "currency") or "").strip()[:8], "p": price})
         log.info("Migration: electricity price is now set per meter")
 
+    # v0.9: humidity of SHT sensors
+    _add_column("temperature", "rh FLOAT")
+
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:
         # Old rules were per meter; give them to the admin, then rebuild with the new key.

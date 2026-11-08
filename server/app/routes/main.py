@@ -3,7 +3,7 @@ from flask_login import current_user, login_required
 
 from ..extensions import db
 from ..models import Device, Incident, Notification, Session, now
-from ..services import access, devconfig, hub, mesh, settings, tare as tare_svc
+from ..services import access, auxcfg, devconfig, hub, mesh, settings, tare as tare_svc
 
 bp = Blueprint("main", __name__)
 
@@ -67,7 +67,9 @@ def meter_summary(d, show_price=None, user=None):
                  if v.get("flag") and (allowed is None or int(k) in allowed))
     tvals = reading.get("t") or []
     out = {
-        "temps": [{"name": f"T{i + 1}", "c": c} for i, c in enumerate(tvals)],
+        "temps": [{"name": f"T{i + 1}", "c": c,
+                   "rh": (reading.get("rh") or [])[i] if i < len(reading.get("rh") or []) else None}
+                  for i, c in enumerate(tvals)],
         "temps_at": settings.fmt_ts(reading.get("t_ts")) if reading.get("t_ts") else None,
         "temp_high": bool(st.get("temp_high")),
         "clamp_rev": [d.channel_name(i) if d.is_mc else "" for i in rev],  # channels with a reversed clamp
@@ -113,10 +115,28 @@ def meter_summary(d, show_price=None, user=None):
         "session_desc": devconfig.describe_session(d.cfg or {}),
         "auto": bool((d.cfg or {}).get("auto")),
     }
+    out["aux"] = _aux_summary(d, st) if allowed is None else []
     if d.is_mc:
         out.update(_mc_summary(d, out, show_price, allowed))
         if allowed is not None and d.mc_mode != "independent":  # whole-meter session totals: hidden
             out.update({"kwh": None, "kwh_max": None, "kwh_tared": None, "cost": None, "cost_tared": None})
+    return out
+
+
+def _aux_summary(d, st):
+    """AUX relays (both firmwares): live state from the meter + name / automation from the config."""
+    conf = (d.cfg or {}).get("aux") or []
+    out = []
+    for a in st.get("aux") or []:
+        if not isinstance(a, dict) or not isinstance(a.get("i"), int):
+            continue
+        c = conf[a["i"]] if a["i"] < len(conf) else {}
+        mode = a.get("mode") or c.get("mode") or "manual"
+        out.append({"i": a["i"], "relay": a.get("relay"), "on": bool(a.get("on")),
+                    "name": f"AUX{a['i'] + 1}" + (f" {c.get('name')}" if c.get("name") else ""),
+                    "mode": mode, "override": bool(a.get("override")),
+                    "can_override": mode == "manual" or bool(c.get("override", a.get("can_override"))),
+                    "desc": auxcfg.describe(c, d) if c else ""})
     return out
 
 
@@ -173,12 +193,7 @@ def _mc_summary(d, base, show_price, allowed=None):
                 costs.append((cost, cur))
             maxes.append(float(ss.get("max") or 0))
         channels.append(c)
-    names = cfg.get("aux") or []
-    aux = [{"i": a.get("i"), "relay": a.get("relay"), "on": bool(a.get("on")),
-            "name": f"AUX{a.get('i', 0) + 1}" + (f" {names[a['i']].get('name')}" if isinstance(a.get("i"), int)
-                                                  and a["i"] < len(names) and names[a["i"]].get("name") else "")}
-           for a in st.get("aux") or [] if isinstance(a, dict) and allowed is None]
-    out = {"mc": True, "mode": d.mc_mode, "channels": channels, "aux": aux, "drdy": bool(cfg.get("drdy")),
+    out = {"mc": True, "mode": d.mc_mode, "channels": channels, "drdy": bool(cfg.get("drdy")),
            "limited": allowed is not None,
            "relay_on": any(c["relay_on"] for c in channels)}
     if indep:

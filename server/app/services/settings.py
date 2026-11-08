@@ -17,6 +17,7 @@ DEFAULTS = {
     "telegram_enabled": "0",
     "telegram_bot_token": "",
     "telegram_chat_id": "",
+    "tz_min_sent": "",            # UTC offset (min) last sent to the meters (AUX schedules); DST check
 }
 
 _cache = {}

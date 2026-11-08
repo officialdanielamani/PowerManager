@@ -101,6 +101,25 @@ var PM = (function () {
           ' kWh"><div class="progress-bar ' + (pct >= 100 ? 'bg-warning' : '') + '" style="width:' + pct + '%"></div></div>' : '');
     }).join('');
   }
+  function renderAux(m, admin) {  // meter Info page: AUX relays (both firmwares)
+    var box = document.getElementById('auxBox');
+    if (!box) return;
+    box.closest('.card').classList.toggle('d-none', !(m.aux && m.aux.length));
+    if (!m.aux || !m.aux.length) return;
+    box.innerHTML = '<div class="row g-2">' + m.aux.map(function (a) {
+      var modeBadge = a.mode && a.mode !== 'manual' ? '<span class="badge text-bg-light border ms-1">' + esc(a.mode) + '</span>' +
+        (a.override ? '<span class="badge text-bg-warning ms-1" title="Switched by hand: the automation takes over again at its next change">overridden</span>' : '') : '';
+      var canSwitch = admin && a.can_override;
+      return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100"><div class="d-flex align-items-center gap-2">' +
+        '<span class="fw-semibold">' + esc(a.name) + '</span><span class="small text-body-secondary text-nowrap">relay ' + esc(a.relay) + '</span>' + modeBadge +
+        '<span class="ms-auto">' + chBadge({relay_on: a.on}) + '</span></div>' +
+        (a.desc && a.mode !== 'manual' ? '<div class="small text-body-secondary mt-1">' + esc(a.desc) + '</div>' : '') +
+        (canSwitch ? '<div class="d-flex gap-1 mt-2"><button class="btn btn-sm btn-success" data-mc-action="aux_on" data-i="' + a.i + '">ON</button>' +
+                     '<button class="btn btn-sm btn-outline-secondary" data-mc-action="aux_off" data-i="' + a.i + '">OFF</button></div>'
+                   : (admin ? '<div class="small text-body-secondary mt-2">Automatic (override not enabled)</div>' : '')) +
+        '</div></div>';
+    }).join('') + '</div>';
+  }
   function renderMc(m, admin) {  // meter Info page: Channels panel
     var box = document.getElementById('mcChannels');
     if (!box || !m.mc) return;
@@ -132,16 +151,7 @@ var PM = (function () {
           (ind ? btn('renew', 'btn-outline-primary', 'bi-arrow-repeat', 'Renew', 'Start a new session on ' + c.name + '?') +
                  btn('end', 'btn-outline-danger', 'bi-stop-circle', 'End', 'End the session of ' + c.name + ' now? Its relay stays off until renewed.') : '') +
           '</div>' : '') + '</div></div>';
-    }).join('') + '</div>' + (m.aux && m.aux.length ?
-      '<div class="mt-3"><div class="fw-semibold small mb-1">AUX relays <span class="fw-normal text-body-secondary">(extra relays: not metered, manual ON / OFF only, not tied to limits or sessions)</span></div><div class="row g-2">' +
-      m.aux.map(function (a) {
-        return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 d-flex align-items-center gap-2">' +
-          '<span class="fw-semibold text-truncate">' + esc(a.name) + '</span><span class="small text-body-secondary">relay ' + esc(a.relay) + '</span>' +
-          '<span class="ms-auto">' + chBadge({relay_on: a.on}) + '</span>' +
-          (admin ? '<button class="btn btn-sm btn-success" data-mc-action="aux_on" data-i="' + a.i + '">ON</button>' +
-                   '<button class="btn btn-sm btn-outline-secondary" data-mc-action="aux_off" data-i="' + a.i + '">OFF</button>' : '') +
-          '</div></div>';
-      }).join('') + '</div></div>' : '');
+    }).join('') + '</div>';
   }
 
   function updateMeterCard(root, m) {
@@ -163,7 +173,7 @@ var PM = (function () {
       var t = m.temps || [];
       el.classList.toggle('d-none', !t.length);
       el.classList.toggle('text-danger', !!m.temp_high);
-      el.innerHTML = t.length ? '<i class="bi bi-thermometer-half me-1"></i>' + t.map(function (x) { return esc(x.name) + ' ' + (x.c == null ? '–' : fmt(x.c, 1)) + ' °C'; }).join(' · ') : '';
+      el.innerHTML = t.length ? '<i class="bi bi-thermometer-half me-1"></i>' + t.map(function (x) { return esc(x.name) + ' ' + (x.c == null ? '–' : fmt(x.c, 1)) + ' °C' + (x.rh != null ? ' ' + fmt(x.rh, 0) + '%' : ''); }).join(' · ') : '';
     });
     set(root, 'clamp', function (el) {
       var r = m.clamp_rev || [];
@@ -272,7 +282,8 @@ var PM = (function () {
     if (!m.temps || !m.temps.length) return '';
     return '<div class="row g-2 mt-0">' + m.temps.map(function (t) {
       return '<div class="col-6 col-md-3"><div class="pm-stat' + (m.temp_high ? ' border border-danger' : '') + '"><div class="small text-body-secondary"><i class="bi bi-thermometer-half me-1"></i>Temperature ' + esc(t.name) + '</div>' +
-        '<div class="pm-big">' + (t.c == null ? '–' : fmt(t.c, 1)) + ' <small class="fs-6 text-body-secondary">°C</small></div></div></div>';
+        '<div class="pm-big">' + (t.c == null ? '–' : fmt(t.c, 1)) + ' <small class="fs-6 text-body-secondary">°C</small>' +
+        (t.rh != null ? ' <small class="fs-6 text-body-secondary">· ' + fmt(t.rh, 0) + ' %RH</small>' : '') + '</div></div></div>';
     }).join('') + '</div>' + (m.temp_high ? '<div class="small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>Temperature above the limit</div>' : '');
   }
   function renderLatest(m) {
@@ -319,7 +330,8 @@ var PM = (function () {
   function meterInfo(opt) {
     var head = document.getElementById('meterHead');
     var mcBox = document.getElementById('mcChannels');
-    if (mcBox && opt.action) mcBox.addEventListener('click', function (e) {  // per-channel buttons
+    if (opt.action) [mcBox, document.getElementById('auxBox')].forEach(function (box) { if (box) box.addEventListener('click', onBoxClick); });
+    function onBoxClick(e) {  // per-channel and AUX buttons
       var b = e.target.closest('[data-mc-action]');
       if (!b || (b.dataset.confirm && !confirm(b.dataset.confirm))) return;
       b.disabled = true;
@@ -332,11 +344,12 @@ var PM = (function () {
           fetch(opt.live, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(onLive).catch(function () {});
         }, 1200);
       }).finally(function () { b.disabled = false; });
-    });
+    }
     function onLive(m) {
       updateMeterCard(document.body, m);
       renderLatest(m);
       renderMc(m, !!opt.action);
+      renderAux(m, !!opt.action);
       var on = document.getElementById('btnRelayOn');
       if (on) {
         var blocked = m.status === 'quota' || m.status === 'expired' || m.status === 'tripped' || m.status.indexOf('ended') === 0;
@@ -531,13 +544,13 @@ var PM = (function () {
       var s = state.series, span = last.end - last.start, off = last.tz_offset_s;
       var pts = last.points, labels = pts.map(function (p) { return label(p.t, span, off); });
       var datasets;
-      if (s === 'temp') {
-        var tp = last.temps || {t: [], series: [], names: []};
+      if (s === 'temp' || s === 'hum') {
+        var tp = last.temps || {t: [], series: [], rh: [], names: []}, hum = s === 'hum';
         labels = tp.t.map(function (t) { return label(t, span, off); });
-        datasets = tp.series.map(function (vals, i) {
+        datasets = (hum ? tp.rh : tp.series).map(function (vals, i) {
           var c = tempColors[i % tempColors.length];
-          return {label: tp.names[i] + ' (°C)', data: vals, borderColor: c, backgroundColor: c, pointRadius: 0, borderWidth: 2, tension: .2, spanGaps: true};
-        });
+          return {label: tp.names[i] + (hum ? ' (%RH)' : ' (°C)'), data: vals, borderColor: c, backgroundColor: c, pointRadius: 0, borderWidth: 2, tension: .2, spanGaps: true};
+        }).filter(function (ds) { return !hum || ds.data.some(function (v) { return v != null; }); });
       } else if (s === 'kwh') {
         if (last.source === 'raw') {
           datasets = [{label: 'Energy used since range start (kWh)', data: pts.map(function (p) { return p.kwh_cum; }), borderColor: colors.kwh, backgroundColor: colors.kwh + '22', fill: true, pointRadius: 0, borderWidth: 2}];
@@ -555,7 +568,7 @@ var PM = (function () {
       chart = new Chart(document.getElementById('chart'), {
         type: 'line', data: {labels: labels, datasets: datasets},
         options: {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'index', intersect: false},
-                  scales: {x: {ticks: {maxTicksLimit: 10, autoSkip: true}}, y: {beginAtZero: s !== 'v' && s !== 'temp'}},
+                  scales: {x: {ticks: {maxTicksLimit: 10, autoSkip: true}}, y: {beginAtZero: s !== 'v' && s !== 'temp' && s !== 'hum'}},
                   plugins: {legend: {display: true, labels: {boxWidth: 12}}}}
       });
       var st = last.stats, html = '';

@@ -147,12 +147,10 @@ def server():
 
 
 def _repush_daily_configs():
-    """The daily reset time is sent as UTC minute-of-day, so a zone change needs a new config."""
-    for d in Device.query.filter(Device.removed_at.is_(None)).all():
-        if (d.cfg or {}).get("sess_mode") == "daily":
-            d.cfg_ver_wanted += 1
-            db.session.commit()
-            hub.send(d.id, {"t": "cfg", **devconfig.to_device(d.cfg, d.cfg_ver_wanted)})
+    """Daily reset times (UTC minute-of-day) and AUX schedules (UTC offset) depend on the zone."""
+    from ..services import auxcfg, scheduler
+    settings.set_many({"tz_min_sent": str(auxcfg.tz_minutes())})
+    scheduler.repush_local_time()
 
 
 def _set_access(user, view_all, meter_ids):

@@ -161,6 +161,7 @@ Commands for an offline device are **queued** on the server and sent on reconnec
 | `tv` | 1 = clock was valid. 0 = the device had no valid time; then `ts` holds **uptime seconds** and the item also has `boot`. The server fixes the time using the `hello` (`up` + `ts` of that boot) when possible, otherwise marks the item `time_estimated`. |
 | `v` V, `a` A, `w` W, `pf` 0–1, `hz` Hz, `e` kWh | PZEM values. `e` is the PZEM's total energy register. |
 | channel missing / `null` values | No reading (e.g. AC lost: the PZEM measurement side is powered from AC) |
+| `rh` | With SHT sensors: humidity %RH of the same sensors as `t` (`null` for DS18B20) |
 | `t` | Only with temperature sensors (firmware `TEMP_ENABLE`), on the first item after each new round of readings (every `TEMP_READ_MS`): `[24.5, 31.0]` °C for T1, T2 …; `null` = that sensor could not be read |
 | `se` | Only when the item has no reading: `no_reply` (the sensor did not answer: sensor/wiring fault or no AC) or `bad` (garbled reply / CRC error). The server then shows "no current reading" instead of the old values; no `se` and no channel = no AC |
 
@@ -255,7 +256,9 @@ The server sends the whole config every time (no partial updates).
 | `tamper.action` | `run` / `hold` / `end` | `hold` | With protection on, when the panel opens: **run** = event only; **hold** = relay OFF while open; **end** = end the session (reason `tamper`) |
 | `sensor.timeout_s` | 0, 3–3600 s | 10 | No valid reading for this long = sensor error (`sensor_error` event); 0 = off. A power cut also stops the PZEM from answering |
 | `sensor.action` | `run` / `hold` / `end` | `hold` | **run** = event only; **hold** = relay OFF until readings return (`sensor_ok`); **end** = end the session (reason `sensor`) |
-| `temp.max` | 0–125 °C | 0 | Over-temperature (any DS18B20 sensor); 0 = off |
+| `temp.max` | 0–125 °C | 0 | Over-temperature (any temperature sensor); 0 = off |
+| `aux` | list | `[]` | AUX relays: name + automation (manual / schedule / event), see docs/multichannel.md § AUX relays |
+| `tz_min` | −840…840 | 0 | UTC offset of the display time zone in minutes (AUX schedules run in local time) |
 | `temp.action` | `run` / `hold` / `end` | `hold` | **run** = event only; **hold** = relay(s) OFF until it cools down (`temp_ok`); **end** = end the session (reason `temp`) |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |
 

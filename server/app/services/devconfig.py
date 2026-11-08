@@ -3,7 +3,7 @@
 The server keeps a UI-level config in Device.cfg. `to_device()` turns it into the protocol
 config (docs/protocol.md §3), e.g. converting the daily reset time to a UTC minute-of-day.
 """
-from . import settings
+from . import auxcfg, settings
 
 NOTIFY_TYPES = [
     ("kwh_exceeded", "Device exceeded kWh"),
@@ -137,18 +137,33 @@ def default_for(device):
     if device.is_mc:
         cfg.update({"mode": "shared", "drdy": False, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION})
         cfg["ch"] = [_mc_channel_default() for _ in range(n)]
-        cfg["aux"] = [{"name": ""} for _ in range(aux_count(device))]
         for k in ("tare_a", "tare_w", "tare_limits"):  # the clamps measure only the load
             cfg.pop(k, None)
+    if aux_count(device):
+        cfg["aux"] = auxcfg.fit([], aux_count(device))
     return cfg
 
 
 def aux_count(device):
-    """AUX relays of a multi-channel meter: relays on the board beyond the measuring channels."""
+    """AUX relays of a meter: relay outputs no measured channel uses (caps.aux, both firmwares)."""
     try:
-        return max(0, int((device.caps or {}).get("aux", 0) or 0)) if device.is_mc else 0
+        return min(16, max(0, int((device.caps or {}).get("aux", 0) or 0)))
     except (TypeError, ValueError):
         return 0
+
+
+def fit_aux(device):
+    """The meter reported a different number of AUX relays: pad / trim the AUX config. True if changed."""
+    n = aux_count(device)
+    cfg = dict(device.cfg or default_for(device))
+    have = cfg.get("aux") or []
+    if len(have) == n and all("mode" in a for a in have):
+        return False
+    cfg["aux"] = auxcfg.fit(have, n)
+    if not n:
+        cfg.pop("aux", None)
+    device.cfg = cfg
+    return True
 
 
 def fit_channels(device):
@@ -159,8 +174,8 @@ def fit_channels(device):
     n = channel_count(device)
     cfg = dict(device.cfg or default_for(device))
     chans = list(cfg.get("ch") or [])
-    if len(chans) == n and "mode" in cfg and len(cfg.get("aux") or []) == aux_count(device):
-        return False
+    if len(chans) == n and "mode" in cfg:
+        return fit_aux(device)
     if "mode" not in cfg:  # config made before the meter said it is multi-channel
         base = default_for(device)
         base.update({k: v for k, v in cfg.items() if k != "ch"})
@@ -169,7 +184,7 @@ def fit_channels(device):
                  for c in chans]
     chans = (chans + [_mc_channel_default() for _ in range(n)])[:n]
     cfg["ch"] = chans
-    cfg["aux"] = (list(cfg.get("aux") or []) + [{"name": ""} for _ in range(aux_count(device))])[:aux_count(device)]
+    cfg["aux"] = auxcfg.fit(cfg.get("aux"), aux_count(device))
     device.cfg = cfg
     return True
 
@@ -237,14 +252,6 @@ def _parse_mc(form, device, cfg, errors):
         c.update(_parse_sess(form, f"_{i}", errors, label))
         chans.append(c)
     cfg["ch"] = chans
-    aux = []
-    for j in range(aux_count(device)):
-        name = (form.get(f"aux_name_{j}") or "").strip()[:20]
-        if any(ch in name for ch in "<>\"'&"):
-            errors.append(f"AUX{j + 1}: name: letters, numbers and spaces only")
-            name = ""
-        aux.append({"name": name})
-    cfg["aux"] = aux
     for k in ("tare_a", "tare_w", "tare_limits"):
         cfg.pop(k, None)
 
@@ -314,6 +321,8 @@ def parse_form(form, device):
     cfg["temp_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
     if device.is_mc:
         _parse_mc(form, device, cfg, errors)
+    if aux_count(device):
+        cfg["aux"] = auxcfg.parse_form(form, aux_count(device), errors)
     return cfg, errors
 
 
@@ -349,7 +358,8 @@ def to_device(cfg, ver):
             "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
                     "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
                     "sess": _sess_doc(c)} for i, c in enumerate(cfg.get("ch", []))],
-            "aux": [{"i": j, "name": a.get("name", "")} for j, a in enumerate(cfg.get("aux") or [])],
+            "aux": auxcfg.to_device(cfg.get("aux")),
+            "tz_min": auxcfg.tz_minutes(),
         }}
     sess = _sess_doc(cfg)
     return {
@@ -375,6 +385,8 @@ def to_device(cfg, ver):
                  "amp_max": float(c.get("amp_max", 0))}
                 for i, c in enumerate(cfg.get("ch", []))
             ],
+            "aux": auxcfg.to_device(cfg.get("aux")),
+            "tz_min": auxcfg.tz_minutes(),
         },
     }
 

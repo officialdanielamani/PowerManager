@@ -1,6 +1,6 @@
 # Multi-channel AC meter (rbAmp)
 
-A separate firmware (`firmware/PowerMeterMC/`) for an ESP32-S3 Super Mini with one or more **rbAmp BASIC**
+A separate firmware (`firmware/PowerMeterRBAmp/`) for an ESP32-S3 Super Mini with one or more **rbAmp BASIC**
 modules (SCT-013 clamps), a DS3231, a tamper limit switch and **I²C relay board(s)** (PCF8574 + SSRs, or
 XL9535 relay boards), optionally DS18B20 temperature sensors. One voltage input, 1–16 current channels; the
 `CHANNELS` table in `config.h` maps each channel to a module input, a clamp model and a relay.
@@ -137,13 +137,41 @@ Example: PZEM AC → rbAmp 5 ch → PZEM DC → rbAmp 2 ch → PZEM AC leaves on
 
 ## AUX relays
 
-Relays on the board beyond the measuring channels (e.g. 2 channels on a 4-relay board: relays 3 and 4)
-are **AUX relays**: manual ON / OFF only (server Info page → Channels, or the meter's own page). They are
-not measured, not recorded and not tied to limits, sessions or protections. They keep their ON / OFF over
-a reboot; a disabled meter switches them off.
+Relay outputs that no channel uses (both firmwares; PZEM: every relay except `CHANNEL_RELAY`) are **AUX
+relays**. They are not measured and not tied to limits, sessions or protections; a disabled meter switches
+them off. Each one is set on the server (Configuration → AUX relays):
 
-Protocol: `caps.aux` = number of AUX relays; state `aux: [{"i":0,"relay":3,"on":true}, …]`; command
-`aux {i, on}`; event `aux_relay {i, relay, on, src}`; config `aux: [{"i":0,"name":"Pump"}, …]` (names).
+- **Manual**: ON / OFF buttons (Info page, the meter's own page). The state survives a reboot.
+- **Schedule**: up to 4 windows `start → end` (local time, any days), each ON or OFF; outside them the
+  "otherwise" state. The first matching window wins; an end before the start runs over midnight; end 23:59 =
+  to midnight.
+- **Event**: ON (or OFF) while a condition holds, the opposite otherwise: Temperature / Humidity of a sensor
+  (T1 …), Current / Power of a channel (or all channels), kWh balance of a session (≥ / ≤ a value), or a
+  session running / ended. Small hysteresis (1 °C, 2 %RH, 0.1 A, 10 W, 0.01 kWh) and at most one change per
+  5 s; a missing value (sensor unplugged) keeps the last state.
+- **Enable override**: with an automation, the ON / OFF buttons still work and win until the automation
+  changes state again (e.g. switched OFF at 01:05 inside a 01:00–02:00 ON window: stays OFF, and the next
+  window switches it ON again). Without it the buttons are refused (`automation`).
+
+The meter runs the automation itself (also offline). The server sends `tz_min` (UTC offset of the display
+time zone) with the config and re-sends it after a time zone or daylight-saving change.
+
+Protocol: `caps.aux` = number of AUX relays; state `aux: [{"i":0,"relay":6,"on":true,"mode":"schedule",
+"auto":true,"override":false,"can_override":true}, …]`; command `aux {i, on}`; event `aux_relay {i, relay,
+on, src}` (`src`: `server` / `local` / `schedule` / `event` / `disabled`); config:
+
+```json
+"tz_min": 480,
+"aux": [{"i":0,"name":"Desk Lamp","mode":"schedule","override":true,"else":"off",
+         "sched":[{"on":true,"start":1080,"end":1439,"days":127},{"on":true,"start":60,"end":120,"days":32}]},
+        {"i":1,"name":"Exhaust Fan","mode":"event","override":false,
+         "event":{"src":"temp","idx":1,"cmp":"over","value":50,"on":true}}]
+```
+
+`start` / `end` = minutes of the local day, `days` = bit 0 Monday … bit 6 Sunday; event `src`: `temp`, `hum`
+(`idx` = sensor), `amp`, `watt` (`idx` = channel, 255 = all), `kwh`, `session` (`idx` = channel; its session),
+`cmp` `over` (≥) / `under` (≤), `running` (session), `on` = relay state while the condition holds.
+Logic test on a PC: `firmware/tools/auxrelay_test/run.sh <ArduinoJson/src>`.
 
 ## No session after pairing
 

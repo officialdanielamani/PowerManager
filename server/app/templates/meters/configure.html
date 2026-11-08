@@ -254,15 +254,6 @@
         </div>
       </div>
       {% endfor %}
-      {% if cfg.get('aux') %}
-      <div class="fw-semibold small mt-3 mb-1">AUX relays <span class="fw-normal text-body-secondary">(relays beyond the channels: manual ON / OFF only, not metered, not tied to limits or sessions)</span></div>
-      <div class="d-flex flex-wrap gap-2">
-        {% for a in cfg.get('aux') %}{% set j = loop.index0 %}
-        <div class="input-group input-group-sm" style="width:260px"><span class="input-group-text">AUX{{ j + 1 }} · relay {{ cfg.ch|length + j + 1 }}</span>
-          <input class="form-control" name="aux_name_{{ j }}" maxlength="20" placeholder="Name, e.g. Pump" value="{{ val('aux_name_' ~ j, a.get('name', '')) }}"></div>
-        {% endfor %}
-      </div>
-      {% endif %}
     </div><div class="card-footer d-flex align-items-center gap-2"><span class="small text-warning-emphasis d-none pm-dirty-note"><i class="bi bi-exclamation-circle me-1"></i>Unsaved changes</span><button class="btn btn-sm btn-primary ms-auto"><i class="bi bi-save me-1"></i>Save</button></div></div>
   </div>
   {% else %}
@@ -304,6 +295,91 @@
     </div><div class="card-footer d-flex align-items-center gap-2"><span class="small text-warning-emphasis d-none pm-dirty-note"><i class="bi bi-exclamation-circle me-1"></i>Unsaved changes</span><button class="btn btn-sm btn-primary ms-auto"><i class="bi bi-save me-1"></i>Save</button></div></div>
   </div>
 
+
+  {% if aux_cfg %}
+  <div class="col-12">
+    <div class="card"><div class="card-header fw-semibold">AUX relays</div><div class="card-body">
+      <p class="small text-body-secondary mb-2">Relay outputs that no measured channel uses. Not metered and not tied to limits or sessions.
+        Each one is <strong>Manual</strong> (ON / OFF buttons), on a <strong>Schedule</strong> (up to 4 time windows, local time {{ tz_label() }}) or driven by an <strong>Event</strong>.
+        The meter runs the automation itself, so it keeps working while offline. <em>Enable override</em>: the ON / OFF buttons still work and win until the automation changes state again.</p>
+      {% for a in aux_cfg %}{% set j = loop.index0 %}
+      {% set mode = val('aux_mode_' ~ j, a.get('mode', 'manual')) %}
+      {% set ev = a.get('event') or {} %}
+      <div class="border rounded p-2 mb-2 pm-aux" data-aux="{{ j }}">
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <span class="fw-semibold" style="min-width:110px">AUX{{ j + 1 }}{% if aux_relays.get(j) %} <span class="fw-normal small text-body-secondary">· relay {{ aux_relays.get(j) }}</span>{% endif %}</span>
+          <input class="form-control form-control-sm" style="max-width:200px" name="aux_name_{{ j }}" maxlength="20" placeholder="Name, e.g. Desk Lamp" value="{{ val('aux_name_' ~ j, a.get('name', '')) }}">
+          <select class="form-select form-select-sm pm-aux-mode" style="max-width:220px" name="aux_mode_{{ j }}">
+            {% for k, label in aux_modes.items() %}<option value="{{ k }}" {{ 'selected' if mode == k }}>{{ label }}</option>{% endfor %}
+          </select>
+          <div class="form-check mb-0 pm-aux-auto"><input class="form-check-input" type="checkbox" name="aux_override_{{ j }}" id="aux_override_{{ j }}" {{ chk('aux_override_' ~ j, a.get('override')) }}>
+            <label class="form-check-label small" for="aux_override_{{ j }}">Enable override</label></div>
+        </div>
+        {# schedule #}
+        <div class="mt-2 pm-aux-sched">
+          {% for k in range(4) %}
+          {% set s = (a.get('sched') or [])[k] if k < (a.get('sched') or [])|length else none %}
+          {% set days = (f.getlist('aux_s' ~ k ~ '_days_' ~ j)|map('int')|list) if f else ((s.days if s else [0, 1, 2, 3, 4, 5, 6])) %}
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-1 small">
+            <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="aux_s{{ k }}_use_{{ j }}" id="aux_s{{ k }}_use_{{ j }}" {{ chk('aux_s' ~ k ~ '_use_' ~ j, s is not none) }}>
+              <label class="form-check-label" for="aux_s{{ k }}_use_{{ j }}">{{ k + 1 }}.</label></div>
+            {% set son = val('aux_s' ~ k ~ '_on_' ~ j, 'on' if (s is none or s.get('on', true)) else 'off') %}
+            <select class="form-select form-select-sm" style="width:80px" name="aux_s{{ k }}_on_{{ j }}"><option value="on" {{ 'selected' if son == 'on' }}>ON</option><option value="off" {{ 'selected' if son == 'off' }}>OFF</option></select>
+            <input class="form-control form-control-sm" style="width:130px" type="time" name="aux_s{{ k }}_start_{{ j }}" value="{{ val('aux_s' ~ k ~ '_start_' ~ j, s.start if s else '18:00') }}">
+            <span>→</span>
+            <input class="form-control form-control-sm" style="width:130px" type="time" name="aux_s{{ k }}_end_{{ j }}" value="{{ val('aux_s' ~ k ~ '_end_' ~ j, s.end if s else '23:59') }}">
+            <div class="form-check form-check-inline mb-0 ms-1"><input class="form-check-input pm-aux-all" type="checkbox" id="aux_s{{ k }}_all_{{ j }}" {{ 'checked' if days|length == 7 }}><label class="form-check-label" for="aux_s{{ k }}_all_{{ j }}">All</label></div>
+            {% for dn in aux_days %}{% set di = loop.index0 %}
+            <div class="form-check form-check-inline mb-0 me-1"><input class="form-check-input pm-aux-day" type="checkbox" name="aux_s{{ k }}_days_{{ j }}" value="{{ di }}" id="aux_s{{ k }}_d{{ di }}_{{ j }}" {{ 'checked' if di in days }}><label class="form-check-label" for="aux_s{{ k }}_d{{ di }}_{{ j }}">{{ dn }}</label></div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+          {% set els = val('aux_else_' ~ j, a.get('else', 'off')) %}
+          <div class="d-flex align-items-center gap-2 small mt-1"><span>Outside these times the relay is</span>
+            <select class="form-select form-select-sm" style="width:80px" name="aux_else_{{ j }}"><option value="off" {{ 'selected' if els == 'off' }}>OFF</option><option value="on" {{ 'selected' if els == 'on' }}>ON</option></select>
+            <span class="text-body-secondary">· the first matching window wins · an end before the start runs over midnight · end 23:59 = to midnight</span></div>
+        </div>
+        {# event #}
+        {% set esrc = val('aux_ev_src_' ~ j, ev.get('src', 'temp')) %}
+        {% set eidx = val('aux_ev_idx_' ~ j, ev.get('idx', 0))|string %}
+        <div class="mt-2 pm-aux-event d-flex flex-wrap gap-2 align-items-center small">
+          <span>When</span>
+          <select class="form-select form-select-sm pm-aux-src" style="width:150px" name="aux_ev_src_{{ j }}">
+            {% for k, label in aux_sources.items() %}<option value="{{ k }}" {{ 'selected' if esrc == k }}>{{ label }}</option>{% endfor %}
+          </select>
+          <select class="form-select form-select-sm pm-aux-idx" style="width:170px" name="aux_ev_idx_{{ j }}">
+            {% for t in range(n_temp) %}<option data-src="temp hum" value="{{ t }}" {{ 'selected' if eidx == t|string and esrc in ('temp', 'hum') }}>T{{ t + 1 }}</option>{% endfor %}
+            {% if d.is_mc %}
+              <option data-src="amp watt" value="255" {{ 'selected' if eidx == '255' and esrc in ('amp', 'watt') }}>All channels</option>
+              {% for c in range(n_channels) %}<option data-src="amp watt" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('amp', 'watt') }}>{{ d.channel_name(c) }}</option>{% endfor %}
+              {% if d.mc_mode == 'independent' %}
+                {% for c in range(n_channels) %}<option data-src="kwh session" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('kwh', 'session') }}>Session of {{ d.channel_name(c) }}</option>{% endfor %}
+              {% else %}<option data-src="kwh session" value="0" selected>Meter session</option>{% endif %}
+            {% else %}
+              <option data-src="amp watt" value="0">The measured line</option>
+              <option data-src="kwh session" value="0">The session</option>
+            {% endif %}
+          </select>
+          {% set ecmp = val('aux_ev_cmp_' ~ j, ev.get('cmp', 'over')) %}
+          <span class="pm-aux-num d-flex gap-2 align-items-center">
+            <span>is</span>
+            <select class="form-select form-select-sm" style="width:80px" name="aux_ev_cmp_{{ j }}"><option value="over" {{ 'selected' if ecmp == 'over' }}>≥</option><option value="under" {{ 'selected' if ecmp == 'under' }}>≤</option></select>
+            <input class="form-control form-control-sm" style="width:100px" inputmode="decimal" name="aux_ev_value_{{ j }}" value="{{ val('aux_ev_value_' ~ j, ev.get('value', 50)) }}">
+            <span class="pm-aux-unit text-body-secondary"></span>
+          </span>
+          {% set erun = val('aux_ev_running_' ~ j, 'running' if ev.get('running', true) else 'ended') %}
+          <span class="pm-aux-sess d-flex gap-2 align-items-center"><span>is</span>
+            <select class="form-select form-select-sm" style="width:110px" name="aux_ev_running_{{ j }}"><option value="running" {{ 'selected' if erun == 'running' }}>running</option><option value="ended" {{ 'selected' if erun == 'ended' }}>ended</option></select></span>
+          {% set eon = val('aux_ev_on_' ~ j, 'on' if ev.get('on', true) else 'off') %}
+          <span>the relay is</span>
+          <select class="form-select form-select-sm" style="width:80px" name="aux_ev_on_{{ j }}"><option value="on" {{ 'selected' if eon == 'on' }}>ON</option><option value="off" {{ 'selected' if eon == 'off' }}>OFF</option></select>
+          <span class="text-body-secondary">(otherwise the opposite)</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div><div class="card-footer d-flex align-items-center gap-2"><span class="small text-warning-emphasis d-none pm-dirty-note"><i class="bi bi-exclamation-circle me-1"></i>Unsaved changes</span><button class="btn btn-sm btn-primary ms-auto"><i class="bi bi-save me-1"></i>Save</button></div></div>
+  </div>
+  {% endif %}
   <div class="col-12">
     <div class="card"><div class="card-header fw-semibold">Link this meter to users</div><div class="card-body">
       <p class="small text-body-secondary mb-2">View-only users only see meters linked to them.{% if d.is_mc %} Tick channels to show a user only those channels (none ticked = the whole meter).{% endif %} This list stays on the server; it is never sent to the meter.</p>
@@ -342,6 +418,38 @@
 <script>
 (function () {
   var actionUrl = "{{ url_for('meters.action', pk=d.id) }}", infoUrl = "{{ url_for('meters.info', pk=d.id) }}";
+  // AUX relays: show the fields of the chosen mode / event source
+  var UNITS = {temp: '°C', hum: '%RH', amp: 'A', watt: 'W', kwh: 'kWh'};
+  function syncAux(box) {
+    var mode = box.querySelector('.pm-aux-mode').value;
+    box.querySelector('.pm-aux-sched').classList.toggle('d-none', mode !== 'schedule');
+    box.querySelector('.pm-aux-event').classList.toggle('d-none', mode !== 'event');
+    box.querySelector('.pm-aux-auto').classList.toggle('d-none', mode === 'manual');
+    var src = box.querySelector('.pm-aux-src').value, idx = box.querySelector('.pm-aux-idx'), firstVisible = null, selVisible = false;
+    Array.prototype.forEach.call(idx.options, function (o) {
+      var show = (o.dataset.src || '').split(' ').indexOf(src) >= 0;
+      o.hidden = !show; o.disabled = !show;
+      if (show && !firstVisible) firstVisible = o;
+      if (show && o.selected) selVisible = true;
+    });
+    if (!selVisible && firstVisible) firstVisible.selected = true;
+    box.querySelector('.pm-aux-num').classList.toggle('d-none', src === 'session');
+    box.querySelector('.pm-aux-sess').classList.toggle('d-none', src !== 'session');
+    box.querySelector('.pm-aux-unit').textContent = UNITS[src] || '';
+  }
+  document.querySelectorAll('.pm-aux').forEach(function (box) {
+    syncAux(box);
+    box.addEventListener('change', function (e) {
+      if (e.target.classList.contains('pm-aux-all')) {
+        e.target.closest('.d-flex').querySelectorAll('.pm-aux-day').forEach(function (c) { c.checked = e.target.checked; });
+      } else if (e.target.classList.contains('pm-aux-day')) {
+        var row = e.target.closest('.d-flex'), all = row.querySelectorAll('.pm-aux-day:checked').length === 7;
+        row.querySelector('.pm-aux-all').checked = all;
+      }
+      syncAux(box);
+    });
+  });
+
   function syncMode() {
     var m = document.querySelector('input[name=sess_mode]:checked').value;
     document.querySelectorAll('[data-mode]').forEach(function (el) { el.style.display = el.dataset.mode === m ? '' : 'none'; });

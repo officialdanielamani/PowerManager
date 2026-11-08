@@ -74,7 +74,7 @@
           <span class="text-body-secondary"><i class="bi bi-cash-coin me-1"></i>Session cost</span><span class="fw-semibold" data-field="cost">{{ m.cost or '' }}</span>
         </div>
 
-        <div class="small mb-2 {{ '' if m.temps else 'd-none' }} {{ 'text-danger' if m.temp_high }}" data-field="temps">{% if m.temps %}<i class="bi bi-thermometer-half me-1"></i>{% for t in m.temps %}{{ t.name }} {{ '–' if t.c is none else '%.1f'|format(t.c) }} °C{{ ' · ' if not loop.last }}{% endfor %}{% endif %}</div>
+        <div class="small mb-2 {{ '' if m.temps else 'd-none' }} {{ 'text-danger' if m.temp_high }}" data-field="temps">{% if m.temps %}<i class="bi bi-thermometer-half me-1"></i>{% for t in m.temps %}{{ t.name }} {{ '–' if t.c is none else '%.1f'|format(t.c) }} °C{% if t.rh is not none %} {{ '%.0f'|format(t.rh) }}%{% endif %}{{ ' · ' if not loop.last }}{% endfor %}{% endif %}</div>
         <div class="d-flex flex-wrap gap-1 align-items-center">
           <span data-field="status">{{ status_badge(m.status) }}</span>
           <span data-field="ongoing">
