@@ -170,7 +170,7 @@ Detected from the meter firmware at pairing (`caps.mc`); see [multichannel.md](m
 ## Managers, per-meter price, per-channel viewers
 
 - **Manager** accounts (see architecture.md § Roles): own meters + own view-only accounts; no server settings.
-- **Configuration → General** has **Owner** (admin only: Admin or a manager), **Electricity price** [currency][price] / kWh
+- **Configuration → General** has **Manager** (admin only: None = admin only, or one manager who manages it too), **Electricity price** [currency][price] / kWh
   (default 0.25 for AC and DC; empty = no cost shown; locked into each session when it starts) and **Positive watt only**
   (default on: a negative power reading is stored as 0 W). Bulk Configuration can set the price too.
 - **Link this meter to users** on a multi-channel meter: tick channels per user to show only those channels (none = the

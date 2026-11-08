@@ -53,13 +53,14 @@
       <div class="mb-3"><label class="form-label">Info</label>
         <input class="form-control" name="info" maxlength="200" value="{{ val('info', d.info) }}" placeholder="e.g. Basement"></div>
       {% if current_user.is_admin %}
-      <div class="mb-3"><label class="form-label">Owner</label>
+      <div class="mb-3"><label class="form-label">Manager</label>
         {% set own = val('owner', d.owner_fk or '')|string %}
         <select class="form-select" name="owner" style="max-width:320px">
-          <option value="">Admin</option>
-          {% for mg in managers %}<option value="{{ mg.id }}" {{ 'selected' if own == mg.id|string }}>Manager {{ mg.username }}</option>{% endfor %}
+          <option value="">None (admin only)</option>
+          {% for mg in managers %}<option value="{{ mg.id }}" {{ 'selected' if own == mg.id|string }}>{{ mg.username }}</option>{% endfor %}
         </select>
-        <div class="form-text">The owner manages this meter (configuration, control, delete) and links its own view-only users. Transferring it removes the links of the previous manager's view-only users.</div></div>
+        <div class="form-text">The admin always manages every meter. Pick one manager to manage it too (configuration, control, delete, linking its own view-only users).
+          Pick another manager to <strong>transfer</strong> it, or <em>None</em> to <strong>revoke</strong>; the previous manager's view-only users then lose this meter.</div></div>
       {% endif %}
       <div class="mb-3"><label class="form-label">Electricity price</label>
         <div class="input-group" style="max-width:340px">

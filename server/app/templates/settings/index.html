@@ -129,7 +129,7 @@
             {% if admin %}<td class="small">{% if u.role == 'manager' %}<span class="badge text-bg-warning">manager</span>{% else %}viewer{% if u.manager_fk %}<div class="text-body-secondary">of {{ manager_names.get(u.manager_fk, '?') }}</div>{% endif %}{% endif %}</td>{% endif %}
             <td>{% if not u.is_enabled %}<span class="badge text-bg-dark">disabled</span>{% elif locked %}<span class="badge text-bg-danger">locked</span>{% else %}<span class="badge text-bg-success">active</span>{% endif %}
               {% if u.failed_logins and not locked %}<span class="small text-body-secondary">{{ u.failed_logins }} failed</span>{% endif %}</td>
-            <td class="small">{% if u.role == 'manager' %}<span class="text-body-secondary">owns:</span> {{ owned.get(u.id, [])|join(', ') or '–' }}{% else %}{% if u.can_csv %}<span class="badge text-bg-light border me-1" title="Can download CSV">CSV</span>{% endif %}{% if u.show_price %}<span class="badge text-bg-light border me-1" title="Sees prices">Price</span>{% endif %}{% if u.view_all %}<span class="badge text-bg-info">{{ 'all meters of its manager' if u.manager_fk else 'all meters' }}</span> {% endif %}{{ user_meters.get(u.id, [])|join(', ') or ('' if u.view_all else '–') }}{% endif %}</td>
+            <td class="small">{% if u.role == 'manager' %}<span class="text-body-secondary">manages:</span> {{ owned.get(u.id, [])|join(', ') or '–' }}{% else %}{% if u.can_csv %}<span class="badge text-bg-light border me-1" title="Can download CSV">CSV</span>{% endif %}{% if u.show_price %}<span class="badge text-bg-light border me-1" title="Sees prices">Price</span>{% endif %}{% if u.view_all %}<span class="badge text-bg-info">{{ 'all meters of its manager' if u.manager_fk else 'all meters' }}</span> {% endif %}{{ user_meters.get(u.id, [])|join(', ') or ('' if u.view_all else '–') }}{% endif %}</td>
             <td class="small">{{ u.last_login_at|dt }}</td>
             <td class="text-end text-nowrap"><button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#u{{ u.id }}">Manage</button></td>
           </tr>
@@ -138,7 +138,7 @@
               <div class="col-lg-6">
               {% if u.role == 'manager' %}
                 <div class="fw-semibold small mb-1">Manager</div>
-                <div class="small text-body-secondary">Manages its own meters ({{ owned.get(u.id, [])|length }}) and the view-only accounts it creates. Give it a meter in that meter's Configuration → Owner. Managers always see prices and can download CSV.</div>
+                <div class="small text-body-secondary">Manages its own meters ({{ owned.get(u.id, [])|length }}) and the view-only accounts it creates. Give it a meter (or take one back) in that meter's Configuration → Manager. Managers always see prices and can download CSV.</div>
               {% else %}
                 {% if admin %}
                 <div class="fw-semibold small mb-1">Belongs to</div>
@@ -220,7 +220,7 @@
           <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="can_csv" id="newCsv"><label class="form-check-label" for="newCsv">Enable download .csv</label></div>
           <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="show_price" id="newPrice"><label class="form-check-label" for="newPrice">Show price</label></div></div>
         <div class="col-12 form-text pm-viewer-only">View-only users see only their meters (info, history, events) and choose their own notifications. They cannot change anything. CSV download and prices are off unless enabled here.</div>
-        {% if admin %}<div class="col-12 form-text pm-manager-only d-none">A manager adds, configures and deletes its own meters (the ones it pairs, or that you give it in a meter's Configuration → Owner) and creates its own view-only accounts. Server settings stay admin-only.</div>{% endif %}
+        {% if admin %}<div class="col-12 form-text pm-manager-only d-none">A manager adds, configures and deletes its own meters (the ones it pairs, or that you give it in a meter's Configuration → Manager) and creates its own view-only accounts. Server settings stay admin-only.</div>{% endif %}
       </div>
       <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Add account</button></div>
     </form>

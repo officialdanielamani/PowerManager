@@ -100,14 +100,14 @@ Reset schedule modes:
 | Role | Can |
 |------|-----|
 | Admin (exactly 1) | Everything: every meter and every account, server settings (Server / Notifications tabs), create managers, transfer meters between owners |
-| Manager (0..n, created by the admin) | Like the admin, but only for **its own meters** (the ones it pairs, or that the admin gives it in *Configuration → Owner*): add / configure / control / delete them, delete their data. Creates and manages **its own view-only accounts** (linked only to its meters). No server settings. Always sees prices and may download CSV. |
+| Manager (0..n, created by the admin) | Like the admin, but only for **its own meters** (the ones it pairs, or that the admin gives it in *Configuration → Manager*): add / configure / control / delete them, delete their data. Creates and manages **its own view-only accounts** (linked only to its meters). No server settings. Always sees prices and may download CSV. |
 | View-only (0..n, created by the admin or a manager) | See **only the meters linked to them** (or all meters if *View all meters* is ticked: for a manager's viewer, all meters of that manager): info, history, events, CSV export. On a multi-channel meter a link can be limited to some channels. Choose **their own** notifications per meter. Change own password / email / phone / Telegram chat ID. **Cannot** change anything about meters. |
 
 Example: the admin creates House-A and House-B and gives House-A to manager *Adam*. Adam pairs My-Kitchen. Adam manages House-A and My-Kitchen (not House-B); the admin manages all three. Adam's viewers can only be linked to House-A / My-Kitchen by Adam; the admin can link any viewer to any meter (bypass).
 
 - A meter can be linked to many view-only users; a user can be linked to many meters. Links are set from the meter (*Configuration → Link this meter to users*, with optional channels) or from the user (*Settings → Users → Manage*).
 - Links live only on the server. They are **never sent to the meter**.
-- **Owner transfer** (admin, meter Configuration → Owner): the meter moves to another manager or back to the admin; links of the previous manager's viewers are removed. A viewer can be moved to another manager in *Settings → Users → Manage → Belongs to*.
+- **Meter manager** (admin, meter Configuration → Manager): a meter is managed by the admin alone (+ its viewers), or by the admin **and one manager** (+ viewers). The admin can transfer it to another manager (A → C) or revoke it (None = admin only); links of the previous manager's viewers are removed. A viewer can be moved to another manager in *Settings → Users → Manage → Belongs to*.
 - **Deleting a manager** gives its meters back to the admin and makes its viewers the admin's.
 - Admin and managers can create, delete, enable/disable (selected or all), unlock and reset the password of the accounts they manage.
 - Login protection: manager and view-only accounts lock after *N* failed logins (default 5) for *M* minutes (default 15; 0 = until unlocked). The admin account is never locked (otherwise anyone could lock you out); every login form is rate limited to 5 tries per minute per IP.

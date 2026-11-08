@@ -215,9 +215,14 @@ def configure(pk):
             config_changed = cfg != device.cfg
             device.cfg = cfg
             if owner != device.owner_fk:
+                old = db.session.get(User, device.owner_fk) if device.owner_fk else None
                 transfer_owner(device, owner)
                 ingest.server_event(device, "owner_changed", {"by": current_user.username,
-                                                              "to": mgr.username if owner else "admin"})
+                                                              "from": old.username if old else None,
+                                                              "to": mgr.username if owner else None})
+                flash(f"Meter transferred from manager {old.username} to manager {mgr.username}." if old and owner else
+                      f"Manager {mgr.username} can now manage this meter." if owner else
+                      f"Manager {old.username} no longer manages this meter (admin only).", "success")
             _set_viewers(device, {int(x) for x in form.getlist("viewers") if x.isdigit()},
                          _viewer_channels(form, device))
             if config_changed or not device.synced:
@@ -514,7 +519,9 @@ def info(pk):
     if allowed is not None:  # a viewer limited to some channels: their sessions, and the shared ones
         q = q.filter((Session.ch.is_(None)) | (Session.ch.in_(allowed)))
     sessions = q.order_by(Session.started_at.desc()).limit(50).all()
+    owner = db.session.get(User, device.owner_fk) if device.owner_fk else None
     return render_template("meters/info.html", d=device, m=meter_summary(device), manage=access.can_manage(current_user, device),
+                           manager_name=owner.username if owner else None,
                            pagination=pagination, incident_types=incidents.TYPES, sel_types=types,
                            f_from=request.args.get("from", ""), f_to=request.args.get("to", ""),
                            detail_text=incident_detail_text, sessions=sessions, now=now(),
