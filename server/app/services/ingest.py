@@ -245,8 +245,8 @@ def h_tel(conn, device, msg):
                     row["w"] = 0.0
         if rows:
             db.session.execute(sqlite_insert(Measurement).values(rows).on_conflict_do_nothing())
-            for row in rows:
-                _mark_dirty(device.id, row["ch"], row["ts"])
+            for ch, ts0 in {(row["ch"], row["ts"] - row["ts"] % 3600) for row in rows}:  # once per channel-hour
+                _mark_dirty(device.id, ch, ts0)
         _bump_seq(device, seq)
         if newest is None or ts >= newest["ts"]:
             last = [r for r in rows if r["seq"] == rows[-1]["seq"]] if rows else []  # (DRDY: the last window)

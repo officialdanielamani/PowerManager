@@ -7,7 +7,7 @@ import secrets
 import qrcode
 import qrcode.image.svg
 from flask import (Blueprint, Response, abort, flash, jsonify, redirect, render_template, request,
-                   url_for)
+                   stream_with_context, url_for)
 from flask_login import current_user, login_required
 
 from ..extensions import db
@@ -628,9 +628,9 @@ def _csv_tare(device, source, header, rows):
     if not tare or source != "raw":
         return header, rows
     ia, iw = header.index("A"), header.index("W")
-    out = [(ts, list(vals) + [None if vals[ia] is None else round(tare_svc.amps(vals[ia], tare), 3),
+    out = ((ts, list(vals) + [None if vals[ia] is None else round(tare_svc.amps(vals[ia], tare), 3),
                               None if vals[iw] is None else round(tare_svc.watts(vals[iw], tare), 1)])
-           for ts, vals in rows]
+           for ts, vals in rows)
     return header + [f"A_tared (-{tare[0]:g})", f"W_tared (-{tare[1]:g})"], out
 
 
@@ -649,15 +649,35 @@ def _csv_decimals(h):
 
 
 def _csv_response(filename, header, rows):
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(header)
+    """Streamed CSV: rows (any iterable, usually a generator reading the database in batches) are
+    written out as they come, so a large export never sits in memory as a whole."""
     dec = [_csv_decimals(h) for h in header]
-    for r in rows:
-        w.writerow([f"{v:.{dec[i]}f}" if isinstance(v, float) and i < len(dec) and dec[i] is not None else v
-                    for i, v in enumerate(r)])
-    return Response(buf.getvalue(), mimetype="text/csv",
+
+    def gen():
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(header)
+        for k, r in enumerate(rows):
+            w.writerow([f"{v:.{dec[i]}f}" if isinstance(v, float) and i < len(dec) and dec[i] is not None else v
+                        for i, v in enumerate(r)])
+            if k % 2000 == 1999:
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate()
+        yield buf.getvalue()
+    return Response(stream_with_context(gen()), mimetype="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _ts_cols(ts, _cache={}):
+    """(UTC, local) time strings of a reading; cached because DRDY has ~10 readings per second."""
+    key = (ts, settings.get("timezone"))
+    hit = _cache.get(key)
+    if hit is None:
+        if len(_cache) > 4096:
+            _cache.clear()
+        hit = _cache[key] = [_utc(ts), settings.fmt_ts(ts)]
+    return hit
 
 
 def _fname_ts(ts):
@@ -669,7 +689,7 @@ def _csv_kind(device, header, rows):
     if device.kind != "dc":
         return header, rows
     keep = [i for i, h in enumerate(header) if not h.startswith(("PF", "Hz"))]
-    return [header[i] for i in keep], [(ts, [vals[i] for i in keep]) for ts, vals in rows]
+    return [header[i] for i in keep], ((ts, [vals[i] for i in keep]) for ts, vals in rows)
 
 
 @bp.get("/<int:pk>/export.csv")
@@ -690,26 +710,25 @@ def export_csv(pk):
         start, end = sess.started_at, sess.ended_at or now()
         if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
             source, header, rows = history.csv_wide(device, start, end, allowed)
-            out = [[_utc(ts), settings.fmt_ts(ts)] + [("" if v is None else v) for v in vals] for ts, vals in rows]
+            out = (_ts_cols(ts) + [("" if v is None else v) for v in vals] for ts, vals in rows)
             hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
             return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
         source, header, rows = history.csv_rows(device.id, ch, start, end)
         header, rows = _csv_tare(device, source, header, rows)
         header, rows = _csv_kind(device, header, rows)
-        out = [[_utc(ts), settings.fmt_ts(ts), ch + 1] + [("" if v is None else v) for v in vals] for ts, vals in rows]
+        out = (_ts_cols(ts) + [ch + 1] + [("" if v is None else v) for v in vals] for ts, vals in rows)
         hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
         return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
     start, end = _range_args(device)
     if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
         source, header, rows = history.csv_wide(device, start, end, allowed)
-        out = [[_utc(ts), settings.fmt_ts(ts)] + [("" if v is None else v) for v in vals] for ts, vals in rows]
+        out = (_ts_cols(ts) + [("" if v is None else v) for v in vals] for ts, vals in rows)
         hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
         return _csv_response(f"{device.device_id}_{_fname_ts(start)}_{_fname_ts(end)}.csv", hdr, out)
     source, header, rows = history.csv_rows(device.id, ch, start, end)
     header, rows = _csv_tare(device, source, header, rows)
     header, rows = _csv_kind(device, header, rows)
-    out = [[_utc(ts), settings.fmt_ts(ts), ch + 1] + [("" if v is None else v) for v in vals]
-           for ts, vals in rows]
+    out = (_ts_cols(ts) + [ch + 1] + [("" if v is None else v) for v in vals] for ts, vals in rows)
     hdr = ["time_utc", f"time_local ({settings.get('timezone')})", "channel"] + header
     return _csv_response(f"{device.device_id}_{_fname_ts(start)}_{_fname_ts(end)}.csv", hdr, out)
 

@@ -161,6 +161,13 @@ Types: `kwh_exceeded`, `voltage_range`, `sensor_error`, `session_renew`, `max_am
 
 The stats panel shows min / max / average of V, A, W and total kWh for the picked range (hour, day, week, month, all time, custom).
 
+**Large ranges stay cheap.** The chart never gets more than 1,500 points. When a raw range has more readings than
+that (e.g. DRDY: ~860,000 per channel per day), SQLite averages them per time bucket (avg / min / max per bucket,
+energy from the positive steps of the kWh register) and only the buckets reach Python and the browser: a full DRDY
+day loads in ~0.6 s instead of ~13 s. Hourly roll-ups are aggregated in SQL the same way; daily roll-ups are built
+from the 24 hourly ones. CSV exports are streamed while they are read from the database, so a large export does not
+have to fit in the server's memory.
+
 CSV export covers **exactly the range selected** in the history view (1 week shown → 1 week exported), for admin and viewers. It uses raw data where it still exists (within the retention period), otherwise roll-ups (with min/max/avg columns). Timestamps are in **both** UTC and the display timezone. File name: `<device_id>_<from>_<to>.csv`.
 
 ## Removing a device
