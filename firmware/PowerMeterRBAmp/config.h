@@ -75,7 +75,7 @@
 // Example, rbAmp UI5 (0x50) + rbAmp I7 (0x51), 8 channels, two XL9535 8-relay boards (0x20, 0x21):
 //   #define RBAMP_BOARDS { 0x50, 0x51 }
 //   #define RELAY_BOARDS { {RELAY_XL9535, 0x20, 8, 1}, {RELAY_XL9535, 0x21, 8, 1} }
-//   #define CHANNELS { {1, 1, SCT_100A, 1}, {1, 2, SCT_30A, 2}, {1, 3, SCT_30A, 3}, {1, 4, SCT_30A, 4}, \
+//   #define CHANNELS { {1, 1, SCT_100A, 1}, {1, 2, SCT_30A, 2}, {1, 3, SCT_30A, 3}, {1, 4, SCT_30A, 4},
 //                      {1, 5, SCT_30A, 5}, {2, 1, SCT_20A, 9}, {2, 2, SCT_20A, 10}, {2, 3, SCT_20A, 11} }
 //   -> relays 6, 7, 8 and 12..16 are AUX relays.
 

@@ -240,7 +240,7 @@ String clampSummary() {
 String boardSummary() {
   String s;
   for (uint8_t i = 0; i < hw::BOARDS; i++) {
-    char buf[40];
+    char buf[64];
     snprintf(buf, sizeof(buf), "%sB%u %s @0x%02X %s", i ? ", " : "", i + 1, boards[i].found ? boards[i].vname : "?",
              boards[i].addr, boards[i].found ? "OK" : "NOT FOUND");
     s += buf;

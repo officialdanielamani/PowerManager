@@ -398,6 +398,7 @@ static void addTemps(JsonDocument &doc) {
   }
 }
 
+#if TEMP_ENABLE
 // Over-temperature: any sensor above cfg.temp_max triggers (event + action); every sensor back below
 // temp_max - TEMP_HYST clears. A sensor that cannot be read does not count either way.
 static void checkTemp() {
@@ -444,6 +445,7 @@ static void checkTemp() {
     bump();
   }
 }
+#endif  // TEMP_ENABLE
 
 // Session progress with every reading (the "state" message is only sent on changes).
 static void addSessionProgress(JsonDocument &doc) {
@@ -473,7 +475,7 @@ static void pushTelemetry() {
   {
     StateLock l;
     JsonArray ch = doc["ch"].to<JsonArray>();
-    if (!g.readOk) doc["se"] = SENS_NAME[(g.lastReadErr ? g.lastReadErr : SENS_NO_REPLY) % 3];
+    if (!g.readOk) doc["se"] = SENS_NAME[(g.lastReadErr ? g.lastReadErr : (uint8_t)SENS_NO_REPLY) % 3];
     if (g.readOk && g.ac) {
       for (uint8_t i = 0; i < g.nch; i++) {
         JsonObject c = ch.add<JsonObject>();
@@ -625,7 +627,7 @@ static void checkSensor(bool ok, uint8_t err) {
     return;
   }
   if (g.cfg.sensor_to_s == 0 || g.sensorErr || now - lastGoodMs < g.cfg.sensor_to_s * 1000UL) return;
-  g.sensorErr = err ? err : SENS_NO_REPLY;
+  g.sensorErr = err ? err : (uint8_t)SENS_NO_REPLY;
   struct Ctx {
     const char *kind, *action;
     uint16_t after;
@@ -697,7 +699,7 @@ static void readSensor() {
   bool ok = rbamp::read(smp);
   uint8_t err = rbamp::lastError();
   StateLock l;
-  g.lastReadErr = ok ? SENS_OK : (err ? err : SENS_NO_REPLY);
+  g.lastReadErr = ok ? (uint8_t)SENS_OK : (err ? err : (uint8_t)SENS_NO_REPLY);
   checkSensor(ok, g.lastReadErr);
   g.readOk = ok;
   if (ok) {

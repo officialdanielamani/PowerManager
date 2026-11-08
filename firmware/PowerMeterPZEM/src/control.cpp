@@ -94,7 +94,7 @@ static void pushTelemetry() {
     se["sid"] = g.sess.sid;
     se["kwh"] = serialized(String(skwh, 4));
     if (hasTare()) se["kwh_t"] = serialized(String(sessionKwhTared(), 4));
-    if (!g.reading.ok) doc["se"] = SENS_NAME[(g.lastReadErr ? g.lastReadErr : SENS_NO_REPLY) % 3];
+    if (!g.reading.ok) doc["se"] = SENS_NAME[(g.lastReadErr ? g.lastReadErr : (uint8_t)SENS_NO_REPLY) % 3];
     if (g.reading.ok && g.ac) {
       JsonObject c = ch.add<JsonObject>();
       c["i"] = 0;
@@ -427,7 +427,7 @@ static void checkSensor(bool ok, uint8_t err) {
     return;
   }
   if (g.cfg.sensor_to_s == 0 || g.sensorErr || now - lastGoodMs < g.cfg.sensor_to_s * 1000UL) return;
-  g.sensorErr = err ? err : SENS_NO_REPLY;
+  g.sensorErr = err ? err : (uint8_t)SENS_NO_REPLY;
   struct Ctx {
     const char *kind, *action;
     uint16_t after;
@@ -447,7 +447,7 @@ static void readSensor() {
   bool ok = sensor_->read(0, r);
   uint8_t err = sensor_->lastError();
   StateLock l;
-  g.lastReadErr = ok ? SENS_OK : (err ? err : SENS_NO_REPLY);
+  g.lastReadErr = ok ? (uint8_t)SENS_OK : (err ? err : (uint8_t)SENS_NO_REPLY);
   checkSensor(ok, g.lastReadErr);
   if (ok) {
     g.reading = r;
@@ -689,6 +689,7 @@ static void auxTick() {
 
 void bumpState() { bump(); }
 
+#if TEMP_ENABLE
 // Over-temperature: any sensor above cfg.temp_max triggers (event + action); every sensor back below
 // temp_max - TEMP_HYST clears. A sensor that cannot be read does not count either way.
 static void checkTemp() {
@@ -735,6 +736,7 @@ static void checkTemp() {
     bump();
   }
 }
+#endif  // TEMP_ENABLE
 
 static void checkTamper() {
 #if TAMPER_ENABLE
