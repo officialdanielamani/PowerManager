@@ -239,6 +239,8 @@ def h_tel(conn, device, msg):
                 lo, hi = LIMITS[f]
                 row[f] = val if val is not None and lo <= val <= hi else None
             rows.append(row)
+        if rows:
+            _check_reversed(device, rows)  # before "positive watt only" hides the sign
         if rows and device.positive_only:  # "Positive watt only": negative power is recorded as 0
             for row in rows:
                 if row["w"] is not None and row["w"] < 0:
@@ -262,6 +264,47 @@ def h_tel(conn, device, msg):
         device.last_reading = newest
     _session_progress(device, items)
     conn.send({"t": "ack", "last_seq": device.last_seq, "time": now()})
+
+
+# Reversed current clamp: clear negative power with real current for about a minute.
+REV_W, REV_A, REV_S = -30.0, 0.3, 60
+
+
+def _check_reversed(device, rows):
+    """A clamp fitted the wrong way round reads negative power (e.g. -660 W) and the rbAmp counts no kWh
+    for it, so its kWh limit never triggers. Flag the channel (dashboard / Info badge + one Meter status
+    notification) whatever "Positive watt only" says; clear positive power clears the flag. Small
+    negatives with no load (noise) are ignored."""
+    st = dict(device.last_state or {})
+    rev = {k: dict(v) for k, v in (st.get("clamp_rev") or {}).items()}
+    changed = False
+    for r in sorted(rows, key=lambda x: (x["ts"], x.get("ms") or 0)):
+        w, a = r["w"], r["a"]
+        if w is None:
+            continue
+        key = str(r["ch"])
+        cur = rev.get(key) or {}
+        if w <= REV_W and (a is None or a >= REV_A):
+            if cur.get("since") is None:
+                cur["since"] = r["ts"]
+            cur["w"] = round(w, 1)
+            if not cur.get("flag") and r["ts"] - cur["since"] >= REV_S:
+                cur["flag"] = True
+                name = device.channel_name(r["ch"]) if device.is_mc else "Meter"
+                notify.notify(device, "meter_status",
+                              f"{name}: negative power ({w:.0f} W). The current clamp may be fitted the wrong way "
+                              "round: turn it over. Its kWh is not counted until then, so its kWh limit cannot trigger.")
+                server_event(device, "clamp_reversed", {"ch": r["ch"], "w": round(w, 1)})
+            rev[key] = cur
+            changed = True
+        elif w > -REV_W and cur:
+            if cur.get("flag"):
+                server_event(device, "clamp_ok", {"ch": r["ch"], "w": round(w, 1)})
+            rev.pop(key, None)
+            changed = True
+    if changed:
+        st["clamp_rev"] = rev
+        device.last_state = st
 
 
 FRAMES_PER_ITEM = 64

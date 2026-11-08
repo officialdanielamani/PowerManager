@@ -84,13 +84,17 @@ var PM = (function () {
     return '<span class="badge rounded-pill ' + (c.relay_on ? 'text-bg-success' : (c.tripped ? 'text-bg-danger' : 'text-bg-secondary')) + '">' +
       (c.relay_on ? 'ON' : (c.tripped ? 'TRIP' : 'OFF')) + '</span>';
   }
+  function revBadge(c) {
+    return c.reversed ? ' <span class="badge text-bg-danger" title="Negative power with real current: the clamp may be fitted the wrong way round. Turn it over: its kWh is not counted until then.">' +
+      '<i class="bi bi-arrow-left-right"></i> reversed?</span>' : '';
+  }
   function mcMini(m) {  // dashboard card: one line per channel
     if (!m.mc) return '';
     return m.channels.map(function (c) {
       var st = m.mode === 'independent' && c.status !== 'active' ?
         ' <span class="badge text-bg-warning">' + esc((STATUS[c.status] || ['', c.status])[1]) + '</span>' : '';
       var pct = c.kwh_max ? Math.min(100, (c.kwh || 0) / c.kwh_max * 100) : 0;
-      return '<div class="d-flex justify-content-between align-items-center gap-2"><span class="text-truncate">' + esc(c.name) + st + '</span>' +
+      return '<div class="d-flex justify-content-between align-items-center gap-2"><span class="text-truncate">' + esc(c.name) + st + revBadge(c) + '</span>' +
         '<span class="text-nowrap">' + (c.w == null ? '–' : c.w) + ' W ' + chBadge(c) + '</span></div>' +
         (m.mode === 'independent' ? '<div class="progress mb-1" style="height:4px" title="' + fmt(c.kwh, 3) + ' / ' + (c.kwh_max || '∞') +
           ' kWh"><div class="progress-bar ' + (pct >= 100 ? 'bg-warning' : '') + '" style="width:' + pct + '%"></div></div>' : '');
@@ -114,7 +118,8 @@ var PM = (function () {
           '<div class="text-body-secondary">' + esc(c.session_desc || '') + (c.next_reset ? ' · next reset ' + esc(c.next_reset) : '') + '</div></div>';
       }
       return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100">' +
-        '<div class="d-flex align-items-center gap-2"><span class="fw-semibold text-truncate">' + esc(c.name) + '</span><span class="ms-auto">' + chBadge(c) + '</span></div>' +
+        '<div class="d-flex align-items-center gap-2"><span class="fw-semibold text-truncate">' + esc(c.name) + '</span>' + revBadge(c) + '<span class="ms-auto">' + chBadge(c) + '</span></div>' +
+        (c.reversed ? '<div class="small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>Negative power: the current clamp may be fitted the wrong way round. Turn it over (the arrow / K→L should point to the load); its kWh is not counted until then.</div>' : '') +
         '<div class="d-flex flex-wrap gap-3 small mt-1"><span><span class="fs-5 fw-semibold">' + (c.w == null ? '–' : c.w) + '</span> W</span><span>' + fmt(c.a, 3) + ' A</span><span>PF ' + fmt(c.pf, 2) + '</span>' +
         '<span class="text-body-secondary">' + fmt(c.e, 3) + ' kWh total</span>' + (c.amp_max ? '<span class="text-body-secondary">max ' + c.amp_max + ' A</span>' : '') + '</div>' +
         (c.relay_block && !c.relay_on ? '<div class="small text-body-secondary">Off: ' + esc(c.relay_block) + '</div>' : '') + sess +
@@ -153,6 +158,11 @@ var PM = (function () {
       el.style.width = pct + '%'; el.classList.toggle('bg-warning', pct >= 100);
     });
     set(root, 'status', function (el) { var s = STATUS[m.status] || ['secondary', m.status]; el.innerHTML = '<span class="badge text-bg-' + s[0] + '">' + esc(s[1]) + '</span>'; });
+    set(root, 'clamp', function (el) {
+      var r = m.clamp_rev || [];
+      el.innerHTML = r.length ? '<span class="badge text-bg-danger" title="Negative power with real current: the current clamp may be fitted the wrong way round (its kWh is not counted)">' +
+        '<i class="bi bi-arrow-left-right me-1"></i>' + (r[0] ? esc(r.join(', ')) + ' ' : '') + 'clamp reversed?</span>' : '';
+    });
     set(root, 'ongoing', function (el) { el.innerHTML = m.ongoing.map(function (t) { return INCIDENT[t] || ''; }).join(' '); });
     set(root, 'last_seen', function (el) { el.textContent = m.last_seen; });
     set(root, 'via-badge', function (el) { el.innerHTML = m.via ? '<i class="bi bi-diagram-3"></i> via ' + esc(m.via) : ''; });

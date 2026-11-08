@@ -55,6 +55,7 @@
     </div><div class="card-body">
       <dl class="row mb-0 small">
         <dt class="col-6">Status</dt><dd class="col-6" data-field="status">{{ status_badge(m.status) }}</dd>
+        <dd class="col-12 mb-1" data-field="clamp">{% if m.clamp_rev %}<span class="badge text-bg-danger"><i class="bi bi-arrow-left-right me-1"></i>{{ (m.clamp_rev|join(', ') ~ ' ') if m.clamp_rev[0] else '' }}clamp reversed?</span>{% endif %}</dd>
         <dt class="col-6">Relay</dt><dd class="col-6"><span class="badge rounded-pill {{ 'text-bg-success' if m.relay_on else 'text-bg-secondary' }}" data-field="relay">Relay {{ 'ON' if m.relay_on else 'OFF' }}</span></dd>
         {% if d.is_mc and d.mc_mode == 'independent' %}
         <dt class="col-6">Sessions</dt><dd class="col-6">One per channel (see Channels above)</dd>

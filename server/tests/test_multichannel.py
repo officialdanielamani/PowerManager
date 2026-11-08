@@ -2,7 +2,7 @@
 import pytest
 
 from app.extensions import db
-from app.models import Command, Device, Incident, Notification, NotificationRule, Session, User, now
+from app.models import Command, Device, Incident, Measurement, Notification, NotificationRule, Session, User, now
 from app.services import devconfig, ingest
 
 from .conftest import FakeConn
@@ -235,3 +235,32 @@ def test_no_session_blocks_relay_on(app, admin, mc):
         db.session.commit()
     r = admin.post(f"/meters/{mc}/action", json={"action": "relay_on", "ch": 0}).get_json()
     assert not r["ok"] and r["error"] == "no_session" and "Renew" in r["message"]
+
+
+def test_reversed_clamp_warning(app, admin, mc):
+    """Clear negative power with real current for a minute flags the channel once (even with
+    "Positive watt only" on); positive power clears it; no-load noise is ignored."""
+    from app.routes.main import meter_summary
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        t = now() - 300
+
+        def tel(seq, ts, w, a=2.8, ch=1):
+            ingest.handle(FakeConn(), d, {"t": "tel", "items": [{"seq": seq, "ts": ts, "tv": 1,
+                                          "ch": [{"i": 0, "v": 230, "a": 0.0, "w": -1.7}, {"i": ch, "v": 230, "a": a, "w": w}]}]})
+        tel(1, t, -660)
+        tel(2, t + 30, -655)
+        assert not d.last_state["clamp_rev"]["1"].get("flag")
+        tel(3, t + 61, -662)
+        assert d.last_state["clamp_rev"]["1"]["flag"] and "0" not in d.last_state["clamp_rev"]  # CH1 noise ignored
+        notes = Notification.query.filter(Notification.message.like("%wrong way round%")).all()
+        assert notes and "CH2" in notes[0].message
+        n = len(notes)
+        tel(4, t + 120, -650)
+        assert Notification.query.filter(Notification.message.like("%wrong way round%")).count() == n  # once
+        m = admin.get(f"/meters/{mc}/live").get_json()
+        assert m["clamp_rev"] == ["CH2"] and m["channels"][1]["reversed"] and not m["channels"][0]["reversed"]
+        assert Measurement.query.filter_by(device_fk=d.id, seq=4, ch=1).one().w == 0.0  # still stored as 0
+        tel(5, t + 180, 640)  # turned over
+        assert "1" not in d.last_state["clamp_rev"]
+        assert admin.get(f"/meters/{mc}/live").get_json()["clamp_rev"] == []

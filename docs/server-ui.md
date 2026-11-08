@@ -176,3 +176,11 @@ Detected from the meter firmware at pairing (`caps.mc`); see [multichannel.md](m
 - **Link this meter to users** on a multi-channel meter: tick channels per user to show only those channels (none = the
   whole meter). Such a viewer sees only those channels on the dashboard, Info, history, CSV and Telegram; whole-meter session
   totals of a shared session are hidden.
+
+## Reversed clamp warning
+
+A clamp fitted the wrong way round reads negative power (e.g. −660 W), and the rbAmp counts no kWh for it, so that
+channel's kWh limit cannot trigger. The server checks every reading **before** *Positive watt only* turns negatives into 0:
+power ≤ −30 W with current ≥ 0.3 A for about 60 s flags the channel. It then shows a red **clamp reversed?** badge on
+the dashboard card and the Info page (with a hint to turn the clamp over), and sends one **Meter status** notification.
+Clear positive power (> 30 W) clears the flag. No-load noise (a few negative watts at ~0 A) is ignored.

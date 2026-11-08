@@ -63,7 +63,11 @@ def meter_summary(d, show_price=None, user=None):
         secs = ((sess_end or now()) - sess_start) if sess_start else 0
         kwh_t = round(tare_svc.kwh(float(kwh_now), secs, tare), 4)
     cost_t = round(kwh_t * price, 4) if show_price and price is not None and kwh_t is not None else None
+    rev = sorted(int(k) for k, v in (st.get("clamp_rev") or {}).items()
+                 if v.get("flag") and (allowed is None or int(k) in allowed))
     out = {
+        "clamp_rev": [d.channel_name(i) if d.is_mc else "" for i in rev],  # channels with a reversed clamp
+        "clamp_rev_idx": rev,
         "tare": {"a": d.tare_a, "w": d.tare_w} if tare else None,
         "reading_tared": chans_t,
         "w_tared": round(w_t, 1) if w_t is not None else None,
@@ -130,7 +134,8 @@ def _mc_summary(d, base, show_price, allowed=None):
         c = {"i": i, "name": d.channel_name(i), "label": (ccfg[i].get("name") if i < len(ccfg) else "") or "",
              "w": rd.get("w"), "a": rd.get("a"), "pf": rd.get("pf"), "e": rd.get("e"),
              "relay_on": bool(rl.get("on")), "relay_block": rl.get("block"), "tripped": bool(rl.get("tripped")),
-             "amp_max": (ccfg[i].get("amp_max") if i < len(ccfg) else 0) or 0}
+             "amp_max": (ccfg[i].get("amp_max") if i < len(ccfg) else 0) or 0,
+             "reversed": bool(((st.get("clamp_rev") or {}).get(str(i)) or {}).get("flag"))}
         if indep:
             ss = sessions.get(i) or {}
             rec = None

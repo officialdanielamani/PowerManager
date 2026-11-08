@@ -79,6 +79,7 @@
           <span data-field="ongoing">
           {% for t in m.ongoing %}{% include "_incident_badge.html" %}{% endfor %}
           </span>
+          <span data-field="clamp">{% if m.clamp_rev %}<span class="badge text-bg-danger" title="Negative power with real current: the current clamp may be fitted the wrong way round (its kWh is not counted)"><i class="bi bi-arrow-left-right me-1"></i>{{ (m.clamp_rev|join(', ') ~ ' ') if m.clamp_rev[0] else '' }}clamp reversed?</span>{% endif %}</span>
           {% if not m.synced and not m.disabled %}<span class="badge text-bg-info" data-field="sync">Pending sync</span>{% endif %}
         </div>
       </div>
