@@ -157,17 +157,20 @@
         <button class="btn btn-sm btn-outline-primary">Filter</button>
         {% if can_csv %}<a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('meters.incidents_csv', pk=d.id) }}?{{ request.query_string.decode() }}"><i class="bi bi-download me-1"></i>Export CSV</a>{% endif %}
       </form>
-      {% if manage %}
-      <div class="d-none mb-2" id="incBar"><button class="btn btn-sm btn-outline-danger" id="incDelete"><i class="bi bi-trash me-1"></i>Delete selected (<span id="incCount">0</span>)</button></div>
+      {% set pick = manage or can_csv %}
+      {% if pick %}
+      <div class="d-none mb-2 align-items-center flex-wrap gap-2" id="incBar"><span class="small fw-semibold me-1"><span id="incCount">0</span> selected</span>
+        {% if can_csv %}<button class="btn btn-sm btn-outline-primary" id="incSummary"><i class="bi bi-filetype-csv me-1"></i>Download selected summary</button>{% endif %}
+        {% if manage %}<button class="btn btn-sm btn-outline-danger" id="incDelete"><i class="bi bi-trash me-1"></i>Delete selected</button>{% endif %}</div>
       {% endif %}
       <div class="table-responsive">
       <table class="table table-sm align-middle">
-        <thead><tr>{% if manage %}<th style="width:1%"><input class="form-check-input" type="checkbox" id="incAll" title="Select all on this page"></th>{% endif %}<th>Type</th><th>Started</th><th>Ended</th><th>Duration</th><th>Details</th></tr></thead>
+        <thead><tr>{% if pick %}<th style="width:1%"><input class="form-check-input" type="checkbox" id="incAll" title="Select all on this page"></th>{% endif %}<th>Type</th><th>Started</th><th>Ended</th><th>Duration</th><th>Details</th></tr></thead>
         <tbody>
         {% for inc in pagination.items %}
           {% set est = '~' if inc.time_estimated else '' %}
           <tr class="{{ 'table-warning' if not inc.ended_at }}">
-            {% if manage %}<td><input class="form-check-input pm-inc" type="checkbox" value="{{ inc.id }}"></td>{% endif %}
+            {% if pick %}<td><input class="form-check-input pm-inc" type="checkbox" value="{{ inc.id }}"></td>{% endif %}
             <td>{% set t = inc.type %}{% if t == 'offline' %}<span class="badge text-bg-secondary"><i class="bi bi-wifi-off"></i> Offline</span>{% else %}{% include "_incident_badge.html" %}{% endif %}</td>
             <td class="text-nowrap">{{ est }}{{ inc.started_at|dt }}</td>
             <td class="text-nowrap">{% if inc.ended_at %}{{ est }}{{ inc.ended_at|dt }}{% else %}<strong>Ongoing</strong>{% endif %}</td>
@@ -191,23 +194,26 @@
       <div class="small text-body-tertiary mt-2">Times in {{ tz_label() }}. "~" = estimated time (meter clock was not set).</div>
     </div>
     <div class="tab-pane fade" id="tabSessions">
-      {% if manage %}
-      <div class="d-none mb-2" id="sesBar"><button class="btn btn-sm btn-outline-danger" id="sesDelete"><i class="bi bi-trash me-1"></i>Delete selected (<span id="sesCount">0</span>)</button>
-        <span class="small text-body-secondary ms-2">Deletes the session record only; power readings stay. The running session cannot be deleted.</span></div>
+      {% if pick %}
+      <div class="d-none mb-2 align-items-center flex-wrap gap-2" id="sesBar"><span class="small fw-semibold me-1"><span id="sesCount">0</span> selected</span>
+        {% if can_csv %}<button class="btn btn-sm btn-outline-primary" id="sesSummary"><i class="bi bi-filetype-csv me-1"></i>Download selected summary</button>{% endif %}
+        {% if manage %}<button class="btn btn-sm btn-outline-danger" id="sesDelete"><i class="bi bi-trash me-1"></i>Delete selected</button>
+        <span class="small text-body-secondary">Delete removes the session record only; power readings stay. A running session is not deleted.</span>{% endif %}</div>
       {% endif %}
       <div class="table-responsive">
       <table class="table table-sm">
-        <thead><tr>{% if manage %}<th style="width:1%"><input class="form-check-input" type="checkbox" id="sesAll" title="Select all ended sessions"></th>{% endif %}<th>#</th>{% if d.is_mc %}<th>Channel</th>{% endif %}<th>Started</th><th>Ended</th><th>Duration</th><th>kWh used</th>{% if price[1] is not none %}<th>Cost</th>{% endif %}<th>Limit</th><th>End reason</th><th></th></tr></thead>
+        <thead><tr>{% if pick %}<th style="width:1%"><input class="form-check-input" type="checkbox" id="sesAll" title="Select all"></th>{% endif %}<th>#</th>{% if d.is_mc %}<th>Channel</th>{% endif %}<th>Started</th><th>Ended</th><th>Duration</th><th>kWh used</th>{% if price[1] is not none %}<th>Cost</th>{% endif %}<th>Limit</th><th>End reason</th><th></th></tr></thead>
         <tbody>
         {% for s in sessions %}
-          <tr>{% if manage %}<td>{% if s.ended_at %}<input class="form-check-input pm-ses" type="checkbox" value="{{ s.id }}">{% endif %}</td>{% endif %}<td>{{ s.sid }}</td>{% if d.is_mc %}<td>{{ d.channel_name(s.ch) if s.ch is not none else 'All' }}</td>{% endif %}<td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
+          <tr>{% if pick %}<td><input class="form-check-input pm-ses" type="checkbox" value="{{ s.id }}"></td>{% endif %}<td>{{ s.sid }}</td>{% if d.is_mc %}<td>{{ d.channel_name(s.ch) if s.ch is not none else 'All' }}</td>{% endif %}<td>{{ s.started_at|dt }}</td><td>{{ s.ended_at|dt if s.ended_at else 'Active' }}</td>
             <td class="text-nowrap">{{ ((s.ended_at or now) - s.started_at)|duration if s.started_at else '–' }}</td>
             {% set kt = tare_kwh(s) %}
             {% set hide = allowed is not none and s.ch is none %}{# whole-meter kWh of a shared session: not for a per-channel viewer #}
             {% if hide %}<td>–</td>{% if price[1] is not none %}<td>–</td>{% endif %}{% else %}
-            <td><span class="v-raw">{{ '%.3f'|format(s.kwh_used) }}</span>{% if kt is not none %}<span class="v-tared">{{ '%.3f'|format(kt) }}</span>{% endif %}</td>
+            <td><span class="v-raw">{{ '%.3f'|format(s.kwh_used) }}</span>{% if kt is not none %}<span class="v-tared">{{ '%.3f'|format(kt) }}</span>{% endif %}
+              {% if s.stats and s.stats.w %}<div class="small text-body-secondary text-nowrap" title="Session summary from the meter: V {{ s.stats.v|join(' / ') if s.stats.v }} · A {{ s.stats.a|join(' / ') if s.stats.a }} (min / max / avg)">avg {{ '%.0f'|format(s.stats.w[2]) }} W · max {{ '%.0f'|format(s.stats.w[1]) }} W</div>{% endif %}</td>
             {% if price[1] is not none %}{% set pp = s.price_per_kwh if s.price_per_kwh is not none else price[1] %}<td><span class="v-raw">{{ money(s.cost(price[1]), s.currency if s.price_per_kwh is not none else price[0]) }}</span>{% if kt is not none %}<span class="v-tared">{{ money(kt * pp, s.currency if s.price_per_kwh is not none else price[0]) }}</span>{% endif %}{% if s.price_per_kwh is not none %} <span class="small text-body-secondary">@ {{ '%g'|format(s.price_per_kwh) }}</span>{% endif %}</td>{% endif %}{% endif %}<td>{{ s.kwh_max if s.kwh_max else '∞' }}</td>
-            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now', 'voltage': 'Voltage out of range', 'tamper': 'Tamper', 'sensor': 'Sensor error', 'temp': 'Temperature too high', 'disabled': 'Disabled', 'stopped': 'End', 'mode': 'Mode changed'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
+            <td>{{ {'quota': 'kWh limit', 'expired': 'Time limit', 'manual': 'Renew Now', 'voltage': 'Voltage out of range', 'tamper': 'Tamper', 'sensor': 'Sensor error', 'temp': 'Temperature too high', 'next': 'Next session started', 'disabled': 'Disabled', 'stopped': 'End', 'mode': 'Mode changed'}.get(s.end_reason, s.end_reason or '–') }}{% if s.auto %} <span class="badge text-bg-light">auto</span>{% endif %}</td>
             <td class="text-end text-nowrap">{% if s.started_at %}
               {% set s_end = s.ended_at or now %}
               <button type="button" class="btn btn-sm btn-outline-primary py-0" data-hist-from="{{ s.started_at }}" data-hist-to="{{ s_end }}"
@@ -265,6 +271,8 @@ PM.meterInfo({
   deviceInfo: {{ (url_for('meters.device_info', pk=d.id) if manage else none)|tojson }},
   incDelete: {{ (url_for('meters.incidents_delete', pk=d.id) if manage else none)|tojson }},
   sesDelete: {{ (url_for('meters.sessions_delete', pk=d.id) if manage else none)|tojson }},
+  incSummary: {{ (url_for('meters.incidents_summary', pk=d.id) if can_csv else none)|tojson }},
+  sesSummary: {{ (url_for('meters.sessions_summary', pk=d.id) if can_csv else none)|tojson }},
   initial: {{ m|tojson }}
 });
 {% if manage %}

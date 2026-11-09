@@ -256,6 +256,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (sto < 0 || sto > 3600) { err = "sensor.timeout_s"; return false; }
   m.sensor_to_s = sto;
   m.sensor_action = action3(se["action"] | "hold");
+  m.summary = c["summary"] | false;
   JsonObject tp = c["temp"];
   float tmax = tp["max"] | 0.0f;
   if (tmax < 0 || tmax > 125) { err = "temp.max"; return false; }

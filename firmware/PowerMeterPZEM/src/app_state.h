@@ -49,6 +49,7 @@ struct MeterConfig {
   uint8_t tamper_action = ACT_HOLD;
   uint16_t sensor_to_s = 10;  // no valid reading for this long = sensor error; 0 = off
   uint8_t sensor_action = ACT_HOLD;
+  bool summary = false;       // "Core data only": no interval readings, only the session summary
   float temp_max = 0;         // over-temperature: any sensor above this (degC); 0 = off
   uint8_t temp_action = ACT_HOLD;
 };

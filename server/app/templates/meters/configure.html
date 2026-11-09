@@ -104,7 +104,10 @@
             ≈ 600 per minute). Limits and protections are checked on every window. Lots of data: about 860,000 rows per channel per day
             on the server — use it for detailed measurements, Normal mode for everyday metering.</div>
         </div>
-        {% endif %}</div>
+        {% endif %}
+        <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="summary" id="summary" {{ chk('summary', cfg.get('summary')) }}>
+          <label class="form-check-label" for="summary">Core data only (send when session ends)</label>
+          <div class="form-text">No readings every X s: the meter keeps only a summary of each session (start, end, kWh used, min / max / average voltage, current and power; cost from the price) and sends it when the session ends. Uses very little space, good for meters that are mostly offline. Limits and protections still run every second; <em>Get Data Now</em> still shows a live reading. Needs firmware PZEM 0.7.1 / rbAmp 0.9.1.</div></div></div>
       <div class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-outline-secondary" data-action="set_default" data-confirm="Reset limits and send interval to defaults? Name, info, linked users, notification options and history are kept."><i class="bi bi-arrow-counterclockwise me-1"></i>Set to Default</button>
         <button type="button" class="btn btn-outline-danger ms-auto" data-bs-toggle="modal" data-bs-target="#lifecycleModal"><i class="bi bi-power me-1"></i>Disable / Unsync / Remove</button>

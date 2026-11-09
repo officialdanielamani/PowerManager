@@ -449,19 +449,27 @@ var PM = (function () {
     });
 
     // ---- select + delete historical events / sessions (admin)
-    function selectDelete(prefix, url, what, tab) {
+    function selectDelete(prefix, url, what, tab, summaryUrl) {  // row checkboxes: Delete selected / Download selected summary
       var bar = document.getElementById(prefix + 'Bar');
-      if (!bar || !url) return;
+      if (!bar || (!url && !summaryUrl)) return;
       var boxes = function () { return Array.prototype.slice.call(document.querySelectorAll('.pm-' + prefix)); };
+      var picked = function () { return boxes().filter(function (c) { return c.checked; }).map(function (c) { return +c.value; }); };
       var refresh = function () {
-        var n = boxes().filter(function (c) { return c.checked; }).length;
-        bar.classList.toggle('d-none', !n); document.getElementById(prefix + 'Count').textContent = n;
+        var n = picked().length;
+        bar.classList.toggle('d-none', !n); bar.classList.toggle('d-flex', !!n);
+        document.getElementById(prefix + 'Count').textContent = n;
       };
       boxes().forEach(function (c) { c.addEventListener('change', refresh); });
       var all = document.getElementById(prefix + 'All');
       if (all) all.addEventListener('change', function (e) { boxes().forEach(function (c) { c.checked = e.target.checked; }); refresh(); });
-      document.getElementById(prefix + 'Delete').addEventListener('click', function () {
-        var ids = boxes().filter(function (c) { return c.checked; }).map(function (c) { return +c.value; });
+      var sb = document.getElementById(prefix + 'Summary');
+      if (sb && summaryUrl) sb.addEventListener('click', function () {
+        var ids = picked();
+        if (ids.length) window.location = summaryUrl + '?ids=' + ids.join(',');
+      });
+      var db = document.getElementById(prefix + 'Delete');
+      if (db && url) db.addEventListener('click', function () {
+        var ids = picked();
         if (!ids.length || !confirm('Delete ' + ids.length + ' ' + what + '? This cannot be undone.')) return;
         post(url, {ids: ids}).then(function (r) {
           toast(r.message || r.error, r.ok ? 'success' : 'danger');
@@ -469,8 +477,8 @@ var PM = (function () {
         });
       });
     }
-    selectDelete('inc', opt.incDelete, 'historical event(s)');
-    selectDelete('ses', opt.sesDelete, 'session record(s)', 'sessions');
+    selectDelete('inc', opt.incDelete, 'historical event(s)', null, opt.incSummary);
+    selectDelete('ses', opt.sesDelete, 'session record(s)', 'sessions', opt.sesSummary);
     if (location.hash === '#sessions') {  // back on the Sessions tab after a delete
       var st = document.querySelector('[data-bs-target="#tabSessions"],[href="#tabSessions"]');
       if (st && window.bootstrap) bootstrap.Tab.getOrCreateInstance(st).show();

@@ -194,3 +194,18 @@ or the session is [running / ended] — the relay is [ON / OFF], otherwise the o
 The Info page shows each AUX relay with its mode, a one-line description of the automation, *overridden* while a
 manual switch wins, and ON / OFF buttons (hidden for automated relays without override). Details:
 docs/multichannel.md § AUX relays.
+
+## Session summary, Core data only, selected summary CSV
+
+- Every `session_end` from current firmware carries a summary (min / max / average V, A, W). The Sessions tab shows
+  *avg … W · max … W* under kWh used (hover: V and A).
+- **Configuration → General → Data → Core data only (send when session ends)**: no readings every X s; the meter keeps
+  only the session summary and sends it at the session end (cost from the meter's price). Limits run as usual; *Get Data
+  Now* still gives a live reading. For meters that are mostly offline.
+- **Historical Events / Sessions → tick rows → Download selected summary**: one CSV line per selected row (session: #,
+  channel, start, end, duration, kWh used, cost, kWh limit, end reason, auto renew, V / A / W min / max / avg; event:
+  type, start, end, duration, details). *Export CSV* / the row's *CSV* button still give the raw readings.
+- A session whose `session_end` never reached the server is closed when the next session of the same meter / channel
+  starts (end reason *Next session started*), so a meter never shows more than one running session per slot.
+- Raising the kWh limit while a session is held at the old limit ("Off relay, but session continue") lets that session
+  continue at once.

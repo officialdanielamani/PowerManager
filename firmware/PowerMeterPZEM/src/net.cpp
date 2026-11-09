@@ -258,6 +258,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   }
   m.sensor_to_s = sto;
   m.sensor_action = action(se["action"] | "hold");
+  m.summary = c["summary"] | false;
   JsonObject tp = c["temp"];
   float tmax = tp["max"] | 0.0f;
   if (tmax < 0 || tmax > 125) {

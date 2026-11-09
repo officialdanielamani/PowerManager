@@ -757,6 +757,101 @@ def export_csv(pk):
     return _csv_response(f"{device.device_id}_{_fname_ts(start)}_{_fname_ts(end)}.csv", hdr, out)
 
 
+def _picked_ids():
+    return sorted({int(x) for x in str(request.args.get("ids", "")).split(",") if x.strip().isdigit()})[:5000]
+
+
+def _hms(secs):
+    if secs is None:
+        return ""
+    secs = max(0, int(secs))
+    return f"{secs // 3600}:{secs % 3600 // 60:02d}:{secs % 60:02d}"
+
+
+END_REASONS = {"quota": "kWh limit", "expired": "Time limit", "manual": "Renew Now", "voltage": "Voltage out of range",
+               "tamper": "Tamper", "sensor": "Sensor error", "temp": "Temperature too high", "next": "Next session started",
+               "disabled": "Disabled", "stopped": "End", "mode": "Mode changed", "hardware": "Hardware changed"}
+
+
+@bp.get("/<int:pk>/sessions/summary.csv")
+@login_required
+def sessions_summary(pk):
+    """Selected session rows as a summary (one line per session), not the raw readings."""
+    device = access.device_for_current_user(pk, allow_removed=True)
+    if not access.can_csv(current_user):
+        abort(403)
+    allowed = access.allowed_channels(current_user, device)
+    q = Session.query.filter(Session.device_fk == device.id, Session.id.in_(_picked_ids() or [-1]))
+    if allowed is not None:
+        q = q.filter((Session.ch.is_(None)) | (Session.ch.in_(allowed)))
+    sessions = q.order_by(Session.started_at).all()
+    show_price = access.can_price(current_user)
+    cur, price = settings.price(device)
+    t = now()
+    hdr = ["session"] + (["channel"] if device.is_mc else []) + [
+        "started_utc", f"started_local ({settings.get('timezone')})", "ended_utc", "ended_local", "duration",
+        "duration_s", "kWh used"] + (["cost", "currency", "price per kWh"] if show_price else []) + [
+        "kWh limit", "end reason", "auto renew",
+        "V min", "V max", "V avg", "A min", "A max", "A avg", "W min", "W max", "W avg", "readings"]
+    rows = []
+    for x in sessions:
+        dur = ((x.ended_at or t) - x.started_at) if x.started_at else None
+        shared_hidden = allowed is not None and x.ch is None  # whole-meter kWh: not for a per-channel viewer
+        kwh = None if shared_hidden else round(x.kwh_used or 0, 4)
+        p = x.price_per_kwh if x.price_per_kwh is not None else price
+        c = x.currency if x.price_per_kwh is not None else cur
+        st = x.stats or {}
+        row = [x.sid] + ([device.channel_name(x.ch) if x.ch is not None else "All"] if device.is_mc else []) + [
+            _utc(x.started_at) if x.started_at else "", settings.fmt_ts(x.started_at) if x.started_at else "",
+            _utc(x.ended_at) if x.ended_at else "", settings.fmt_ts(x.ended_at) if x.ended_at else "Active",
+            _hms(dur), dur if dur is not None else ""]
+        row.append("" if kwh is None else kwh)
+        if show_price:
+            row += ["" if (kwh is None or p is None) else round(kwh * p, 2), c or "", "" if p is None else p]
+        row += [x.kwh_max or "", END_REASONS.get(x.end_reason, x.end_reason or ""), "yes" if x.auto else "no"]
+        for k in ("v", "a", "w"):
+            vals = st.get(k) if not shared_hidden else None
+            row += list(vals) if vals else ["", "", ""]
+        row.append(st.get("n", "") if st and not shared_hidden else "")
+        rows.append(row)
+    return _summary_response(f"{device.device_id}_sessions_summary.csv", hdr, rows)
+
+
+@bp.get("/<int:pk>/incidents/summary.csv")
+@login_required
+def incidents_summary(pk):
+    """Selected historical events (one line per event)."""
+    device = access.device_for_current_user(pk, allow_removed=True)
+    if not access.can_csv(current_user):
+        abort(403)
+    allowed = access.allowed_channels(current_user, device)
+    q = Incident.query.filter(Incident.device_fk == device.id, Incident.id.in_(_picked_ids() or [-1]))
+    if allowed is not None:
+        q = q.filter((Incident.ch.is_(None)) | (Incident.ch.in_(allowed)))
+    t = now()
+    hdr = ["type"] + (["channel"] if device.is_mc else []) + [
+        "started_utc", f"started_local ({settings.get('timezone')})", "ended_utc", "ended_local", "duration",
+        "duration_s", "time_estimated", "details"]
+    rows = []
+    for inc in q.order_by(Incident.started_at).all():
+        dur = inc.duration_s if inc.duration_s is not None else t - inc.started_at
+        rows.append([incidents.TYPES.get(inc.type, inc.type)] +
+                    ([device.channel_name(inc.ch) if inc.ch is not None else "All"] if device.is_mc else []) +
+                    [_utc(inc.started_at), settings.fmt_ts(inc.started_at),
+                     _utc(inc.ended_at) if inc.ended_at else "", settings.fmt_ts(inc.ended_at) if inc.ended_at else "ongoing",
+                     _hms(dur), dur, int(inc.time_estimated), incident_detail_text(inc)])
+    return _summary_response(f"{device.device_id}_events_summary.csv", hdr, rows)
+
+
+def _summary_response(filename, header, rows):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(header)
+    w.writerows(rows)
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @bp.get("/<int:pk>/incidents.csv")
 @login_required
 def incidents_csv(pk):

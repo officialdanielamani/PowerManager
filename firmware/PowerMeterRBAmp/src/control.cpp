@@ -10,6 +10,7 @@
 #include "storage.h"
 #include "system.h"
 #include "auxrelay.h"
+#include "sessstats.h"
 #include "temp.h"
 #include "timekeep.h"
 
@@ -46,17 +47,27 @@ static void stampTime(JsonDocument &doc) {
   }
 }
 
+// Sequence number + queueing in one step (outLock_): an item can never be queued after an item with a
+// higher seq was queued (and maybe already acknowledged), which would make the outbox skip it.
+static SemaphoreHandle_t outLock_ = nullptr;
+static uint32_t queueItem(outbox::Kind kind, JsonDocument &doc, String &s) {
+  if (outLock_) xSemaphoreTake(outLock_, portMAX_DELAY);
+  uint32_t seq = store::nextSeq();
+  doc["seq"] = seq;
+  serializeJson(doc, s);
+  outbox::push(kind, seq, s);
+  if (outLock_) xSemaphoreGive(outLock_);
+  return seq;
+}
+
 void emitEvent(const char *e, void (*fill)(JsonObject, void *), void *ctx) {
   JsonDocument doc;
-  uint32_t seq = store::nextSeq();
   doc["t"] = "evt";
-  doc["seq"] = seq;
   stampTime(doc);
   doc["e"] = e;
   if (fill) fill(doc.as<JsonObject>(), ctx);
   String s;
-  serializeJson(doc, s);
-  outbox::push(outbox::EVT, seq, s);
+  queueItem(outbox::EVT, doc, s);
   sendReq_ = true;  // events go out right away (with any readings queued before them)
   Serial.printf("[event] %s\n", s.c_str());
 }
@@ -129,7 +140,11 @@ struct SessCtx {
   float max;
   const char *reason;
   double kwh;
+  const SessStats *st;
 };
+// Session summary per slot (shared: voltage + total current / power of all channels; independent: the
+// channel's own). RAM only, sent with session_end.
+static SessStats stats_[MC_MAX_CH];
 
 static void startSession(uint8_t slot, bool autoRenew) {
   // caller holds StateLock
@@ -146,6 +161,7 @@ static void startSession(uint8_t slot, bool autoRenew) {
   s.stopReason = STOP_NONE;
   store::saveSession(slot, s);
   saveEnergy();
+  stats_[slot].reset();
   SessCtx ctx = {s.sid, (int8_t)(indep() ? slot : -1), autoRenew, slotKwhMax(slot), nullptr, 0};
   emitEvent("session_start", [](JsonObject o, void *p) {
     SessCtx *c = (SessCtx *)p;
@@ -163,13 +179,14 @@ static void endSession(uint8_t slot, const char *reason) {
   if (s.ended || !s.sid) return;
   s.ended = true;
   double kwh = slotEnergy(slot) - s.e0;
-  SessCtx ctx = {s.sid, (int8_t)(indep() ? slot : -1), false, 0, reason, kwh > 0 ? kwh : 0};
+  SessCtx ctx = {s.sid, (int8_t)(indep() ? slot : -1), false, 0, reason, kwh > 0 ? kwh : 0, &stats_[slot]};
   emitEvent("session_end", [](JsonObject o, void *p) {
     SessCtx *c = (SessCtx *)p;
     o["sid"] = c->sid;
     if (c->ch >= 0) o["ch"] = c->ch;
     o["reason"] = c->reason;
     o["kwh"] = serialized(String(c->kwh, 4));
+    if (c->st) c->st->toJson(o);
   }, &ctx);
   saveEnergy();
 }
@@ -323,7 +340,29 @@ void applyConfig(const MeterConfig &c) {
     g.cfg = c;
   }
   store::saveConfig(c);
-  // A session that already ended (kWh or time limit) stays ended: use Renew to start a new one.
+  // kWh limit raised (or removed) while a session was held at the old limit ("relay off until the session
+  // ends"): that session continues. A session that already ENDED stays ended: use Renew to start a new one.
+  for (uint8_t i = 0; i < sessSlots(); i++) {
+    SessionState &ss = g.sess[i];
+    double used = slotEnergy(i) - ss.e0;
+    float max = slotKwhMax(i);
+    bool room = max <= 0 || used < max;
+    if (!ss.sid || !room || !((ss.status == SESS_QUOTA && !ss.ended) || ss.over)) continue;
+    ss.status = SESS_ACTIVE;
+    ss.over = false;
+    store::saveSession(i, ss);
+    struct Ctx {
+      int8_t ch;
+      double kwh;
+      float max;
+    } ctx = {(int8_t)(indep() ? i : -1), used > 0 ? used : 0, max};
+    emitEvent("quota_cleared", [](JsonObject o, void *p) {
+      Ctx *x = (Ctx *)p;
+      if (x->ch >= 0) o["ch"] = x->ch;
+      o["kwh"] = serialized(String(x->kwh, 4));
+      o["max"] = num4(x->max);
+    }, &ctx);
+  }
   bump();
 }
 
@@ -475,8 +514,6 @@ static void addSessionProgress(JsonDocument &doc) {
 
 static void pushTelemetry() {
   JsonDocument doc;
-  uint32_t seq = store::nextSeq();
-  doc["seq"] = seq;
   stampTime(doc);
   {
     StateLock l;
@@ -500,8 +537,7 @@ static void pushTelemetry() {
     addSessionProgress(doc);
   }
   String s;
-  serializeJson(doc, s);
-  outbox::push(outbox::TEL, seq, s);
+  queueItem(outbox::TEL, doc, s);
 }
 
 // ------------------------------------------------------------------ DRDY frames
@@ -548,8 +584,6 @@ static void pushFrames() {
   {
     StateLock l;
     if (!nFrames_) return;
-    uint32_t seq = store::nextSeq();
-    doc["seq"] = seq;
     uint32_t ts = (uint32_t)(frames_[0].atMs / 1000);
     doc["ts"] = ts;
     doc["tv"] = timekeep::valid() ? 1 : 0;
@@ -574,8 +608,7 @@ static void pushFrames() {
     addSessionProgress(doc);
   }
   String s;
-  serializeJson(doc, s);
-  outbox::push(outbox::TEL, doc["seq"].as<uint32_t>(), s);
+  queueItem(outbox::TEL, doc, s);
 }
 
 // ------------------------------------------------------------------ sensor
@@ -596,6 +629,7 @@ static void sensorFound() {
 }
 
 void begin() {
+  outLock_ = xSemaphoreCreateMutex();
 #if TAMPER_ENABLE
   pinMode(PIN_TAMPER, INPUT_PULLUP);
 #endif
@@ -728,7 +762,16 @@ static void readSensor() {
   }
   checkVoltage(ok, smp.v);
   if (!ok) return;
-  if (g.cfg.drdy) addFrame(smp);  // DRDY data mode: every window is recorded
+  if (g.cfg.drdy && !g.cfg.summary) addFrame(smp);  // DRDY data mode: every window is recorded
+  if (g.ac) {  // session summary (min / max / average)
+    float aT = 0, wT = 0;
+    for (uint8_t i = 0; i < g.nch; i++) aT += smp.a[i], wT += smp.w[i];
+    for (uint8_t sl = 0; sl < sessSlots(); sl++) {
+      if (!g.sess[sl].sid || g.sess[sl].ended) continue;
+      if (indep()) stats_[sl].add(smp.v, smp.a[sl], smp.w[sl]);
+      else stats_[sl].add(smp.v, aT, wT);
+    }
+  }
   for (uint8_t i = 0; i < g.nch; i++) {
     ChState &c = g.ch[i];
     float lim = g.cfg.ch[i].amp_max;
@@ -1070,10 +1113,11 @@ void task(void *) {
     // Normal mode: record a reading every read_s. DRDY mode: every window, packed once a second.
     // Either way the buffered readings are sent every report_s.
     uint32_t readMs, sendMs;
-    bool drdyMode;
+    bool drdyMode, summary;
     {
       StateLock l;
-      drdyMode = g.cfg.drdy;
+      summary = g.cfg.summary;  // "Core data only": readings only on request (Get Data Now)
+      drdyMode = g.cfg.drdy && !summary;
       sendMs = (uint32_t)g.cfg.report_s * 1000UL;
       readMs = g.cfg.read_ms ? g.cfg.read_ms : (uint32_t)(g.cfg.read_s ? g.cfg.read_s : g.cfg.report_s) * 1000UL;
     }
@@ -1088,7 +1132,7 @@ void task(void *) {
         sys::crumb(sys::CR_CONTROL, "telemetry");
         pushFrames();
       }
-    } else if (nowReq || millis() - lastReportMs_ >= readMs) {
+    } else if (nowReq || (!summary && millis() - lastReportMs_ >= readMs)) {
       lastReportMs_ = millis();
       sys::crumb(sys::CR_CONTROL, "telemetry");
       pushTelemetry();

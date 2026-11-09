@@ -245,3 +245,73 @@ def test_float_limit_from_meter_is_rounded(app, device):
     assert Session.query.filter_by(sid=2).one().kwh_max == 0.05
     with app.test_request_context():
         assert meter_summary(device, show_price=False)["kwh_max"] == 0.05
+
+
+def test_lost_session_end_is_closed_by_the_next_session(app, device):
+    """A meter runs one session at a time: a session whose session_end never arrived is closed when the
+    next one starts (end = that start), and a state message repairs older rows too."""
+    from app.models import Session
+    conn = FakeConn()
+    t = now() - 7200
+    ingest.handle(conn, device, {"t": "evt", "seq": 101, "ts": t, "tv": 1, "e": "session_start", "sid": 49, "max": 0.2})
+    # session_end of 49 lost; 50 starts an hour later (auto renew)
+    ingest.handle(conn, device, {"t": "evt", "seq": 103, "ts": t + 3600, "tv": 1, "e": "session_start", "sid": 50,
+                                 "auto": True, "max": 0.2})
+    s49 = Session.query.filter_by(sid=49).one()
+    assert s49.ended_at == t + 3600 and s49.end_reason == "next"
+    assert Session.query.filter_by(ended_at=None).count() == 1
+    # old stuck rows (from before this fix) are closed by the next state message
+    db.session.add(Session(device_fk=device.id, gen=device.pair_gen, sid=40, started_at=t - 9000))
+    db.session.commit()
+    ingest.handle(conn, device, {"t": "state", "relay": [{"i": 0, "on": True}],
+                                 "sess": {"sid": 50, "start": t + 3600, "kwh": "0.05", "max": 0.2, "status": "active"}})
+    assert [s.sid for s in Session.query.filter_by(ended_at=None).all()] == [50]
+
+
+def test_session_summary_and_selected_csv(app, admin):
+    """session_end carries min / max / avg ("sum"); the Sessions tab downloads the selected rows as a summary."""
+    from app.models import Device, Session
+    from .test_pairing import _code, _pair
+    assert _pair(admin, _code(admin)).status_code == 200
+    with app.app_context():
+        d = Device.query.first()
+        d.currency, d.price_per_kwh = "RM", 25
+        conn, t = FakeConn(), now() - 3600
+        ingest.handle(conn, d, {"t": "evt", "seq": 5, "ts": t, "tv": 1, "e": "session_start", "sid": 51, "max": 0.2})
+        ingest.handle(conn, d, {"t": "evt", "seq": 6, "ts": t + 600, "tv": 1, "e": "session_end", "sid": 51,
+                                "reason": "expired", "kwh": "0.1310",
+                                "sum": {"n": 600, "v": ["253.3", "259.7", "255.6"], "a": ["0.000", "1.156", "0.546"],
+                                        "w": ["0.0", "295.6", "135.2"]}})
+        ingest.handle(conn, d, {"t": "evt", "seq": 7, "ts": t + 600, "tv": 1, "e": "session_start", "sid": 52, "max": 0.2})
+        db.session.commit()
+        s51 = Session.query.filter_by(sid=51).one()
+        assert s51.stats == {"n": 600, "v": [253.3, 259.7, 255.6], "a": [0.0, 1.156, 0.546], "w": [0.0, 295.6, 135.2]}
+        ids, pk = f"{s51.id},{Session.query.filter_by(sid=52).one().id}", d.id
+    r = admin.get(f"/meters/{pk}/sessions/summary.csv?ids={ids}")
+    lines = r.get_data(as_text=True).strip().splitlines()
+    assert r.status_code == 200 and len(lines) == 3
+    assert lines[0].startswith("session,started_utc") and "W avg" in lines[0]
+    row = lines[1].split(",")
+    assert row[0] == "51" and "0:10:00" in row and "0.131" in row and "3.28" in row and "Time limit" in row and "135.2" in row
+    assert "Active" in lines[2]
+    page = admin.get(f"/meters/{pk}").get_data(as_text=True)
+    assert "Download selected summary" in page and "avg 135 W" in page
+
+
+def test_events_summary_and_core_data_flag(app, admin):
+    from app.models import Device, Incident
+    from app.services import devconfig
+    from .test_pairing import _code, _pair
+    assert _pair(admin, _code(admin)).status_code == 200
+    with app.app_context():
+        d = Device.query.first()
+        inc = Incident(device_fk=d.id, type="trip", started_at=now() - 120, ended_at=now() - 60, duration_s=60,
+                       detail={"a": 12.5, "limit": 10})
+        db.session.add(inc)
+        db.session.commit()
+        pk, iid = d.id, inc.id
+        cfg, errors = devconfig.parse_form({"report_s": "60", "read_s": "60", "sess_mode": "none", "daily_at": "00:00",
+                                             "kwh_max_0": "0", "amp_max_0": "0", "summary": "on"}, d)
+        assert not errors and devconfig.to_device(cfg, 2)["cfg"]["summary"] is True
+    lines = admin.get(f"/meters/{pk}/incidents/summary.csv?ids={iid}").get_data(as_text=True).strip().splitlines()
+    assert lines[0].startswith("type,started_utc") and "Power trip" in lines[1] and "0:01:00" in lines[1]

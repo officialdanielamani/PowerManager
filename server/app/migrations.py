@@ -91,6 +91,8 @@ def run():
 
     # v0.9: humidity of SHT sensors
     _add_column("temperature", "rh FLOAT")
+    # v0.9.1: session summary (min / max / avg) from the meter
+    _add_column("meter_session", "stats JSON")
 
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:

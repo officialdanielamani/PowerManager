@@ -183,6 +183,8 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch. With Tamper Protection on, `tamper_open` carries `action` |
 | `sensor_error` / `sensor_ok` | No valid reading for `sensor.timeout_s`: `{"kind": "no_reply"\|"bad", "after_s": 10, "action": "hold"}`; `sensor_ok` = first valid reading again |
+| `session_end` summary | Firmware PZEM 0.7.1 / rbAmp 0.9.1 add `"sum": {"n": 3600, "v": [min, max, avg], "a": [...], "w": [...]}` (shared multi-channel session: total current / power of all channels) |
+| `quota_cleared` | The kWh limit was raised (or removed) while the session was held at the old limit: the session continues (`kwh`, `max`, `ch`?) |
 | `temp_high` / `temp_ok` | A temperature sensor went above `temp.max`: `i` (sensor, 0 = T1), `c` (°C), `max`, `action`; `temp_ok` = every sensor back 5 °C below the limit (`i`, `c`), or the limit was switched off (`disabled`) |
 | `voltage_out` / `voltage_ok` | Voltage left / returned to the operating range: `v`, `min`, `max`, `dir` (`low`/`high`), `action` |
 | `ac_lost` / `ac_restored` | V < 50 V or PZEM not responding for 3 reads / back to normal |
@@ -258,6 +260,7 @@ The server sends the whole config every time (no partial updates).
 | `sensor.action` | `run` / `hold` / `end` | `hold` | **run** = event only; **hold** = relay OFF until readings return (`sensor_ok`); **end** = end the session (reason `sensor`) |
 | `temp.max` | 0–125 °C | 0 | Over-temperature (any temperature sensor); 0 = off |
 | `aux` | list | `[]` | AUX relays: name + automation (manual / schedule / event), see docs/multichannel.md § AUX relays |
+| `summary` | bool | false | "Core data only": no interval readings (telemetry only on Get Data Now); each session is reported by its `session_end` summary |
 | `tz_min` | −840…840 | 0 | UTC offset of the display time zone in minutes (AUX schedules run in local time) |
 | `temp.action` | `run` / `hold` / `end` | `hold` | **run** = event only; **hold** = relay(s) OFF until it cools down (`temp_ok`); **end** = end the session (reason `temp`) |
 | `ch[].amp_max` | 0–100 | 0 | 0 = disabled; must not exceed the sensor/relay rating set in caps |

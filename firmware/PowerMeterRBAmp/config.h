@@ -2,7 +2,7 @@
 // ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
 #pragma once
 
-#define FW_VERSION "0.9.0"
+#define FW_VERSION "0.9.1"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 

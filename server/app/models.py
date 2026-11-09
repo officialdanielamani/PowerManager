@@ -262,6 +262,8 @@ class Session(db.Model):
     # Electricity price locked in when the session starts (Settings -> Server -> Price).
     price_per_kwh = db.Column(db.Float)
     currency = db.Column(db.String(8))
+    # Summary from the meter at session end: {"n", "v": [min, max, avg], "a": [...], "w": [...]}
+    stats = db.Column(db.JSON)
 
     def cost(self, fallback_price=None):
         price = self.price_per_kwh if self.price_per_kwh is not None else fallback_price

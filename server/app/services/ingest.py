@@ -506,6 +506,40 @@ def _apply_state(device, state):
                 s.started_at = s.started_at or int(sess["start"])
             s.kwh_used = _f(sess.get("kwh")) or 0.0
             s.kwh_max = _r4(_f(sess.get("max"))) or 0.0
+            if s.ended_at is None:  # the meter's current session: older open ones of this slot are over
+                close_older_sessions(device, s, s.started_at)
+
+
+def _session_stats(raw):
+    out = {}
+    try:
+        out["n"] = int(raw.get("n") or 0)
+    except (TypeError, ValueError):
+        out["n"] = 0
+    for k in ("v", "a", "w"):
+        vals = raw.get(k)
+        if isinstance(vals, list) and len(vals) == 3:
+            nums = [_f(x) for x in vals]
+            if all(x is not None for x in nums):
+                out[k] = nums
+    return out
+
+
+def close_older_sessions(device, cur, at):
+    """A meter runs one session per slot (the whole meter, or one channel in independent mode). When session N
+    starts, an older one of the same slot that is still open lost its session_end on the way: close it at the
+    start of N (its kWh stays the last value received)."""
+    q = Session.query.filter(Session.device_fk == device.id, Session.gen == device.pair_gen,
+                             Session.sid < cur.sid, Session.ended_at.is_(None))
+    q = q.filter(Session.ch.is_(None)) if cur.ch is None else q.filter(Session.ch == cur.ch)
+    n = 0
+    for old in q.all():
+        old.ended_at = max(at or now(), old.started_at or 0)
+        old.end_reason = "next"
+        n += 1
+    if n:
+        log.info("%s: closed %d session(s) without a session_end before session %s", device.device_id, n, cur.sid)
+    return n
 
 
 def _session(device, sid, ch=None, authoritative=False):
@@ -643,6 +677,7 @@ def process_event(device, ev):
             if price is not None and s.price_per_kwh is None:
                 s.price_per_kwh, s.currency = price, cur
             s.kwh_max = _r4(_f(d.get("max"))) or s.kwh_max
+            close_older_sessions(device, s, ev.ts)
         first = sid == 1 or (device.is_mc and isinstance(sid, int) and sid <= devconfig.channel_count(device)
                              and not d.get("auto") and Session.query.filter_by(device_fk=device.id, gen=device.pair_gen)
                              .filter(Session.ended_at.isnot(None)).count() == 0)
@@ -658,6 +693,8 @@ def process_event(device, ev):
                 s.end_reason = str(d.get("reason", ""))[:10] or None
             if d.get("kwh") is not None:  # always the raw kWh
                 s.kwh_used = _f(d.get("kwh")) or 0.0
+            if isinstance(d.get("sum"), dict):  # min / max / avg of the session (firmware 0.7.1 / 0.9.1+)
+                s.stats = _session_stats(d["sum"])
     elif e == "server_back":
         last_off = (Incident.query
                     .filter_by(device_fk=device.id, type="offline")

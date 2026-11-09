@@ -95,6 +95,7 @@ def default_cfg(n_channels=1):
         "tare_limits": True,       # the meter uses tared values for the kWh limit and max current
         "sensor_to_s": SENSOR_TIMEOUT_DEFAULT,  # no valid reading for this long = sensor error; 0 = off
         "sensor_action": DEFAULT_PROTECT_ACTION,
+        "summary": False,          # "Core data only": no interval readings, only the session summary
         "temp_max": 0.0,           # over-temperature (any DS18B20 sensor); 0 = off
         "temp_action": DEFAULT_PROTECT_ACTION,
     }
@@ -316,6 +317,7 @@ def parse_form(form, device):
         errors.append("Sensor timeout: at least 3 s (or 0 = off)")
     a = form.get("sensor_action", DEFAULT_PROTECT_ACTION)
     cfg["sensor_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
+    cfg["summary"] = form.get("summary") == "on"
     cfg["temp_max"] = _num(form, "temp_max", float, 0, 125, "Max temperature", errors, 0.0)
     a = form.get("temp_action", DEFAULT_PROTECT_ACTION)
     cfg["temp_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
@@ -355,6 +357,7 @@ def to_device(cfg, ver):
             "sensor": {"timeout_s": int(cfg.get("sensor_to_s", SENSOR_TIMEOUT_DEFAULT)),
                        "action": cfg.get("sensor_action", DEFAULT_PROTECT_ACTION)},
             "temp": {"max": float(cfg.get("temp_max", 0) or 0), "action": cfg.get("temp_action", DEFAULT_PROTECT_ACTION)},
+            "summary": bool(cfg.get("summary")),
             "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
                     "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
                     "sess": _sess_doc(c)} for i, c in enumerate(cfg.get("ch", []))],
@@ -378,6 +381,7 @@ def to_device(cfg, ver):
             "sensor": {"timeout_s": int(cfg.get("sensor_to_s", SENSOR_TIMEOUT_DEFAULT)),
                        "action": cfg.get("sensor_action", DEFAULT_PROTECT_ACTION)},
             "temp": {"max": float(cfg.get("temp_max", 0) or 0), "action": cfg.get("temp_action", DEFAULT_PROTECT_ACTION)},
+            "summary": bool(cfg.get("summary")),
             "ch": [
                 {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_action": kwh_action(c),
                  # for meters on firmware 0.1.x that only know kwh_end ("hold" acts like "end" there)
