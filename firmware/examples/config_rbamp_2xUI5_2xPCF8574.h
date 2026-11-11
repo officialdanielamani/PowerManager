@@ -95,15 +95,22 @@
 //   -> relays 6, 7, 8 and 12..16 are AUX relays.
 
 // ---------------------------------------------------------------- temperature / humidity
-// Sensors are numbered T1, T2 ...: first the SHT sensors in the order below, then the DS18B20s sorted by
+// Numbering: T1, T2 ... = first the SHT sensors (in the order of SHT_SENSORS), then the DS18B20s sorted by
 // serial number (a sensor keeps its number over a restart). Both kinds can be used together.
-// SHT (TEMP_SHT 1): one entry per sensor, { type, I2C address }:
-//   SHT_20 (SHT20 / HTU21D, 0x40)   SHT_3X (SHT30/31/35, 0x44 or 0x45)   SHT_4X (SHT40/41/45, 0x44 / 0x45 / 0x46)
+//
+// SHT sensors (TEMP_SHT 1): on the I2C bus (PIN_I2C_SDA / PIN_I2C_SCL, shared with the other I2C parts),
+// no extra pin. One entry per sensor, { type, I2C address }:
+//   SHT_20  SHT20 / HTU21D          0x40
+//   SHT_3X  SHT30 / SHT31 / SHT35   0x44 (ADDR pin to GND) or 0x45 (ADDR to VCC)
+//   SHT_4X  SHT40 / SHT41 / SHT45   0x44 (0x45 / 0x46 variants)
+// e.g. one SHT30:  { {SHT_3X, 0x44} }     two:  { {SHT_3X, 0x44}, {SHT_3X, 0x45} }
 #define SHT_SENSORS { {SHT_4X, 0x44} }
-// DS18B20 (TEMP_DS18B20 1): on one 1-Wire pin with a 4.7 k pull-up to 3.3 V, up to TEMP_MAX_SENSORS.
+//
+// DS18B20 (TEMP_DS18B20 1): on their own 1-Wire pin PIN_TEMP with a 4.7 k pull-up to 3.3 V (several sensors
+// on the same wire). PIN_TEMP is not used when TEMP_DS18B20 is 0.
 #define PIN_TEMP 6
-#define TEMP_MAX_SENSORS 4
-#define TEMP_READ_MS 10000        // read (and record) the temperatures this often
+#define TEMP_MAX_SENSORS 4        // DS18B20s at most (SHT sensors: as many as listed above)
+#define TEMP_READ_MS 10000        // read (and record) the sensors (SHT and DS18B20) this often
 #define TEMP_HYST 5.0f            // over-temperature clears this many degC below the limit
 
 // ---------------------------------------------------------------- battery (optional)
