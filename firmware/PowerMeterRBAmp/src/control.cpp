@@ -635,8 +635,10 @@ void begin() {
 #endif
   relays::begin();  // all relays OFF first
   drdySem_ = xSemaphoreCreateBinary();
+#if PIN_DRDY >= 0
   pinMode(PIN_DRDY, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_DRDY), onDrdy, FALLING);
+#endif
   {
     StateLock l;
 #if TAMPER_ENABLE

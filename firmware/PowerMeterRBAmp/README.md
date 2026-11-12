@@ -17,7 +17,7 @@ by Markus Sattler; **ESP32S3 Dev Module**, USB CDC On Boot Enabled, Flash 4 MB, 
 | Function | GPIO / bus |
 |----------|------------|
 | I²C SDA / SCL (rbAmp, DS3231, relay board) | 8 / 9, **50 kHz** |
-| rbAmp DRDY | 5 (internal pull-up; add 10 kΩ to 3.3 V on long wires) |
+| rbAmp DRDY (board 1 only; optional) | 5 (internal pull-up; add 10 kΩ to 3.3 V on long wires). `PIN_DRDY -1` = not wired: Normal mode only, the server hides the DRDY option |
 | Tamper switch (NC, other side to GND) | 4 |
 | WS2812 data | 48 |
 | Battery sense (optional, `BATTERY_ENABLE 1`) | 1, through a divider |

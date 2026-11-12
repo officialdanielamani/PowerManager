@@ -15,7 +15,8 @@
 #define PIN_I2C_SDA 8       // shared I2C bus: rbAmp, DS3231, relay board
 #define PIN_I2C_SCL 9
 #define I2C_FREQ_HZ 50000   // rbAmp recommendation for ESP32 hosts (do not use 400 kHz)
-#define PIN_DRDY 5           // rbAmp DRDY (open-drain, internal pull-up used; add 10 k to 3.3 V for long wires)
+#define PIN_DRDY 5           // rbAmp DRDY of board 1 (open-drain, internal pull-up; add 10 k to 3.3 V for long wires)
+                             // -1 = DRDY not wired: Normal mode only (the module is read once a second)
 #define PIN_TAMPER 4        // NC switch to GND; open = panel open (INPUT_PULLUP)
 #define PIN_LED 48          // WS2812 RGB LED (onboard on most Super Mini boards)
 #define PIN_BOOT_BUTTON 0   // hold 10 s = factory reset
