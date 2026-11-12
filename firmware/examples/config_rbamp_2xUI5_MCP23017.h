@@ -1,6 +1,7 @@
 // EXAMPLE config.h for PowerMeterRBAmp: copy it over PowerMeterRBAmp/config.h (keep your pins / Wi-Fi settings).
 //   2 x rbAmp UI5 (5 current inputs each, SCT-013-030 30 A / 1 V clamps)  -> 10 channels
-//   2 x PCF8574 (16 outputs): P0-P4 of each drive the 10 SSRs, P5-P7 of each = 6 AUX relays
+//   1 x MCP23017 (16 push-pull outputs): GPA0-GPB1 drive the 10 SSRs (SSR+ to the pin, SSR- to GND),
+//   GPB2-GPB7 = 6 AUX relays
 //   DS3231 RTC, 2 x DS18B20 (T1, T2: meter-wide, not tied to a channel), tamper limit switch
 // PowerMeter MC (multi-channel AC) firmware configuration. See docs/multichannel.md.
 // ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
@@ -54,6 +55,8 @@
 
 // ---------------------------------------------------------------- relay outputs
 // One entry per relay board / pin group: { driver, I2C address, relays used, active high }.
+//   RELAY_MCP23017 MCP23017 I/O expander, 16 push-pull outputs GPA0-7 = 0-7, GPB0-7 = 8-15 (0x20-0x27); active high 1
+//                  (recommended for SSRs: each output sources / sinks up to 25 mA, 125 mA for the whole chip)
 //   RELAY_XL9535   XL9535 / TCA9535 relay board, up to 16 outputs (0x20-0x27, A0-A2 jumpers); active high 1
 //   RELAY_PCF8574  PCF8574 (0x20-0x27) / PCF8574A (0x38-0x3F), up to 8 outputs; with low-side SSRs usually 0
 //   RELAY_GPIO     ESP32 pins listed in RELAY_GPIO_PINS (address 0)
@@ -62,9 +65,9 @@
 //   { {RELAY_PCF8574, 0x20, 5, 0}, {RELAY_PCF8574, 0x21, 7, 0} }   PCF8574 (0-4) + PCF8574 (0-6) = 12 relays
 //   { {RELAY_XL9535, 0x20, 2, 1}, {RELAY_XL9535, 0x21, 8, 1} }     XL9535 2-relay + 8-relay board = 10 relays
 //   { {RELAY_GPIO, 0, 2, 1} } with RELAY_GPIO_PINS { 10, 11 }      two SSRs on GPIO 10 / 11
-// Both PCF8574 with all 8 outputs: relays 1-8 = board 0x20 P0-P7, relays 9-16 = board 0x21 P0-P7.
-// Active low (0) for SSRs / relay modules switched to GND by the PCF8574 (it can sink, not source, current).
-#define RELAY_BOARDS { {RELAY_PCF8574, 0x20, 8, 0}, {RELAY_PCF8574, 0x21, 8, 0} }
+//   { {RELAY_MCP23017, 0x20, 16, 1} }                               one MCP23017: 16 outputs (e.g. 10 SSRs + 6 AUX)
+// One MCP23017 at 0x20 (A0-A2 to GND), all 16 outputs, active high: relays 1-8 = GPA0-7, 9-16 = GPB0-7.
+#define RELAY_BOARDS { {RELAY_MCP23017, 0x20, 16, 1} }
 #define RELAY_GPIO_PINS { -1 }      // pins for RELAY_GPIO entries, in order (-1 = none)
 
 // ---------------------------------------------------------------- channels: what is wired where
@@ -75,18 +78,18 @@
 // Voltage comes from the first board that has a voltage input (UI* variants).
 #define CHANNELS { \
   /* board  input  clamp     relay */ \
-  {  1,     1,     SCT_30A,  1 },   /* CH1  = module 1 input 1, SSR on PCF8574 0x20 P0 */ \
-  {  1,     2,     SCT_30A,  2 },   /* CH2 */ \
-  {  1,     3,     SCT_30A,  3 },   /* CH3 */ \
-  {  1,     4,     SCT_30A,  4 },   /* CH4 */ \
-  {  1,     5,     SCT_30A,  5 },   /* CH5  = 0x20 P4 */ \
-  {  2,     1,     SCT_30A,  9 },   /* CH6  = module 2 input 1, SSR on PCF8574 0x21 P0 */ \
-  {  2,     2,     SCT_30A,  10 },  /* CH7 */ \
-  {  2,     3,     SCT_30A,  11 },  /* CH8 */ \
-  {  2,     4,     SCT_30A,  12 },  /* CH9 */ \
-  {  2,     5,     SCT_30A,  13 },  /* CH10 = 0x21 P4 */ \
+  {  1,     1,     SCT_30A,  1 },   /* CH1  = module 1 input 1, SSR on GPA0 */ \
+  {  1,     2,     SCT_30A,  2 },   /* CH2  = GPA1 */ \
+  {  1,     3,     SCT_30A,  3 },   /* CH3  = GPA2 */ \
+  {  1,     4,     SCT_30A,  4 },   /* CH4  = GPA3 */ \
+  {  1,     5,     SCT_30A,  5 },   /* CH5  = GPA4 */ \
+  {  2,     1,     SCT_30A,  6 },   /* CH6  = module 2 input 1, SSR on GPA5 */ \
+  {  2,     2,     SCT_30A,  7 },   /* CH7  = GPA6 */ \
+  {  2,     3,     SCT_30A,  8 },   /* CH8  = GPA7 */ \
+  {  2,     4,     SCT_30A,  9 },   /* CH9  = GPB0 */ \
+  {  2,     5,     SCT_30A,  10 },  /* CH10 = GPB1 */ \
 }
-// -> AUX relays (automation on the server): AUX1-3 = relays 6-8 (0x20 P5-P7), AUX4-6 = relays 14-16 (0x21 P5-P7)
+// -> AUX relays (automation on the server): AUX1-6 = relays 11-16 = GPB2-GPB7
 // Example, rbAmp UI5 (0x50) + rbAmp I7 (0x51), 8 channels, two XL9535 8-relay boards (0x20, 0x21):
 //   #define RBAMP_BOARDS { 0x50, 0x51 }
 //   #define RELAY_BOARDS { {RELAY_XL9535, 0x20, 8, 1}, {RELAY_XL9535, 0x21, 8, 1} }

@@ -50,6 +50,8 @@
 
 // ---------------------------------------------------------------- relay outputs
 // One entry per relay board / pin group: { driver, I2C address, relays used, active high }.
+//   RELAY_MCP23017 MCP23017 I/O expander, 16 push-pull outputs GPA0-7 = 0-7, GPB0-7 = 8-15 (0x20-0x27); active high 1
+//                  (recommended for SSRs: each output sources / sinks up to 25 mA, 125 mA for the whole chip)
 //   RELAY_XL9535   XL9535 / TCA9535 relay board, up to 16 outputs (0x20-0x27, A0-A2 jumpers); active high 1
 //   RELAY_PCF8574  PCF8574 (0x20-0x27) / PCF8574A (0x38-0x3F), up to 8 outputs; with low-side SSRs usually 0
 //   RELAY_GPIO     ESP32 pins listed in RELAY_GPIO_PINS (address 0)
@@ -58,6 +60,7 @@
 //   { {RELAY_PCF8574, 0x20, 5, 0}, {RELAY_PCF8574, 0x21, 7, 0} }   PCF8574 (0-4) + PCF8574 (0-6) = 12 relays
 //   { {RELAY_XL9535, 0x20, 2, 1}, {RELAY_XL9535, 0x21, 8, 1} }     XL9535 2-relay + 8-relay board = 10 relays
 //   { {RELAY_GPIO, 0, 2, 1} } with RELAY_GPIO_PINS { 10, 11 }      two SSRs on GPIO 10 / 11
+//   { {RELAY_MCP23017, 0x20, 16, 1} }                               one MCP23017: 16 outputs (e.g. 10 SSRs + 6 AUX)
 #define RELAY_BOARDS { {RELAY_XL9535, 0x20, 2, 1} }
 #define RELAY_GPIO_PINS { -1 }      // pins for RELAY_GPIO entries, in order (-1 = none)
 

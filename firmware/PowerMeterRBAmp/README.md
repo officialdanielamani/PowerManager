@@ -51,7 +51,7 @@ Everything about the hardware is in a few tables at the top:
 | Setting | Meaning |
 |---|---|
 | `RBAMP_BOARDS` | I²C address of every rbAmp module (1 to 8). Board 1 = first entry |
-| `RELAY_BOARDS` | every relay board / pin group: `RELAY_XL9535` (up to 16 outputs), `RELAY_PCF8574` (up to 8) or `RELAY_GPIO` (pins in `RELAY_GPIO_PINS`), address, outputs used (from output 0), active high (XL9535: 1; PCF8574 with low-side SSRs: usually 0). Relays are numbered across the entries |
+| `RELAY_BOARDS` | every relay board / pin group: `RELAY_MCP23017` (16 push-pull outputs, recommended for SSRs), `RELAY_XL9535` (up to 16 outputs), `RELAY_PCF8574` (up to 8) or `RELAY_GPIO` (pins in `RELAY_GPIO_PINS`), address, outputs used (from output 0), active high (XL9535: 1; PCF8574 with low-side SSRs: usually 0). Relays are numbered across the entries |
 | `CHANNELS` | one line per channel, in order CH1, CH2 … (up to 16): rbAmp board, its current input (1–7), clamp model, relay (0 = none) |
 | clamp models | `SCT_5A`, `SCT_10A`, `SCT_20A`, `SCT_30A`, `SCT_50A`, `SCT_60A`, `SCT_100A`, or `SCT_KEEP` (CT-series modules with factory-paired clamps) |
 | AUX relays | relays no channel uses: manual ON / OFF from the server, not metered |
@@ -59,8 +59,8 @@ Everything about the hardware is in a few tables at the top:
 | `SHT_SENSORS` | SHT20 / SHT3x / SHT4x sensors on the I²C bus: `{ {SHT_4X, 0x44} }` (temperature + humidity) |
 | `PIN_TEMP`, `TEMP_MAX_SENSORS`, `TEMP_READ_MS` | DS18B20 pin, how many DS18B20s, read interval. Numbering: the SHTs first, then the DS18B20s by serial number |
 
-Example for 2 × rbAmp UI5 + 2 × PCF8574 (10 SSRs + 6 AUX relays) + DS3231 + 2 × DS18B20 + tamper switch:
-[`../examples/config_rbamp_2xUI5_2xPCF8574.h`](../examples/config_rbamp_2xUI5_2xPCF8574.h).
+Example for 2 × rbAmp UI5 + 1 × MCP23017 (10 SSRs + 6 AUX relays) + DS3231 + 2 × DS18B20 + tamper switch:
+[`../examples/config_rbamp_2xUI5_MCP23017.h`](../examples/config_rbamp_2xUI5_MCP23017.h).
 
 Mistakes in the tables (a board number that does not exist, the same input or relay used twice) stop the
 **compile** with a clear message. At start-up the meter checks the tables against the modules it finds (e.g.

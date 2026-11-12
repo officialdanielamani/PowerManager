@@ -54,7 +54,7 @@ If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** 
 | DS18B20 temperature sensor(s) (optional, set `TEMP_DS18B20 1`) | 10, 4.7 kΩ pull-up to 3.3 V |
 
 **Relay outputs** (both sketches, `RELAY_BOARDS` in `config.h`): ESP32 pins (`RELAY_GPIO` + `RELAY_GPIO_PINS`),
-PCF8574 (up to 8 outputs) and XL9535 (up to 16) boards, mixed, e.g. `{ {RELAY_GPIO, 0, 1, 1}, {RELAY_PCF8574, 0x20, 6, 0} }`
+**MCP23017** (16 push-pull outputs, recommended for SSRs), PCF8574 (up to 8 outputs) and XL9535 (up to 16) boards, mixed, e.g. `{ {RELAY_GPIO, 0, 1, 1}, {RELAY_PCF8574, 0x20, 6, 0} }`
 = an SSR on GPIO 7 plus 6 outputs of a PCF8574, or PCF8574 (0-4) + PCF8574 (0-6) = `{ {RELAY_PCF8574, 0x20, 5, 0},
 {RELAY_PCF8574, 0x21, 7, 0} }`. Relays are numbered across the entries. On the PZEM meter `CHANNEL_RELAY` (default 1)
 switches the measured line; every other relay is an **AUX relay** with manual / schedule / event control from the

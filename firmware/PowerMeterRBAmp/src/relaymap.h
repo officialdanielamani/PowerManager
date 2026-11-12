@@ -7,6 +7,7 @@
 #define RELAY_PCF8574 1  // PCF8574 / PCF8574A I/O expander (up to 8 outputs)
 #define RELAY_XL9535 2   // XL9535 / TCA9535 relay board (up to 16 outputs: port 0 = 1..8, port 1 = 9..16)
 #define RELAY_GPIO 3     // ESP32 pins, taken in order from RELAY_GPIO_PINS (the address is not used)
+#define RELAY_MCP23017 4 // MCP23017 I/O expander, 16 push-pull outputs: GPA0..7 = 1..8, GPB0..7 = 9..16
 
 #ifndef RELAY_GPIO_PINS
 #define RELAY_GPIO_PINS { -1 }
@@ -15,9 +16,9 @@
 namespace hw {
 
 struct RelayBoard {
-  uint8_t driver;   // RELAY_PCF8574 / RELAY_XL9535 / RELAY_GPIO
+  uint8_t driver;   // RELAY_MCP23017 / RELAY_PCF8574 / RELAY_XL9535 / RELAY_GPIO
   uint8_t address;  // I2C address (RELAY_GPIO: 0)
-  uint8_t relays;   // outputs used, from output 0 (PCF8574 0..7, XL9535 0..15, GPIO: pins from RELAY_GPIO_PINS)
+  uint8_t relays;   // outputs used, from output 0 (MCP23017 / XL9535 0..15, PCF8574 0..7, GPIO: RELAY_GPIO_PINS)
   uint8_t activeHigh;
 };
 
@@ -36,12 +37,13 @@ constexpr bool boardsValid(uint8_t i = 0) {
   return i >= RELAY_BOARD_COUNT ? true
          : (RELAY_BOARD[i].driver == RELAY_PCF8574 ? RELAY_BOARD[i].relays <= 8
             : RELAY_BOARD[i].driver == RELAY_XL9535 ? RELAY_BOARD[i].relays <= 16
+            : RELAY_BOARD[i].driver == RELAY_MCP23017 ? RELAY_BOARD[i].relays <= 16
             : RELAY_BOARD[i].driver == RELAY_GPIO) && boardsValid(i + 1);
 }
 static constexpr uint8_t RELAYS = sumRelays();  // all relay outputs
 
 static_assert(RELAYS <= 32, "RELAY_BOARDS: at most 32 relays in total");
-static_assert(boardsValid(), "RELAY_BOARDS: driver must be RELAY_PCF8574 (up to 8), RELAY_XL9535 (up to 16) or RELAY_GPIO");
+static_assert(boardsValid(), "RELAY_BOARDS: driver must be RELAY_MCP23017 (up to 16), RELAY_XL9535 (up to 16), RELAY_PCF8574 (up to 8) or RELAY_GPIO");
 static_assert(sumGpio() <= RELAY_GPIO_COUNT, "RELAY_GPIO: list a pin in RELAY_GPIO_PINS for every GPIO relay");
 
 }  // namespace hw
