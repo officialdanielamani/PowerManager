@@ -144,3 +144,21 @@ The full table is in `docs/firmware.md` §9.
 Meters can reach the server through a nearby meter that is on Wi-Fi (ESP-NOW). Same firmware; default role **Auto**
 (Wi-Fi first, mesh after 90 s without Wi-Fi, online meters relay for others). Settings → Mesh on the meter's page, or
 *Use mesh only* during setup. Details and a test plan: [`../docs/mesh.md`](../docs/mesh.md).
+
+## 7. Link to the server: WebSocket and / or MQTT
+
+`config.h`:
+
+```cpp
+#define NET_WEBSOCKET 1   // direct WebSocket to the server
+#define NET_MQTT 1        // through an MQTT broker (MQTT over WebSocket, ws:// or wss://, e.g. behind Cloudflare)
+```
+
+Keep at least one. With both, the meter uses MQTT when the server gave it a broker (at pairing, or later from
+*Settings → MQTT* / the meter's Configuration page) and falls back to the WebSocket when the broker is unreachable
+for 5 minutes (`MQTT_FALLBACK_MS`). `NET_MQTT 0` saves about 18 KB of flash. `NET_WEBSOCKET 0` saves almost nothing
+(MQTT uses the same WebSocket library) and removes the fallback. No extra library is needed. Protocol:
+[`../docs/protocol.md`](../docs/protocol.md) §7.
+
+PC test of the MQTT client (real broker + real server code, no ESP32):
+`python3 tools/mqttlink_test/run.py <ArduinoJson/src>` (needs `pip install amqtt paho-mqtt`, g++, OpenSSL headers).

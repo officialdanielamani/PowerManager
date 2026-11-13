@@ -137,6 +137,9 @@ class Device(db.Model):
     price_per_kwh = db.Column(db.Float, default=0.25)
     # Negative power (e.g. a clamp fitted the wrong way round) is recorded as 0.
     positive_only = db.Column(db.Boolean, nullable=False, default=True)
+    # Connection choices made on the server: {"mqtt": "server" | "off" | "custom", host, port, tls, path,
+    # user, pass, prefix} (custom broker). The meter gets them with the set_mqtt command.
+    net = db.Column(db.JSON, nullable=False, default=dict)
     # Last answer to "Get meter info".
     last_info = db.Column(db.JSON, nullable=False, default=dict)
     last_info_at = db.Column(db.Integer)

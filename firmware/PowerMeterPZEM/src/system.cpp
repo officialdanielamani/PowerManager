@@ -1,6 +1,7 @@
 #include "system.h"
 
 #include "auxrelay.h"
+#include "mqttlink.h"
 
 #include <esp_attr.h>
 #include <esp_idf_version.h>
@@ -24,6 +25,7 @@ void factoryReset(const char *why) {
   outbox::clear();
   store::factoryReset();
   auxrelay::wipe();
+  mqttlink::wipe();
   delay(1500);  // let the LED show white flashing
   ESP.restart();
 }

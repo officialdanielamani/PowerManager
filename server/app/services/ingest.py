@@ -459,7 +459,7 @@ def h_info(conn, device, msg):
     keep = ("ip", "ssid", "rssi", "mac", "heap", "heap_min", "psram", "psram_free", "fw", "hw", "hw_info",
             "bat_v", "bat_pct", "uptime", "boot", "core", "chip", "flash", "outbox", "time_src",
             "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "sensor_detail", "relay_board", "clamps",
-            "sensor_boards", "temp_sensors")
+            "sensor_boards", "temp_sensors", "transport", "mqtt")
     device.last_info = {k: msg[k] for k in keep if k in msg}
     device.last_info_at = now()
 
@@ -631,6 +631,12 @@ def process_event(device, ev):
         notify.notify(device, "sensor_error", f"Sensor error: no valid reading for {d.get('after_s', '?')} s, {why}: {what}")
     elif e == "sensor_ok":
         incidents.close_incident(device.id, "sensor", ev.ts, event=ev, estimated=est)
+    elif e == "wifi_change":  # answer to the server's set_wifi command
+        if d.get("ok"):
+            notify.notify(device, "meter_status", f"Wi-Fi changed: the meter is now on '{d.get('ssid', '?')}'")
+        else:
+            notify.notify(device, "meter_status",
+                          f"Wi-Fi change failed (could not connect): the meter stays on '{d.get('ssid', '?')}'")
     elif e == "temp_high":
         incidents.open_incident(device.id, "temp", ev.ts, event=ev, estimated=est,
                                 detail={"i": d.get("i"), "c": d.get("c"), "max": d.get("max"), "action": d.get("action")})

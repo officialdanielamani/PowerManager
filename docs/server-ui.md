@@ -209,3 +209,23 @@ docs/multichannel.md § AUX relays.
   starts (end reason *Next session started*), so a meter never shows more than one running session per slot.
 - Raising the kWh limit while a session is held at the old limit ("Off relay, but session continue") lets that session
   continue at once.
+
+## MQTT
+
+- **Settings → MQTT** (admin): enable, broker host / port / TLS / transport (WebSocket or TCP) / path / login / topic
+  prefix for the *server*, and "How the meters connect" (public host / port / TLS / path) when the meters must use a
+  different address than the server (e.g. server → broker inside Docker over TCP, meters → `wss://` through
+  Cloudflare). *Test connection* tries the values in the form without saving them. The badge shows the live state.
+- Saving sends the broker to every paired meter that supports MQTT; new meters get it while pairing (auto link).
+- **Configure Meter → Connection** (admin / manager; meters with MQTT firmware): *Change Wi-Fi* (SSID typed by hand +
+  password; the meter keeps the old Wi-Fi if the new one does not connect, and a Meter status notification tells the
+  result) and *MQTT*: server broker / WebSocket only / own broker for this meter.
+- **Meter Info** shows *Link to server* (MQTT or WebSocket).
+- The broker login alone is not enough to read as or control a meter: messages are signed with the meter's key
+  (docs/protocol.md §7).
+
+## Get Data Now: auto refresh
+
+While the Info page is open and the meter is online, a fresh reading is requested when the last one is older than
+about a minute, and the page updates as soon as it arrives. These readings are stored in Historical data like any
+other, also with *Core data only*.

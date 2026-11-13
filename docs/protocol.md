@@ -296,3 +296,54 @@ See [mesh.md](mesh.md). Extra messages on a **gateway's** WebSocket:
 
 `h` = first 128 bits (hex) of HMAC-SHA256(link_key, `"<d>|<n>|<m>"`). The server drops messages with a bad signature or a counter
 that is not higher than the last one; the leaf does the same for downlink messages.
+
+## 7. MQTT link (optional)
+
+The same protocol can travel through an MQTT broker instead of the `/ws/device` WebSocket (firmware `NET_MQTT`,
+server *Settings → MQTT*). Meters always connect with **MQTT over WebSocket** (`ws://` / `wss://`, sub-protocol
+`mqtt`, e.g. behind Cloudflare); the server connects with MQTT over WebSocket or plain TCP. MQTT 3.1.1, QoS 0 (the
+protocol has its own acknowledgements and resends).
+
+| Topic | Direction | Content |
+|---|---|---|
+| `<prefix>/<DEVICE_ID>/up` | meter → server | one signed protocol message |
+| `<prefix>/<DEVICE_ID>/down` | server → meter | one signed protocol message |
+| `<prefix>/<DEVICE_ID>/status` | meter → server | `online` / `offline`, retained (`offline` is the meter's last will) |
+
+`<prefix>` defaults to `powermanager`. Every message on `up` / `down` is wrapped like a mesh message:
+
+```json
+{"n": 1234, "h": "<32 hex>", "m": "{\"t\":\"hello\", ...}"}
+```
+
+`h` = first 128 bits (hex) of HMAC-SHA256(link_key, `"<DEVICE_ID>|<n>|<m>"`), with the meter's `link_key` from pairing.
+Somebody who only has the broker login can therefore neither fake a meter nor command one.
+
+- Uplink `n` is the meter's stored counter; the server drops anything not higher than the last accepted one.
+- Downlink `n` is the server clock in ms; the meter drops anything not higher than the last one, and (with a valid
+  clock) anything older than 10 minutes.
+- There is no token in `hello`: the signature is the authentication. A disabled / unknown meter gets `bye`.
+- `{"t":"rehello"}` (server → meter): the server has no session for this meter (e.g. it restarted); the meter sends
+  `hello` again.
+- A meter silent for 75 s, or whose `status` becomes `offline`, is shown offline.
+
+**Auto link.** The pairing answer carries the broker for the meter (or `null`):
+
+```json
+"mqtt": {"enabled": true, "host": "mqtt.example.com", "port": 443, "tls": true, "path": "/",
+         "user": "", "pass": "", "prefix": "powermanager"}
+```
+
+**Fallback.** If the broker cannot be reached for `MQTT_FALLBACK_MS` (5 min) the meter uses the WebSocket, and tries
+the broker again after `MQTT_RETRY_MS` (30 min). With `NET_WEBSOCKET 0` it keeps trying the broker.
+
+**New commands** (`cmd`, acknowledged with `cmd_ack` as usual):
+
+| `c` | Arguments | Effect |
+|---|---|---|
+| `set_mqtt` | the `mqtt` object above (`enabled: false` = WebSocket only) | save, then reconnect over the new link |
+| `set_wifi` | `ssid`, `pass` | try the new Wi-Fi for 20 s; saved only if it connects, otherwise the old one is kept |
+
+After `set_wifi` the meter reports event `wifi_change` `{"ok": true|false, "ssid": "..."}`. The server wipes the
+password from the stored command once it is acknowledged. `info` now also carries `transport` (`mqtt` / `websocket`)
+and `mqtt` (`host:port`); `hello.caps` has `mqtt` and `ws` (what the firmware was built with).

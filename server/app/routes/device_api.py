@@ -108,8 +108,13 @@ def pair_device(body):
                                               "choose continue or new meter in its Configuration")
     db.session.commit()
     log.info("Device %s paired%s", device_id, f" via {body.get('_via')}" if body.get("_via") else "")
+    from ..services import mqtt_bridge
+    device.net = {}  # a (re)paired meter follows the server's broker again
+    db.session.commit()
     return 200, {"secret": secret, "link_key": device.link_key, "ws": WS_PATH, "time": now(),
-                 "config": devconfig.to_device(device.cfg, device.cfg_ver_wanted)}
+                 "config": devconfig.to_device(device.cfg, device.cfg_ver_wanted),
+                 # "auto link": the MQTT broker for this meter (null = use the WebSocket)
+                 "mqtt": mqtt_bridge.meter_config()}
 
 
 @bp.post("/api/v1/pair")

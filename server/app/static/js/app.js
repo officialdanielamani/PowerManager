@@ -419,6 +419,7 @@ var PM = (function () {
         ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
         ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],
         ['Sensor', i.sensor ? i.sensor + (i.sensor_detail ? ' · ' + i.sensor_detail : '') : null], ['Clamps in use', i.clamps || null],
+        ['Link to server', i.transport ? (i.transport === 'mqtt' ? 'MQTT broker ' + (i.mqtt || '') : 'WebSocket' + (i.mqtt ? ' (MQTT broker ' + i.mqtt + ' not in use)' : '')) : null],
         ['Power modules', i.sensor_boards || null], ['Relay board', i.relay_board || null], ['Temperature sensors', i.temp_sensors || null], ['Firmware', i.fw], ['Hardware', i.hw], ['Hardware info', i.hw_info], ['Chip', i.chip ? i.chip + (i.flash ? ' · ' + Math.round(i.flash / 1048576) + ' MB flash' : '') : null],
         ['Core', i.core], ['Uptime', i.uptime != null ? dur(i.uptime) : null], ['Boot #', i.boot], ['Relay switches since boot', i.relay_sw], ['Last reset', i.reset], ['Meter clock', i.clock_local ? i.clock_local + (i.time_src ? ' (from ' + i.time_src + ')' : '') : (i.clock === 0 ? 'not set' : null)],
         ['RTC (DS3231)', i.clock == null ? null : (i.rtc == null ? 'not fitted' : (i.rtc_local || 'not readable'))], ['Waiting to send', i.outbox != null ? i.outbox + ' item(s)' : null], ['Memory', i.stack]];
@@ -502,6 +503,16 @@ var PM = (function () {
         })();
       });
     });
+
+    // ---- Auto refresh: while this page is open, ask the meter for a fresh reading once a minute (the panel
+    // itself updates every 5 s as soon as new data arrives). Skipped when the tab is hidden, the meter is
+    // offline / disabled, or a reading came in during the last 55 s anyway.
+    if (opt.refresh) setInterval(function () {
+      if (document.visibilityState !== 'visible' || !lastLive.online || lastLive.disabled) return;
+      var age = (lastLive.server_time || 0) - (lastLive.reading_ts || 0);
+      if (lastLive.reading_ts && age < 55) return;
+      post(opt.refresh, {}).catch(function () {});
+    }, 60000);
 
     // history
     var state = {range: '1d', series: 'w', from: '', to: '', ch: 0};

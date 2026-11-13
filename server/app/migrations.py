@@ -93,6 +93,8 @@ def run():
     _add_column("temperature", "rh FLOAT")
     # v0.9.1: session summary (min / max / avg) from the meter
     _add_column("meter_session", "stats JSON")
+    # v0.10: MQTT link (per-meter connection choices)
+    _add_column("device", "net JSON NOT NULL DEFAULT '{}'")
 
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:

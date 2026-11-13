@@ -17,6 +17,7 @@
   {% endif %}
   {% if current_user.is_admin %}
   <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'notifications' }}" href="?tab=notifications">Notifications</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if tab == 'mqtt' }}" href="?tab=mqtt">MQTT</a></li>
   {% endif %}
 </ul>
 
@@ -251,6 +252,51 @@
   </div>
   <div class="card-footer text-end"><button class="btn btn-primary btn-sm">Save</button></div>
 </form>
+{% elif tab == 'mqtt' %}
+{% set st = mqtt_status %}
+<form class="card" method="post" action="{{ url_for('settings.mqtt') }}" style="max-width:820px" id="mqttForm">{{ csrf() }}
+  <div class="card-header fw-semibold d-flex align-items-center gap-2">MQTT broker
+    {% if s.get('mqtt_enabled') == '1' %}
+      <span class="badge text-bg-{{ 'success' if st.state == 'connected' else ('danger' if st.state == 'error' else 'secondary') }}">{{ {'connected': 'Connected', 'connecting': 'Connecting…', 'error': 'Not connected', 'off': 'Starting…'}.get(st.state, st.state) }}</span>
+      {% if st.error %}<span class="small text-danger fw-normal">{{ st.error }}</span>{% endif %}
+    {% else %}<span class="badge text-bg-secondary">Off</span>{% endif %}
+  </div>
+  <div class="card-body">
+    <p class="small text-body-secondary">Optional second way for meters to reach this server: through an MQTT broker (e.g. Mosquitto behind Cloudflare) instead of the server's own WebSocket.
+      Meters get the broker automatically when they are paired (<em>auto link</em>) and after every change here. Each message is signed with the meter's own key,
+      so the broker login alone cannot fake a meter. Without a broker (or when it cannot be reached) meters use the WebSocket.</p>
+    <div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" name="mqtt_enabled" id="mqtt_enabled" {{ 'checked' if s.get('mqtt_enabled') == '1' }}>
+      <label class="form-check-label" for="mqtt_enabled">Use an MQTT broker</label></div>
+    <div class="fw-semibold small mb-1">How this server connects</div>
+    <div class="row g-2 mb-3">
+      <div class="col-md-5"><label class="form-label">Broker address</label><input class="form-control" name="mqtt_host" value="{{ s.get('mqtt_host') }}" placeholder="mqtt.example.com"></div>
+      <div class="col-md-2"><label class="form-label">Port</label><input class="form-control" name="mqtt_port" value="{{ s.get('mqtt_port') }}" placeholder="default"></div>
+      <div class="col-md-3"><label class="form-label">Protocol</label>
+        <select class="form-select" name="mqtt_transport">
+          <option value="websockets" {{ 'selected' if s.get('mqtt_transport') != 'tcp' }}>MQTT over WebSocket</option>
+          <option value="tcp" {{ 'selected' if s.get('mqtt_transport') == 'tcp' }}>MQTT (TCP)</option></select></div>
+      <div class="col-md-2 d-flex align-items-end"><div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" name="mqtt_tls" id="mqtt_tls" {{ 'checked' if s.get('mqtt_tls') == '1' }}><label class="form-check-label" for="mqtt_tls">TLS</label></div></div>
+      <div class="col-md-3"><label class="form-label">WebSocket path</label><input class="form-control" name="mqtt_path" value="{{ s.get('mqtt_path') }}" placeholder="/"></div>
+      <div class="col-md-3"><label class="form-label">User name</label><input class="form-control" name="mqtt_user" value="{{ s.get('mqtt_user') }}" autocomplete="off"></div>
+      <div class="col-md-3"><label class="form-label">Password</label><input class="form-control" type="password" name="mqtt_pass" value="" autocomplete="new-password" placeholder="{{ '•••••• (saved)' if s.get('mqtt_pass') else '' }}"></div>
+      <div class="col-md-3"><label class="form-label">Topic prefix</label><input class="form-control" name="mqtt_prefix" value="{{ s.get('mqtt_prefix') }}" placeholder="powermanager"></div>
+      {% if s.get('mqtt_pass') %}<div class="col-12"><div class="form-check"><input class="form-check-input" type="checkbox" name="mqtt_pass_clear" id="mqtt_pass_clear"><label class="form-check-label small" for="mqtt_pass_clear">Remove the saved password</label></div></div>{% endif %}
+      <div class="col-12 form-text">Default ports: 443 (WebSocket + TLS), 80 (WebSocket), 8883 / 1883 (TCP). Behind Cloudflare: MQTT over WebSocket, TLS on, port 443, path as set in the tunnel (often <code>/</code>).
+        The password is never shown again; leave it empty to keep the saved one. Topics: <code>{{ s.get('mqtt_prefix') or 'powermanager' }}/&lt;Device ID&gt;/up</code>, <code>/down</code>, <code>/status</code>.</div>
+    </div>
+    <div class="fw-semibold small mb-1">How the meters connect <span class="fw-normal text-body-secondary">(only if different, e.g. the server reaches the broker on the LAN and the meters through Cloudflare)</span></div>
+    <div class="row g-2">
+      <div class="col-md-5"><label class="form-label">Address for the meters</label><input class="form-control" name="mqtt_pub_host" value="{{ s.get('mqtt_pub_host') }}" placeholder="same as above"></div>
+      <div class="col-md-2"><label class="form-label">Port</label><input class="form-control" name="mqtt_pub_port" value="{{ s.get('mqtt_pub_port') }}" placeholder="default"></div>
+      <div class="col-md-3"><label class="form-label">WebSocket path</label><input class="form-control" name="mqtt_pub_path" value="{{ s.get('mqtt_pub_path') }}" placeholder="/"></div>
+      <div class="col-md-2 d-flex align-items-end"><div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" name="mqtt_pub_tls" id="mqtt_pub_tls" {{ 'checked' if s.get('mqtt_pub_tls') == '1' }}><label class="form-check-label" for="mqtt_pub_tls">TLS</label></div></div>
+      <div class="col-12 form-text">Meters always use MQTT over WebSocket, with the same user name, password and topic prefix.
+        {% if mqtt_meter %}Meters currently get: <code>{{ 'wss' if mqtt_meter.tls else 'ws' }}://{{ mqtt_meter.host }}:{{ mqtt_meter.port }}{{ mqtt_meter.path }}</code>.{% elif s.get('mqtt_enabled') == '1' %}<span class="text-warning-emphasis">Meters get no broker (the server uses TCP and no address for the meters is set): they use the WebSocket.</span>{% endif %}</div>
+    </div>
+  </div>
+  <div class="card-footer d-flex gap-2"><button type="button" class="btn btn-outline-secondary btn-sm" id="mqttTest"><i class="bi bi-plug me-1"></i>Test connection</button>
+    <span class="small align-self-center" id="mqttTestMsg"></span><button class="btn btn-primary btn-sm ms-auto">Save</button></div>
+</form>
 {% endif %}
 {% endblock %}
 {% block scripts %}
@@ -265,6 +311,20 @@ function bulk(scope, question) {
   document.getElementById('bulkScope').value = scope;
   return question ? confirm(question) : true;
 }
+var mt = document.getElementById('mqttTest');
+if (mt) mt.addEventListener('click', function () {
+  var f = document.getElementById('mqttForm'), body = {}, msg = document.getElementById('mqttTestMsg');
+  Array.prototype.forEach.call(f.elements, function (e) {
+    if (!e.name || e.name === 'csrf_token') return;
+    body[e.name] = e.type === 'checkbox' ? e.checked : e.value;
+  });
+  mt.disabled = true; msg.className = 'small align-self-center text-body-secondary'; msg.textContent = 'Testing…';
+  PM.post("{{ url_for('settings.mqtt_test') }}", body).then(function (r) {
+    msg.className = 'small align-self-center ' + (r.ok ? 'text-success' : 'text-danger');
+    msg.textContent = (r.ok ? '✓ ' : '✗ ') + (r.message || '');
+  }).catch(function () { msg.className = 'small align-self-center text-danger'; msg.textContent = '✗ No answer from the server'; })
+    .finally(function () { mt.disabled = false; });
+});
 var t = document.getElementById('tgTest');
 if (t) t.addEventListener('click', function () {
   PM.post("{{ url_for('settings.notifications_test') }}", {}).then(function (r) { PM.toast(r.ok ? 'Test message sent' : ('Failed: ' + r.error), r.ok ? 'success' : 'danger'); });

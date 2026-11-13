@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.7.1"
+#define FW_VERSION "0.7.2"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -133,6 +133,19 @@
 #define AP_CLOSE_AFTER_STA_MS (5UL * 60UL * 1000UL) // close fallback AP after STA is back
 #define FACTORY_RESET_HOLD_MS 10000
 #define WEB_SESSION_TTL_S (12UL * 3600UL)
+
+// ---------------------------------------------------------------- link to the server
+// How the meter talks to the server. Keep both (default), or switch one off to make the firmware smaller:
+//   NET_WEBSOCKET  the server's own WebSocket (wss://server/ws/device)
+//   NET_MQTT       through an MQTT broker over WebSocket (ws:// / wss://, e.g. a broker behind Cloudflare).
+//                  The broker address comes from the server when the meter is paired ("auto link") and can
+//                  be changed from the server later. Messages are signed with the meter's own key.
+// With both, MQTT is used when the server has a broker, and the WebSocket otherwise (and as a fallback).
+// Pairing itself always uses HTTPS to the server.
+#define NET_WEBSOCKET 1
+#define NET_MQTT 1
+#define MQTT_FALLBACK_MS (5UL * 60UL * 1000UL)   // broker unreachable this long -> use the WebSocket
+#define MQTT_RETRY_MS (30UL * 60UL * 1000UL)     // ...and try the broker again after this
 
 // ---------------------------------------------------------------- mesh (ESP-NOW)
 // Auto role: Wi-Fi first; if Wi-Fi is down for MESH_LEAF_AFTER_MS the meter becomes a "leaf" and

@@ -118,6 +118,8 @@ def create_app(overrides=None):
         from .services import hub, scheduler, telegram_bot
         scheduler.start(app)
         telegram_bot.start(app)  # interactive bot (idles until Telegram is enabled with a token)
+        from .services import mqtt_bridge
+        mqtt_bridge.start(app)   # MQTT link to the meters (idles until a broker is set in Settings -> MQTT)
         hub.install_signal_handler()
 
     return app

@@ -17,6 +17,21 @@ DEFAULTS = {
     "telegram_enabled": "0",
     "telegram_bot_token": "",
     "telegram_chat_id": "",
+    # MQTT broker (Settings -> MQTT). The server connects with mqtt_*; meters get mqtt_pub_* (their view of
+    # the broker, always MQTT over WebSocket) or, when empty, the same address.
+    "mqtt_enabled": "0",
+    "mqtt_host": "",
+    "mqtt_port": "",
+    "mqtt_tls": "1",
+    "mqtt_transport": "websockets",   # websockets | tcp
+    "mqtt_path": "/",
+    "mqtt_user": "",
+    "mqtt_pass": "",
+    "mqtt_prefix": "powermanager",
+    "mqtt_pub_host": "",
+    "mqtt_pub_port": "",
+    "mqtt_pub_tls": "1",
+    "mqtt_pub_path": "/",
     "tz_min_sent": "",            # UTC offset (min) last sent to the meters (AUX schedules); DST check
 }
 

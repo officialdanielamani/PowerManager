@@ -15,6 +15,7 @@
 #include "control.h"
 #include "led.h"
 #include "mesh.h"
+#include "mqttlink.h"
 #include "outbox.h"
 #include "rbamp.h"
 #include "relays.h"
@@ -29,6 +30,10 @@ namespace net {
 static WebSocketsClient ws;
 static store::Server srv;
 static bool wsStarted = false;
+static bool mqttMode = false;       // this connection goes through the MQTT broker (else the server's WebSocket)
+static uint32_t linkTrySinceMs = 0; // connecting since (MQTT fallback to the WebSocket)
+static uint32_t forceWsUntilMs = 0; // MQTT did not work: use the WebSocket until then
+static bool wifiFromServer = false; // Wi-Fi test started by the server's set_wifi command
 static bool wsConnected = false;  // TCP/WS up
 static bool helloDone = false;    // got "welcome"
 static uint32_t lastPingMs = 0, pingSentMs = 0;
@@ -118,7 +123,7 @@ static bool wifiTestLoop() {
     String ssid = testSsid, pass = testPass;
     testPending = false;
     xSemaphoreGive(pairLock);
-    WiFi.mode(WIFI_AP_STA);  // keep the setup AP so the phone stays connected
+    WiFi.mode(g.apActive ? WIFI_AP_STA : WIFI_STA);  // keep the setup AP (if open) so the phone stays connected
     WiFi.disconnect();
     WiFi.begin(ssid.c_str(), pass.c_str());
     testStartMs = millis();
@@ -133,6 +138,13 @@ static bool wifiTestLoop() {
     testing = false;
     testState = 2;
     lastWifiRetryMs = millis();
+    if (wifiFromServer) {  // set_wifi from the server worked: the new network is saved
+      wifiFromServer = false;
+      control::emitEvent("wifi_change", [](JsonObject o, void *) {
+        o["ok"] = true;
+        o["ssid"] = store::wifiSsid();
+      });
+    }
     Serial.printf("[net] Wi-Fi OK, IP %s (setup AP closes in 5 min)\n", WiFi.localIP().toString().c_str());
     return false;
   }
@@ -141,6 +153,14 @@ static bool wifiTestLoop() {
     testing = false;
     testState = 3;
     Serial.println("[net] Wi-Fi test failed");
+    if (wifiFromServer) {  // set_wifi from the server failed: back to the saved network
+      wifiFromServer = false;
+      lastWifiRetryMs = 0;
+      control::emitEvent("wifi_change", [](JsonObject o, void *) {
+        o["ok"] = false;
+        o["ssid"] = store::wifiSsid();
+      });
+    }
     return false;
   }
   setNet(NET_WIFI_CONNECTING);
@@ -187,8 +207,19 @@ static void wifiLoop() {
 
 // Every message to the server goes through here: the WebSocket, or the mesh when a leaf.
 static void txt(String s) {
-  if (leafMode) mesh::leafSend(s);
-  else ws.sendTXT(s);
+  if (leafMode) {
+    mesh::leafSend(s);
+    return;
+  }
+#if NET_MQTT
+  if (mqttMode) {
+    mqttlink::publish(ws, s);
+    return;
+  }
+#endif
+#if NET_WEBSOCKET
+  ws.sendTXT(s);
+#endif
 }
 
 static void sendJson(JsonDocument &doc) {
@@ -310,6 +341,10 @@ static void setPairStatus(const String &s) {
 static void stopWs() {
   if (wsStarted) ws.disconnect();
   wsStarted = wsConnected = helloDone = false;
+  linkTrySinceMs = 0;
+#if NET_MQTT
+  mqttlink::reset();
+#endif
 }
 
 // Multi-channel capabilities (docs/multichannel.md): the server sets up the meter from these.
@@ -330,6 +365,8 @@ static void fillCaps(JsonObject caps) {
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
+  caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
+  caps["ws"] = (bool)NET_WEBSOCKET;
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
   float maxA = 0;
   JsonArray r = caps["ratings"].to<JsonArray>();
@@ -371,6 +408,17 @@ static void applyPairResult(int code, JsonObject doc, const PairRequest &r, cons
     srv.secret = doc["secret"].as<String>();
     store::saveServer(srv);
     if (doc["link_key"].is<const char *>()) store::setLinkKey(doc["link_key"].as<String>());
+    {  // MQTT broker of the server (auto link): used instead of the WebSocket when the server has one
+      mqttlink::Cfg mc = mqttlink::cfg();
+      const char *merr = nullptr;
+      if (doc["mqtt"].is<JsonObjectConst>() && mqttlink::fromJson(doc["mqtt"].as<JsonObjectConst>(), mc, merr)) {
+        mqttlink::save(mc);
+      } else if (mc.enabled) {
+        mc.enabled = false;
+        mqttlink::save(mc);
+      }
+      forceWsUntilMs = 0;
+    }
     timekeep::set(doc["time"] | 0, TS_SERVER);
     MeterConfig c;
     String err;
@@ -472,7 +520,7 @@ static void flushOutbox() {
   if (!sendRound) return;
   if (awaitingAck && millis() - sentAtMs < ACK_TIMEOUT_MS) return;
   std::vector<outbox::Item> items;
-  outbox::nextBatch(items, leafMode ? MESH_BATCH_MAX : OUTBOX_BATCH_MAX);
+  outbox::nextBatch(items, leafMode ? MESH_BATCH_MAX : mqttMode ? min<int>(OUTBOX_BATCH_MAX, 25) : OUTBOX_BATCH_MAX);
   if (items.empty()) return;
   if (items[0].kind == outbox::EVT) {
     txt(items[0].json);
@@ -538,6 +586,9 @@ static void sendInfo() {
   doc["t"] = "info";
   doc["ip"] = ipAddress();
   doc["link"] = linkMode();
+  doc["transport"] = mqttMode ? "mqtt" : "websocket";
+  if (mqttlink::cfg().host.length())
+    doc["mqtt"] = String(mqttlink::cfg().enabled ? "" : "(off) ") + mqttlink::cfg().host + ":" + mqttlink::cfg().port;
   if (leafMode) {
     doc["gateway"] = mesh::gatewayId();
     doc["mesh_ch"] = mesh::channel();
@@ -638,6 +689,42 @@ static void handleCommand(JsonObject m) {
     control::setDisabled(!strcmp(c, "disable"));
   } else if (!strcmp(c, "get_info")) {
     sendInfo();
+  } else if (!strcmp(c, "set_mqtt")) {
+    // New broker settings from the server. Acknowledge on the current link, then reconnect with them. If
+    // the broker cannot be reached for MQTT_FALLBACK_MS the meter falls back to the WebSocket for a while.
+    mqttlink::Cfg mc;
+    if (!NET_MQTT) {
+      ok = false;
+      err = "no_mqtt";
+    } else if (mqttlink::fromJson(m, mc, err)) {
+      cmdAck(ref, true, nullptr);
+      if (!leafMode) ws.loop();
+      delay(300);
+      mqttlink::save(mc);
+      forceWsUntilMs = 0;
+      Serial.printf("[net] MQTT settings changed by the server (%s)\n", mc.enabled ? mc.host.c_str() : "off");
+      if (!leafMode) stopWs();
+      return;
+    } else {
+      ok = false;
+    }
+  } else if (!strcmp(c, "set_wifi")) {
+    // New Wi-Fi from the server: tried for 20 s and saved only if it connects; else back to the old one.
+    String ssid = m["ssid"] | "", pass = m["pass"] | "";
+    if (ssid.length() < 1 || ssid.length() > 32 || (pass.length() && (pass.length() < 8 || pass.length() > 63))) {
+      ok = false;
+      err = "bad_wifi";
+    } else if (leafMode) {
+      ok = false;
+      err = "mesh_leaf";
+    } else {
+      cmdAck(ref, true, nullptr);
+      ws.loop();
+      delay(300);
+      wifiFromServer = true;
+      tryWifi(ssid, pass);
+      return;
+    }
   } else if (!strcmp(c, "remove")) {
     cmdAck(ref, true, nullptr);
     if (!leafMode) ws.loop();
@@ -660,6 +747,7 @@ static void handleMessage(const char *payload, size_t len) {
 
   if (!strcmp(t, "welcome")) {
     helloDone = true;
+    linkTrySinceMs = 0;  // connected: the MQTT fallback timer starts again at the next loss
     goOnline();
     Serial.println("[net] online");
   } else if (!strcmp(t, "ack")) {
@@ -691,6 +779,11 @@ static void handleMessage(const char *payload, size_t len) {
     sendJson(ack);
   } else if (!strcmp(t, "cmd")) {
     handleCommand(m);
+  } else if (!strcmp(t, "rehello")) {
+    // MQTT: the server restarted while we stayed connected to the broker. Introduce ourselves again.
+    helloDone = false;
+    awaitingAck = awaitingPong = false;
+    sendHello();
   } else if (!strcmp(t, "pong")) {
     awaitingPong = false;
   } else if (!strcmp(t, "link_key")) {
@@ -708,7 +801,10 @@ static void handleMessage(const char *payload, size_t len) {
 }
 
 void meshToServer(const char *json, size_t len) {
-  if (!leafMode && wsConnected) ws.sendTXT((uint8_t *)json, len);
+  if (leafMode || !wsConnected) return;
+  String s;
+  s.concat(json, len);
+  txt(s);  // WebSocket, or wrapped + signed through the MQTT broker
 }
 
 void meshDeliver(const char *json, size_t len) { handleMessage(json, len); }
@@ -725,44 +821,90 @@ void meshChannel(uint8_t ch) {
   }
 }
 
+// One protocol message from the server (WebSocket text frame, or a verified MQTT message).
+static void serverText(const char *payload, size_t len) {
+  // Messages for our mesh leaves are forwarded as they are (they are signed by the server).
+  JsonDocument filter, head;
+  filter["t"] = true;
+  filter["d"] = true;
+  if (!deserializeJson(head, payload, len, DeserializationOption::Filter(filter))) {
+    const char *t = head["t"] | "";
+    if (!strcmp(t, "via") || !strcmp(t, "via_pair_res")) {
+      mesh::toLeaf(payload, len, head["d"] | "", t[3] == '_');
+      return;
+    }
+  }
+  handleMessage(payload, len);
+}
+
 static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
   switch (type) {
     case WStype_CONNECTED:
-      Serial.println("[net] WebSocket connected");
       wsConnected = true;
       helloDone = false;
       awaitingAck = awaitingPong = false;
       lastPingMs = millis();
+#if NET_MQTT
+      if (mqttMode) {  // WebSocket to the broker is up: log in; hello follows when the broker is ready
+        mqttlink::onWsConnected(ws);
+        break;
+      }
+#endif
+      Serial.println("[net] WebSocket connected");
       sendHello();
       break;
     case WStype_DISCONNECTED:
       if (wsConnected) Serial.println("[net] WebSocket disconnected");
       wsConnected = helloDone = false;
+#if NET_MQTT
+      mqttlink::reset();
+#endif
       reconnectMs = min<uint32_t>(reconnectMs * 2, 60000);
       ws.setReconnectInterval(reconnectMs + (esp_random() % 1000));
       break;
-    case WStype_TEXT: {
+    case WStype_TEXT:
       sys::crumb(sys::CR_NET, "ws: message");
-      // Messages for our mesh leaves are forwarded as they are (they are signed by the server).
-      JsonDocument filter, head;
-      filter["t"] = true;
-      filter["d"] = true;
-      if (!deserializeJson(head, (const char *)payload, len, DeserializationOption::Filter(filter))) {
-        const char *t = head["t"] | "";
-        if (!strcmp(t, "via") || !strcmp(t, "via_pair_res")) {
-          mesh::toLeaf((const char *)payload, len, head["d"] | "", t[3] == '_');
+      if (!mqttMode) serverText((const char *)payload, len);
+      break;
+#if NET_MQTT
+    case WStype_BIN: {  // MQTT packets from the broker
+      if (!mqttMode) break;
+      sys::crumb(sys::CR_NET, "mqtt: packet");
+      String inner;
+      for (size_t n = len;; n = 0) {
+        mqttlink::Result r = mqttlink::onBinary(ws, payload, n, inner);
+        if (r == mqttlink::NOTHING) break;
+        if (r == mqttlink::READY) sendHello();
+        else if (r == mqttlink::MESSAGE) serverText(inner.c_str(), inner.length());
+        else if (r == mqttlink::REFUSED) {
+          ws.disconnect();
           break;
         }
       }
-      handleMessage((const char *)payload, len);
       break;
     }
+#endif
     default:
       break;
   }
 }
 
 static void startWs() {
+  ws.onEvent(onWsEvent);
+  ws.setReconnectInterval(reconnectMs);
+  linkTrySinceMs = millis();
+  mqttMode = false;
+#if NET_MQTT
+  // MQTT when the server gave us a broker; the WebSocket while MQTT is not set up (or did not work).
+  mqttMode = mqttlink::active() && (!NET_WEBSOCKET || !forceWsUntilMs || (int32_t)(millis() - forceWsUntilMs) >= 0);
+  if (mqttMode) {
+    forceWsUntilMs = 0;
+    mqttlink::start(ws);
+    wsStarted = true;
+    return;
+  }
+#endif
+#if NET_WEBSOCKET
   static String headers;
   headers = "Authorization: Bearer " + store::deviceId() + "." + srv.secret + "\r\nX-PM-Proto: 1";
   ws.setExtraHeaders(headers.c_str());
@@ -776,6 +918,7 @@ static void startWs() {
   }
   wsStarted = true;
   Serial.printf("[net] connecting to %s://%s:%u/ws/device\n", srv.tls ? "wss" : "ws", srv.host.c_str(), srv.port);
+#endif
 }
 
 static void onlineWork() {
@@ -814,6 +957,10 @@ static void serverLoop() {
     setNet(NET_NOT_PAIRED);
     return;
   }
+  if (!NET_WEBSOCKET && !mqttlink::active()) {  // MQTT-only build without broker settings yet
+    setNet(NET_CONNECTING);
+    return;
+  }
   if (!wsStarted) {
     sys::crumb(sys::CR_NET, "server: ws start");
     store::loadServer(srv);
@@ -821,13 +968,35 @@ static void serverLoop() {
   }
   sys::crumb(sys::CR_NET, "server: ws.loop");
   ws.loop();
+#if NET_MQTT
+  if (mqttMode) mqttlink::loop(ws);
+#endif
   sys::crumb(sys::CR_NET, "server");
 
   if (!helloDone) {
     setNet(NET_CONNECTING);
     markOffline();
+    if (!linkTrySinceMs) linkTrySinceMs = millis() | 1;
+#if NET_MQTT && NET_WEBSOCKET
+    // The broker cannot be reached (wrong settings, broker down): use the server's WebSocket for a while,
+    // so the meter stays reachable and the settings can be corrected from the server.
+    if (mqttMode && WiFi.status() == WL_CONNECTED && linkTrySinceMs && millis() - linkTrySinceMs > MQTT_FALLBACK_MS) {
+      Serial.println("[mqtt] no connection through the broker: using the WebSocket for now");
+      forceWsUntilMs = millis() + MQTT_RETRY_MS;
+      if (!forceWsUntilMs) forceWsUntilMs = 1;
+      stopWs();
+    }
+#endif
     return;
   }
+#if NET_MQTT && NET_WEBSOCKET
+  // On the WebSocket only because MQTT failed: go back to the broker when the retry time is up.
+  if (!mqttMode && forceWsUntilMs && (int32_t)(millis() - forceWsUntilMs) >= 0 && mqttlink::active()) {
+    Serial.println("[mqtt] trying the broker again");
+    stopWs();
+    return;
+  }
+#endif
 
   onlineWork();
 }
@@ -928,6 +1097,7 @@ static void modeLoop() {
 
 void begin() {
   pairLock = xSemaphoreCreateMutex();
+  mqttlink::begin();
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(("power-" + store::deviceId()).c_str());

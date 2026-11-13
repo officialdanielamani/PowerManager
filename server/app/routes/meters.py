@@ -14,7 +14,7 @@ from ..extensions import db
 from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, User,
                       PairingCode, Rollup, RollupDirty, Session, Temperature, now)
-from ..services import access, auxcfg, commands, devconfig, history, hub, incidents, ingest, lifecycle, settings, validation
+from ..services import access, auxcfg, commands, devconfig, mqtt_bridge, history, hub, incidents, ingest, lifecycle, settings, validation
 from ..services import tare as tare_svc
 from .decorators import staff_required
 from .device_api import ensure_device_defaults
@@ -246,12 +246,77 @@ def configure(pk):
                            aux_relays={a.get("i"): a.get("relay") for a in (device.last_state or {}).get("aux") or []
                                        if isinstance(a, dict)},
                            n_temp=max(int((device.caps or {}).get("temp") or 0), len((device.last_reading or {}).get("t") or []), 1),
+                           mqtt_meter=mqtt_bridge.meter_config(),
                            aux_sources=auxcfg.SOURCES, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
                            aux_cfg=auxcfg.fit(cfg.get("aux"), devconfig.aux_count(device)),
                            n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
                            form=request.form if errors else None)
+
+
+@bp.post("/<int:pk>/connection")
+@staff_required
+def connection(pk):
+    """Meter Configuration -> Connection: send new Wi-Fi details, or choose the MQTT broker of this meter."""
+    device = _device(pk)
+    f = request.form
+    back = redirect(url_for("meters.configure", pk=pk) + "#connection")
+    if not (device.caps or {}).get("mqtt") and f.get("what") == "mqtt":
+        flash("This meter's firmware has no MQTT support.", "warning")
+        return back
+    if f.get("what") == "wifi":
+        ssid, pw = (f.get("ssid") or "").strip(), f.get("wifi_pass") or ""
+        if not 1 <= len(ssid.encode()) <= 32:
+            flash("Wi-Fi name (SSID): 1–32 characters", "danger")
+        elif pw and not 8 <= len(pw) <= 63:
+            flash("Wi-Fi password: 8–63 characters (empty for an open network)", "danger")
+        else:
+            cmd, err = commands.issue(device, "set_wifi", {"ssid": ssid, "pass": pw}, current_user)
+            ingest.server_event(device, "wifi_change_requested", {"by": current_user.username, "ssid": ssid})
+            db.session.commit()
+            flash(f"New Wi-Fi '{ssid}' sent to the meter. It tries it for 20 s and keeps it only if it connects; "
+                  "otherwise it returns to the current network. A Meter status notification tells the result."
+                  if cmd is not None and cmd.sent_at else
+                  f"The meter is offline: the new Wi-Fi '{ssid}' is sent when it reconnects.", "success")
+        return back
+    if f.get("what") == "mqtt":
+        mode = f.get("mqtt_mode") if f.get("mqtt_mode") in ("server", "off", "custom") else "server"
+        net = {"mqtt": mode}
+        if mode == "custom":
+            host = (f.get("host") or "").strip()
+            for pre in ("wss://", "ws://", "https://", "http://"):
+                host = host.removeprefix(pre)
+            host = host.rstrip("/")
+            port = (f.get("port") or "").strip()
+            prefix = (f.get("prefix") or "").strip().strip("/")
+            old = device.net or {}
+            if not host or len(host) > 100 or any(c in host for c in " /?#@"):
+                flash("Broker address: a host name or IP only", "danger")
+                return back
+            if port and (not port.isdigit() or not 1 <= int(port) <= 65535):
+                flash("Port must be 1–65535 or empty", "danger")
+                return back
+            if prefix and (len(prefix) > 48 or any(c in prefix for c in "#+ ")):
+                flash("Topic prefix: up to 48 characters, no spaces, # or +", "danger")
+                return back
+            tls = f.get("tls") == "on"
+            path = (f.get("path") or "/").strip() or "/"
+            net.update({"host": host, "port": int(port) if port else (443 if tls else 80), "tls": tls,
+                        "path": path if path.startswith("/") else "/" + path, "user": (f.get("user") or "").strip()[:64],
+                        # empty password = keep the one saved for this meter
+                        "pass": (f.get("pass") or "")[:128] or (old.get("pass", "") if old.get("mqtt") == "custom" else ""),
+                        "prefix": prefix})
+        device.net = net
+        db.session.commit()
+        doc = mqtt_bridge.device_mqtt_doc(device)
+        cmd, err = commands.issue(device, "set_mqtt", doc, current_user)
+        what = {"server": "the server's broker" if doc.get("enabled") else "the WebSocket (the server has no broker set)",
+                "off": "the WebSocket only", "custom": f"its own broker {net.get('host', '')}"}[mode]
+        flash(f"This meter now uses {what}." + ("" if cmd is not None and cmd.sent_at else
+                                                " It is offline: the change is sent when it reconnects."), "success")
+        return back
+    abort(400)
 
 
 @bp.route("/<int:pk>/notifications", methods=["GET", "POST"])

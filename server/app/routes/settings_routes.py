@@ -5,12 +5,12 @@ from flask_login import current_user, login_required, login_user
 
 from ..extensions import db
 from ..models import Device, MeterViewer, Notification, NotificationRule, PairingCode, User, now
-from ..services import access, devconfig, hub, notify, settings, validation
+from ..services import access, devconfig, hub, mqtt_bridge, notify, settings, validation
 from .decorators import admin_required, staff_required
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
-TABS = ("account", "server", "users", "notifications")
+TABS = ("account", "server", "users", "notifications", "mqtt")
 
 
 @bp.get("/")
@@ -40,7 +40,8 @@ def index():
         "settings/index.html", tab=tab, users=users, meters=meters, links=links, now=now(),
         user_meters={k: sorted(v) for k, v in user_meters.items()}, owned={k: sorted(v) for k, v in owned.items()},
         managers=mgrs, manager_names={m.id: m.username for m in mgrs},
-        zones=settings.zone_names(), s=settings, detected=(host, port, tls), configured=configured)
+        zones=settings.zone_names(), s=settings, detected=(host, port, tls), configured=configured,
+        mqtt_status=mqtt_bridge.status, mqtt_meter=mqtt_bridge.meter_config())
 
 
 def _back(tab, msg=None, cat="success"):
@@ -313,6 +314,91 @@ def notifications():
         values["telegram_bot_token"] = token
     settings.set_many(values)
     return _back("notifications", "Notification settings saved.")
+
+
+def _mqtt_form(f):
+    """Broker settings from the form -> (values to store, errors). An empty password keeps the saved one."""
+    errs = []
+
+    def host(key, label):
+        v = (f.get(key) or "").strip()
+        for pre in ("wss://", "ws://", "https://", "http://", "mqtts://", "mqtt://"):
+            v = v.removeprefix(pre)
+        v = v.rstrip("/")
+        if len(v) > 100 or any(c in v for c in " /?#@"):
+            errs.append(f"{label}: a host name or IP only (no ws://, no path)")
+        return v
+
+    def port(key, label):
+        v = (f.get(key) or "").strip()
+        if v and (not v.isdigit() or not 1 <= int(v) <= 65535):
+            errs.append(f"{label} must be 1–65535 or empty")
+        return v
+
+    def path(key):
+        v = (f.get(key) or "/").strip() or "/"
+        return v if v.startswith("/") else "/" + v
+
+    prefix = (f.get("mqtt_prefix") or "powermanager").strip().strip("/")
+    if not prefix or len(prefix) > 48 or any(c in prefix for c in "#+ "):
+        errs.append("Topic prefix: 1–48 characters, no spaces, # or +")
+    user = (f.get("mqtt_user") or "").strip()
+    if len(user) > 64:
+        errs.append("User name: up to 64 characters")
+    values = {
+        "mqtt_enabled": "1" if f.get("mqtt_enabled") == "on" else "0",
+        "mqtt_host": host("mqtt_host", "Broker address"), "mqtt_port": port("mqtt_port", "Port"),
+        "mqtt_tls": "1" if f.get("mqtt_tls") == "on" else "0",
+        "mqtt_transport": "tcp" if f.get("mqtt_transport") == "tcp" else "websockets",
+        "mqtt_path": path("mqtt_path"), "mqtt_user": user, "mqtt_prefix": prefix,
+        "mqtt_pub_host": host("mqtt_pub_host", "Address for the meters"),
+        "mqtt_pub_port": port("mqtt_pub_port", "Port for the meters"),
+        "mqtt_pub_tls": "1" if f.get("mqtt_pub_tls") == "on" else "0", "mqtt_pub_path": path("mqtt_pub_path"),
+    }
+    pw = f.get("mqtt_pass") or ""
+    if len(pw) > 128:
+        errs.append("Password: up to 128 characters")
+    if f.get("mqtt_pass_clear") == "on":
+        values["mqtt_pass"] = ""
+    elif pw:
+        values["mqtt_pass"] = pw
+    if values["mqtt_enabled"] == "1" and not values["mqtt_host"]:
+        errs.append("Enter the broker address (or switch MQTT off)")
+    return values, errs
+
+
+@bp.post("/mqtt")
+@admin_required
+def mqtt():
+    values, errs = _mqtt_form(request.form)
+    if errs:
+        return _errors("mqtt", errs)
+    settings.set_many(values)
+    n = mqtt_bridge.push_settings_to_meters()  # meters that follow the server's broker get the new settings
+    msg = "MQTT settings saved."
+    if n:
+        msg += f" Sent to {n} meter(s) (meters that are offline get them when they reconnect)."
+    if values["mqtt_enabled"] == "1" and mqtt_bridge.meter_config() is None:
+        flash("The server uses plain TCP and no WebSocket address for the meters is set: meters keep using the "
+              "server's WebSocket.", "warning")
+    return _back("mqtt", msg)
+
+
+@bp.post("/mqtt/test")
+@admin_required
+def mqtt_test():
+    """Test connection with the values in the form (not saved); an empty password = the saved one."""
+    f = request.get_json(silent=True) or {}
+    values, errs = _mqtt_form({k: ("on" if v is True else ("" if v in (False, None) else str(v))) for k, v in f.items()})
+    if errs:
+        return jsonify(ok=False, message=errs[0])
+    tls = values["mqtt_tls"] == "1"
+    transport = values["mqtt_transport"]
+    port = int(values["mqtt_port"]) if values["mqtt_port"] else mqtt_bridge.default_port(transport, tls)
+    cfg = {"host": values["mqtt_host"], "port": port, "tls": tls, "transport": transport, "path": values["mqtt_path"],
+           "user": values["mqtt_user"], "pass": values.get("mqtt_pass", settings.get("mqtt_pass"))}
+    ok, msg = mqtt_bridge.test_connection(cfg)
+    return jsonify(ok=ok, message=f"{msg} ({'wss' if tls and transport == 'websockets' else 'ws' if transport == 'websockets' else 'mqtts' if tls else 'mqtt'}://{cfg['host']}:{port})")
 
 
 @bp.post("/notifications/test")

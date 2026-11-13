@@ -3,7 +3,9 @@ from ..extensions import db
 from ..models import Command, now
 from . import hub
 
-KNOWN = {"relay", "aux", "renew", "end", "send_now", "reset_trip", "get_state", "remove", "disable", "enable", "get_info"}
+KNOWN = {"relay", "aux", "renew", "end", "send_now", "reset_trip", "get_state", "remove", "disable", "enable", "get_info",
+         "set_mqtt", "set_wifi"}
+SECRET = {"set_mqtt", "set_wifi"}  # carry a password: wiped from the stored command once it is acknowledged
 QUEUE_MAX_AGE_S = 7 * 86400
 
 
@@ -40,6 +42,10 @@ def relay_block_reason(device, ch=None):
     return None
 
 
+def _scrub(params):
+    return {k: ("" if k == "pass" else v) for k, v in (params or {}).items()}
+
+
 def _message(cmd):
     msg = {"t": "cmd", "c": cmd.c, "ref": cmd.id}
     msg.update(cmd.params or {})
@@ -72,6 +78,10 @@ def issue(device, c, params=None, user=None):
         for old in Command.query.filter_by(device_fk=device.id, c="aux", sent_at=None, cancelled=False).all():
             if (old.params or {}).get("i") == params.get("i"):
                 old.cancelled = True
+    if c in SECRET:  # only the latest settings matter
+        for old in Command.query.filter_by(device_fk=device.id, c=c, sent_at=None, cancelled=False).all():
+            old.cancelled = True
+            old.params = _scrub(old.params)
     cmd = Command(device_fk=device.id, c=c, params=params,
                   created_by=user.id if user else None)
     db.session.add(cmd)
@@ -103,5 +113,7 @@ def ack(device, ref, ok, err=None):
         return None
     cmd.acked_at = now()
     cmd.ok = bool(ok)
+    if cmd.c in SECRET:
+        cmd.params = _scrub(cmd.params)
     cmd.err = (err or None) and str(err)[:40]
     return cmd
