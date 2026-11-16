@@ -134,3 +134,41 @@ def test_aux_v2_dates_any_channel_and_flags(app, admin):
     r = admin.post(f"/meters/{pk}/configure", data=_form(**{"aux_mode_0": "event", "aux_ev_src_0": "temp",
                                                               "aux_ev_value_0": "30"}))
     assert r.status_code == 200 and "choose what the relay reacts to" in r.get_data(as_text=True)
+
+
+def test_ups_input_and_battery_event(app, admin):
+    """UPS signal input (firmware UPS_ENABLE): notification + historical event; UPS / battery % as AUX events
+    only when the firmware has them."""
+    from app.models import Incident, Notification
+    from app.services import cfggen
+    pk = _mc_with_aux(app, admin)
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        d.caps = dict(d.caps, aux_v=3)
+        db.session.commit()
+        assert "ups" not in auxcfg.sources(d) and "bat" not in auxcfg.sources(d)
+        d.caps = dict(d.caps, ups=True, battery=True)
+        db.session.commit()
+        assert {"ups", "bat"} <= set(auxcfg.sources(d))
+        conn = FakeConn()
+        ingest.handle(conn, d, {"t": "evt", "seq": 1, "ts": 1700000000, "e": "ups_on"})
+        db.session.commit()
+        inc = Incident.query.filter_by(device_fk=pk, type="ups").one()
+        assert inc.ended_at is None
+        assert any("UPS" in n.message for n in Notification.query.all())
+        ingest.handle(conn, d, {"t": "evt", "seq": 2, "ts": 1700000600, "e": "ups_off"})
+        db.session.commit()
+        assert Incident.query.filter_by(device_fk=pk, type="ups").one().ended_at == 1700000600
+    r = admin.post(f"/meters/{pk}/configure", data=_form(**{
+        "aux_mode_0": "event", "aux_ev_src_0": "ups", "aux_ev_active_0": "active", "aux_ev_on_0": "on",
+        "aux_mode_1": "event", "aux_ev_src_1": "bat", "aux_ev_cmp_1": "under", "aux_ev_value_1": "20", "aux_ev_on_1": "off"}))
+    assert "alert-danger" not in r.get_data(as_text=True)
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        a0, a1, _ = devconfig.to_device(d.cfg, 1)["cfg"]["aux"]
+        assert a0["event"] == {"src": "ups", "idx": 0, "active": True, "on": True}
+        assert a1["event"] == {"src": "bat", "idx": 0, "cmp": "under", "value": 20.0, "on": False}
+        assert auxcfg.describe(d.cfg["aux"][1], d) == "Event: OFF while Battery % ≤ 20.0 %"
+    text, errors, _ = cfggen.generate({"meter": "pzem_ac", "pin_sda": 8, "pin_scl": 9, "pin_led": 48, "pin_pzem_rx": 5,
+                                       "pin_pzem_tx": 6, "ups": True, "pin_ups": 2, "ups_level": "HIGH"})
+    assert not errors and "#define UPS_ENABLE 1" in text and "#define UPS_ACTIVE_LEVEL HIGH" in text

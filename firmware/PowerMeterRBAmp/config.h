@@ -2,7 +2,7 @@
 // ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
 #pragma once
 
-#define FW_VERSION "0.9.4"
+#define FW_VERSION "0.9.5"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -22,11 +22,16 @@
 #define PIN_BOOT_BUTTON 0   // hold 10 s = factory reset
 
 #define TAMPER_OPEN_LEVEL HIGH   // with NC switch to GND + pull-up, HIGH = open
+#define PIN_UPS 2           // UPS signal input (only with UPS_ENABLE 1, see "optional parts")
+#define UPS_ACTIVE_LEVEL LOW     // level of PIN_UPS that means "running on the UPS":
+                                 //   LOW  = contact / open collector to GND (internal pull-up is used)
+                                 //   HIGH = 3.3 V logic signal (internal pull-down is used; never 5 V / 12 V directly)
 
 // ---------------------------------------------------------------- optional parts (0 = not fitted)
 // A part switched off here is left out of the firmware completely (smaller binary).
 #define HAS_DS3231 1        // DS3231 RTC module on the I2C bus (keeps the time without Wi-Fi)
 #define TAMPER_ENABLE 1     // tamper / panel switch on PIN_TAMPER
+#define UPS_ENABLE 0        // UPS signal input on PIN_UPS: event + notification while the UPS runs on battery
 #define TEMP_DS18B20 0      // DS18B20 temperature sensor(s) on PIN_TEMP (see "temperature" below)
 #define TEMP_SHT 0          // SHT20 / SHT3x / SHT4x temperature + humidity sensor(s) on the I2C bus
 // (BATTERY_ENABLE and MESH_ENABLE are in their own sections below.)
@@ -137,6 +142,7 @@
                                   // (OFF is always immediate; only the next ON waits)
 #define RELAY_CHATTER_SWITCHES 6  // more relay changes than this within 60 s = warning on serial + event
 #define TAMPER_DEBOUNCE_MS 1000   // tamper input must be stable this long to count
+#define UPS_DEBOUNCE_MS 2000      // UPS input must be stable this long to count
 #define VOLT_OUT_MS 3000          // operating voltage: out of range this long to trigger
 #define VOLT_OK_MS 10000          // ...and back in range this long to clear
 #define WS_PING_INTERVAL_MS 30000

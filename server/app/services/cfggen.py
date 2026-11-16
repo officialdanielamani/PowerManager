@@ -193,6 +193,11 @@ def generate(o):
     t = _set(t, "TAMPER_ENABLE", int(tamper))
     if tamper:
         t = _set(t, "PIN_TAMPER", pin("pin_tamper", "PIN_TAMPER", "Tamper switch pin"))
+    ups = _on(o, "ups")
+    t = _set(t, "UPS_ENABLE", int(ups))
+    if ups:
+        t = _set(t, "PIN_UPS", pin("pin_ups", "PIN_UPS", "UPS input pin"))
+        t = _set(t, "UPS_ACTIVE_LEVEL", "HIGH" if o.get("ups_level") == "HIGH" else "LOW")
     ds = _on(o, "ds18b20")
     t = _set(t, "TEMP_DS18B20", int(ds))
     if ds:

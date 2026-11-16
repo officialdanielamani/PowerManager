@@ -8,6 +8,8 @@
 #include "storage.h"
 #include "system.h"
 #include "auxrelay.h"
+#include "battery.h"
+#include "ups.h"
 #include "hwmap.h"
 #include "relays.h"
 #include "sessstats.h"
@@ -356,6 +358,7 @@ void stateJson(JsonObject o) {
   o["tripped"] = g.tripped;
   if (auxrelay::count()) auxrelay::stateJson(o["aux"].to<JsonArray>());
   o["tamper"] = g.tamper;
+  if (ups::enabled()) o["ups"] = g.ups;
   o["ac"] = g.ac;
   JsonObject s = o["sess"].to<JsonObject>();
   s["sid"] = g.sess.sid;
@@ -386,10 +389,12 @@ void begin(Sensor *sensor) {
 #if TAMPER_ENABLE
   pinMode(PIN_TAMPER, INPUT_PULLUP);
 #endif
+  ups::begin();
   StateLock l;
 #if TAMPER_ENABLE
   g.tamper = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
 #endif
+  g.ups = ups::active();
   g.lastE = g.sess.e0;  // until the first reading arrives
 }
 
@@ -708,12 +713,22 @@ static void writeRelays(bool force) {
 static void auxTick() {
   if (!auxrelay::count()) return;
   auxrelay::Inputs in;
+  if (battery::enabled()) {  // battery % for the AUX event rules, measured every 5 s
+    static uint32_t batAtMs = 0;
+    static float batPct = NAN;
+    if (isnan(batPct) || millis() - batAtMs > 5000) {
+      batAtMs = millis();
+      batPct = battery::percent(battery::volts());
+    }
+    in.batPct = batPct;
+  }
   {
     StateLock l;
     in.nch = 1;
     in.readOk = g.reading.ok && g.ac;
     in.disabled = g.disabled;
     in.tamper = g.tamper;
+    in.ups = g.ups;
     in.voltOut = g.voltOut;
     in.noWifi = g.net <= NET_WIFI_CONNECTING;
     in.noServer = g.paired && g.offlineSinceMs != 0;
@@ -782,6 +797,16 @@ static void checkTemp() {
 }
 #endif  // TEMP_ENABLE
 
+// UPS signal input (ups.cpp): report when the UPS starts / stops running on its battery.
+static void checkUps() {
+  if (!ups::poll()) return;
+  StateLock l;
+  g.ups = ups::active();
+  emitEvent(g.ups ? "ups_on" : "ups_off");
+  Serial.printf("[ups] %s\n", g.ups ? "running on the UPS" : "mains is back");
+  bump();
+}
+
 static void checkTamper() {
 #if TAMPER_ENABLE
   static uint8_t same = 0;
@@ -812,6 +837,7 @@ void task(void *) {
   {
     StateLock l;
     if (g.tamper) emitEvent("tamper_open", [](JsonObject o, void *) { o["boot"] = 1; });
+    if (g.ups) emitEvent("ups_on", [](JsonObject o, void *) { o["boot"] = 1; });
     if (g.tripped) emitEvent("overcurrent", [](JsonObject o, void *) { o["boot"] = 1; });
   }
   TickType_t last = xTaskGetTickCount();
@@ -829,6 +855,7 @@ void task(void *) {
 #endif
     sys::crumb(sys::CR_CONTROL, "rules");
     checkTamper();
+    checkUps();
     checkRules(first);
     sys::crumb(sys::CR_CONTROL, "aux");
     auxTick();

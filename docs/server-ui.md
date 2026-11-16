@@ -207,6 +207,8 @@ or **Event**, and **Enable override**.
 - Only what the meter has is offered: no Temperature without a temperature sensor, no Humidity without an SHT
   sensor, no Tamper without the tamper input. 14 lines, *By date*, *Any channel* and the sources from Tamper on need
   firmware PZEM 0.7.3 / rbAmp 0.9.3; older meters keep 4 lines by day and the first six sources.
+- **UPS power** (active / not active) and **Battery %** (≥ / ≤ a value) appear when the meter's firmware has the
+  UPS input (`UPS_ENABLE 1`) / the battery measurement (`BATTERY_ENABLE 1`); firmware PZEM 0.7.5 / rbAmp 0.9.5.
 - "No server / internet" is true while the meter is paired but has no link to the server (whatever the reason).
 
 The Info page shows each AUX relay with its mode, a one-line description of the automation, *overridden* while a
@@ -252,3 +254,11 @@ docs/multichannel.md § AUX relays.
 While the Info page is open and the meter is online, a fresh reading is requested when the last one is older than
 about a minute, and the page updates as soon as it arrives. These readings are stored in Historical data like any
 other, also with *Core data only*.
+
+## UPS input
+
+Firmware option (off by default; `UPS_ENABLE`, `PIN_UPS`, `UPS_ACTIVE_LEVEL` in config.h, also in the config.h
+Generator): a signal from a UPS that tells "mains failed, running on the UPS". While it is active the meter shows
+an **On UPS** badge, Historical Events gets an "On UPS power" entry (start, end, duration) and accounts with the
+**UPS power** notification (Notification Options, on by default) are told when it starts and ends. It does not
+switch the measured relays; use an AUX relay event for that.

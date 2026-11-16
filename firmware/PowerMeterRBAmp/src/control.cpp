@@ -10,6 +10,8 @@
 #include "storage.h"
 #include "system.h"
 #include "auxrelay.h"
+#include "battery.h"
+#include "ups.h"
 #include "sessstats.h"
 #include "temp.h"
 #include "timekeep.h"
@@ -405,6 +407,7 @@ void stateJson(JsonObject o) {
   }
   o["tripped"] = anyTrip;
   o["tamper"] = g.tamper;
+  if (ups::enabled()) o["ups"] = g.ups;
   o["ac"] = g.ac;
   if (g.disabled) o["disabled"] = true;
   if (g.voltOut) o["volt_out"] = true;
@@ -633,6 +636,7 @@ void begin() {
 #if TAMPER_ENABLE
   pinMode(PIN_TAMPER, INPUT_PULLUP);
 #endif
+  ups::begin();
   relays::begin();  // all relays OFF first
   drdySem_ = xSemaphoreCreateBinary();
 #if PIN_DRDY >= 0
@@ -644,6 +648,7 @@ void begin() {
 #if TAMPER_ENABLE
     g.tamper = digitalRead(PIN_TAMPER) == TAMPER_OPEN_LEVEL;
 #endif
+    g.ups = ups::active();
     g.nch = hw::NCH;  // from the CHANNELS table (relays / sessions work before the modules answer)
     store::saveChannels(g.nch);
   }
@@ -1009,12 +1014,22 @@ static void checkRules(bool firstPass) {
 static void auxTick() {
   if (!auxrelay::count()) return;
   auxrelay::Inputs in;
+  if (battery::enabled()) {  // battery % for the AUX event rules, measured every 5 s
+    static uint32_t batAtMs = 0;
+    static float batPct = NAN;
+    if (isnan(batPct) || millis() - batAtMs > 5000) {
+      batAtMs = millis();
+      batPct = battery::percent(battery::volts());
+    }
+    in.batPct = batPct;
+  }
   {
     StateLock l;
     in.nch = g.nch < auxrelay::MAX_CH ? g.nch : auxrelay::MAX_CH;
     in.readOk = g.readOk && g.ac;
     in.disabled = g.disabled;
     in.tamper = g.tamper;
+    in.ups = g.ups;
     in.voltOut = g.voltOut;
     in.noWifi = g.net <= NET_WIFI_CONNECTING;
     in.noServer = g.paired && g.offlineSinceMs != 0;
@@ -1033,6 +1048,16 @@ static void auxTick() {
     }
   }
   auxrelay::tick(in);
+}
+
+// UPS signal input (ups.cpp): report when the UPS starts / stops running on its battery.
+static void checkUps() {
+  if (!ups::poll()) return;
+  StateLock l;
+  g.ups = ups::active();
+  emitEvent(g.ups ? "ups_on" : "ups_off");
+  Serial.printf("[ups] %s\n", g.ups ? "running on the UPS" : "mains is back");
+  bump();
 }
 
 static void checkTamper() {
@@ -1064,6 +1089,7 @@ void task(void *) {
   {
     StateLock l;  // conditions already present at boot (docs/protocol.md §2.5)
     if (g.tamper) emitEvent("tamper_open", [](JsonObject o, void *) { o["boot"] = 1; });
+    if (g.ups) emitEvent("ups_on", [](JsonObject o, void *) { o["boot"] = 1; });
     for (uint8_t i = 0; i < g.nch; i++)
       if (g.ch[i].tripped) {
         uint8_t ch = i;
@@ -1112,6 +1138,7 @@ void task(void *) {
 #endif
     sys::crumb(sys::CR_CONTROL, "rules");
     checkTamper();
+    checkUps();
     checkRules(first);
     sys::crumb(sys::CR_CONTROL, "aux");
     auxTick();

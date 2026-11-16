@@ -71,6 +71,9 @@
           <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="rtc" id="gRtc"><label class="form-check-label" for="gRtc">DS3231 clock (RTC) on the I2C bus</label></div>
           <div class="d-flex flex-wrap gap-2 align-items-center mb-2"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="tamper" id="gTamper" checked>
             <label class="form-check-label" for="gTamper">Tamper / panel switch, on GPIO</label></div><input class="form-control form-control-sm" style="width:70px" name="pin_tamper" value="4"></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-2"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="ups" id="gUps">
+            <label class="form-check-label" for="gUps">UPS signal input, on GPIO</label></div><input class="form-control form-control-sm" style="width:70px" name="pin_ups" value="2">
+            <span class="small">on UPS when</span><select class="form-select form-select-sm" style="width:210px" name="ups_level"><option value="LOW">LOW (contact to GND)</option><option value="HIGH">HIGH (3.3 V signal)</option></select></div>
           <div class="d-flex flex-wrap gap-2 align-items-center"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="battery" id="gBat">
             <label class="form-check-label" for="gBat">Battery voltage, ADC GPIO</label></div><input class="form-control form-control-sm" style="width:70px" name="pin_battery" value="1"></div>
           <div class="d-flex flex-wrap gap-2 align-items-center small mt-1 ms-4"><span>divider</span><input class="form-control form-control-sm" style="width:70px" name="bat_div" value="2.0">

@@ -483,7 +483,7 @@ HANDLERS = {
 # ---------------------------------------------------------------- state / events
 
 def _apply_state(device, state):
-    keys = ("relay", "tripped", "tamper", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor", "aux",
+    keys = ("relay", "tripped", "tamper", "ups", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor", "aux",
             "temp_high")
     clean = {k: state[k] for k in keys if k in state}
     merged = dict(device.last_state or {})
@@ -562,6 +562,8 @@ def _reconcile_incidents(device, state):
     checks = []
     if "tamper" in state:
         checks.append(("tamper", bool(state["tamper"])))
+    if "ups" in state:
+        checks.append(("ups", bool(state["ups"])))
     if "ac" in state:
         checks.append(("power", state["ac"] is False))
     relays = state.get("relay") or []
@@ -610,6 +612,12 @@ def process_event(device, ev):
         notify.notify(device, "panel_open", f"Panel opened (tamper switch){what}")
     elif e == "tamper_close":
         incidents.close_incident(device.id, "tamper", ev.ts, event=ev, estimated=est)
+    elif e == "ups_on":  # UPS signal input of the meter (firmware UPS_ENABLE)
+        incidents.open_incident(device.id, "ups", ev.ts, event=ev, estimated=est)
+        notify.notify(device, "ups", "Mains failed: running on UPS power")
+    elif e == "ups_off":
+        incidents.close_incident(device.id, "ups", ev.ts, event=ev, estimated=est)
+        notify.notify(device, "ups", "Mains is back: no longer on UPS power")
     elif e == "voltage_out":
         def num(x):
             return f"{float(x):g}" if x not in (None, "", 0, 0.0) else "–"

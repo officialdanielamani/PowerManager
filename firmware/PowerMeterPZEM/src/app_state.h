@@ -84,6 +84,7 @@ struct AppState {
   bool tripped = false;
   bool disabled = false;       // disabled by the server: relay off, no session (persisted)
   bool tamper = false;
+  bool ups = false;            // UPS input: running on the UPS (UPS_ENABLE)
   bool ac = true;
   bool sensorEverOk = false;
   bool voltOut = false;        // voltage outside the operating range (debounced)

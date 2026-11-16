@@ -11,9 +11,10 @@ from . import settings
 MODES = {"manual": "Manual (ON / OFF buttons)", "schedule": "Schedule", "event": "Event"}
 SOURCES = {"temp": "Temperature", "hum": "Humidity", "amp": "Current (A)", "watt": "Power (W)",
            "kwh": "kWh balance", "session": "Session", "tamper": "Tamper", "trip": "Over-current trip",
-           "volt": "Voltage protection", "wifi": "No Wi-Fi", "server": "No server / internet"}
-UNITS = {"temp": "°C", "hum": "%RH", "amp": "A", "watt": "W", "kwh": "kWh"}
-FLAGS = ("tamper", "trip", "volt", "wifi", "server")  # on / off conditions ("active" or "not active")
+           "volt": "Voltage protection", "wifi": "No Wi-Fi", "server": "No server / internet",
+           "ups": "UPS power (mains failed)", "bat": "Battery %"}
+UNITS = {"temp": "°C", "hum": "%RH", "amp": "A", "watt": "W", "kwh": "kWh", "bat": "%"}
+FLAGS = ("tamper", "trip", "volt", "wifi", "server", "ups")  # on / off conditions ("active" or "not active")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 SCHED_MAX = 14
 SCHED_OLD = 4  # firmware before 0.9.3 / 0.7.3 (caps.aux_v missing)
@@ -49,6 +50,9 @@ def sources(device):
             continue
         if k in FLAGS and not new:
             continue
+        if k in ("ups", "bat") and (device is None or int(caps.get("aux_v") or 0) < 3
+                                    or not caps.get("ups" if k == "ups" else "battery")):
+            continue  # UPS input / battery measurement not enabled in the meter's firmware
         if k == "tamper" and device is not None and not caps.get("tamper"):
             continue
         if k == "volt" and caps.get("voltage") is False:
@@ -135,7 +139,7 @@ def parse_form(form, n, errors, device=None):
         if src in allowed:
             idx = form.get(f"aux_ev_idx_{j}", "0")
             idx = int(idx) if str(idx).isdigit() and (int(idx) < 16 or int(idx) == TOTAL or (int(idx) == ANY and v2(device))) else 0
-            if src in ("tamper", "volt", "wifi", "server"):
+            if src in ("tamper", "volt", "wifi", "server", "ups", "bat"):
                 idx = 0
             ev = {"src": src, "idx": idx, "on": form.get(f"aux_ev_on_{j}", "on") == "on"}
             if src == "session":
@@ -221,11 +225,13 @@ def describe(a, device=None):
         src = ev.get("src")
         if src in ("temp", "hum"):
             who = f"T{int(ev.get('idx', 0)) + 1}"
+        elif src == "bat":
+            who = ""
         elif src in ("amp", "watt"):
             who = "all channels" if ev.get("idx") == TOTAL else "any channel" if ev.get("idx") == ANY else (device.channel_name(ev.get("idx", 0)) if device and device.is_mc else "the line")
         else:
             who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else \
                 ("any session" if ev.get("idx") == ANY else device.channel_name(ev.get("idx", 0)))
         cmp = "≥" if ev.get("cmp", "over") == "over" else "≤"
-        return f"Event: {what} while {SOURCES.get(src, src)} {who} {cmp} {ev.get('value')} {UNITS.get(src, '')}".strip()
+        return " ".join(f"Event: {what} while {SOURCES.get(src, src)} {who} {cmp} {ev.get('value')} {UNITS.get(src, '')}".split())
     return "Manual"

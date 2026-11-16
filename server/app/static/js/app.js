@@ -66,7 +66,8 @@ var PM = (function () {
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
                   voltage: '<span class="badge pm-bg-orange"><i class="bi bi-activity"></i> Voltage</span>',
                   sensor: '<span class="badge text-bg-danger"><i class="bi bi-cpu"></i> Sensor</span>',
-                  temp: '<span class="badge text-bg-danger"><i class="bi bi-thermometer-high"></i> Temperature</span>'};
+                  temp: '<span class="badge text-bg-danger"><i class="bi bi-thermometer-high"></i> Temperature</span>',
+                  ups: '<span class="badge text-bg-warning"><i class="bi bi-battery-half"></i> On UPS</span>'};
 
   function set(root, field, fn) {
     root.querySelectorAll('[data-field="' + field + '"]').forEach(fn);

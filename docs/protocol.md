@@ -371,3 +371,11 @@ A configuration saved by older firmware (4 schedules) is converted on the first 
 - `info`: `wifi_net` (`main` / `backup`) and `wifi2` (name of the backup network, if any).
 - Without Wi-Fi the meter tries main, backup, main … every 30 s. On the backup it scans for the main SSID every
   `WIFI_MAIN_CHECK_MS` (5 min; doubled up to 1 h after each return that did not hold) and reconnects to it when seen.
+
+## 10. UPS input and battery % (`hello.caps.ups`, `hello.caps.battery`, `caps.aux_v` = 3)
+
+- Firmware `UPS_ENABLE 1`: a signal input (`PIN_UPS`, active level `UPS_ACTIVE_LEVEL` LOW or HIGH, debounced
+  `UPS_DEBOUNCE_MS`). Events `ups_on` (also with `"boot": 1` when already active at start-up) and `ups_off`; state
+  field `ups`. The server opens / closes a historical event "On UPS power" and sends the *UPS power* notification.
+- AUX `event.src` `ups` (`"active": true|false`) and `bat` (battery % remaining from `BATTERY_ENABLE`, `cmp` /
+  `value`, 2 % hysteresis). Offered by the server only when `caps.ups` / `caps.battery` are true.

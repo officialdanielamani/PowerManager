@@ -505,7 +505,7 @@
     });
   });
   // AUX relays: show the fields of the chosen mode / event source
-  var UNITS = {temp: '°C', hum: '%RH', amp: 'A', watt: 'W', kwh: 'kWh'}, FLAGS = {{ aux_flags|list|tojson }};
+  var UNITS = {temp: '°C', hum: '%RH', amp: 'A', watt: 'W', kwh: 'kWh', bat: '%'}, FLAGS = {{ aux_flags|list|tojson }};
   function syncAux(box) {
     var mode = box.querySelector('.pm-aux-mode').value;
     box.querySelector('.pm-aux-sched').classList.toggle('d-none', mode !== 'schedule');

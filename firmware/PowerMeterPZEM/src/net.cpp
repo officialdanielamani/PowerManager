@@ -11,6 +11,7 @@
 #include "../config.h"
 #include "app_state.h"
 #include "battery.h"
+#include "ups.h"
 #include "certs.h"
 #include "control.h"
 #include "led.h"
@@ -423,7 +424,7 @@ static String pairBody(const PairRequest &r) {
   caps["channels"] = SENSOR_CHANNELS;
   caps["relays"] = CHANNEL_RELAY ? 1 : 0;
   caps["aux"] = auxrelay::count();  // AUX relays (every relay output except CHANNEL_RELAY)
-  caps["aux_v"] = 2;  // 14 schedules (by day or date), extra event sources, "any channel"
+  caps["aux_v"] = 3;  // 2: 14 schedules (day / date), more events, "any channel"; 3: UPS + battery % events
   if (temp::hasHumidity()) caps["hum"] = true;
   caps["inputs"].to<JsonArray>().add("tamper");
   caps["rtc"] = (bool)HAS_DS3231;
@@ -431,6 +432,8 @@ static String pairBody(const PairRequest &r) {
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
   caps["wifi2"] = true;            // backup Wi-Fi (set_wifi with slot "backup")
+  caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
+  caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
   caps["amp_rating"] = SENSOR_AMP_RATING;
   String payload;
@@ -603,7 +606,7 @@ static void sendHello() {
   caps["sensor"] = METER_DC ? "pzem017" : "pzem004t";
   caps["mc"] = false;  // single-channel firmware (the server detects a change of hardware type)
   caps["aux"] = auxrelay::count();
-  caps["aux_v"] = 2;  // 14 schedules (by day or date), extra event sources, "any channel"
+  caps["aux_v"] = 3;  // 2: 14 schedules (day / date), more events, "any channel"; 3: UPS + battery % events
   if (temp::hasHumidity()) caps["hum"] = true;
   caps["channels"] = SENSOR_CHANNELS;
   caps["rtc"] = (bool)HAS_DS3231;
@@ -611,6 +614,8 @@ static void sendHello() {
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
   caps["wifi2"] = true;            // backup Wi-Fi (set_wifi with slot "backup")
+  caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
+  caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();
   caps["amp_rating"] = SENSOR_AMP_RATING;
   control::stateJson(doc["state"].to<JsonObject>());

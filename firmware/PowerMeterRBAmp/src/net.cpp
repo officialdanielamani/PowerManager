@@ -11,6 +11,7 @@
 #include "../config.h"
 #include "app_state.h"
 #include "battery.h"
+#include "ups.h"
 #include "certs.h"
 #include "control.h"
 #include "led.h"
@@ -428,13 +429,15 @@ static void fillCaps(JsonObject caps) {
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
-  caps["aux_v"] = 2;  // 14 schedules (by day or date), extra event sources, "any channel"
+  caps["aux_v"] = 3;  // 2: 14 schedules (day / date), more events, "any channel"; 3: UPS + battery % events
   if (temp::hasHumidity()) caps["hum"] = true;
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
   caps["wifi2"] = true;            // backup Wi-Fi (set_wifi with slot "backup")
+  caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
+  caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
   float maxA = 0;
   JsonArray r = caps["ratings"].to<JsonArray>();

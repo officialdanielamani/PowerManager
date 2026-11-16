@@ -1,7 +1,7 @@
 // PowerMeter firmware configuration. See docs/firmware.md.
 #pragma once
 
-#define FW_VERSION "0.7.4"
+#define FW_VERSION "0.7.5"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -50,11 +50,16 @@
 #define RELAY_GPIO_PINS { 7 }       // pins for RELAY_GPIO entries, in order
 #define CHANNEL_RELAY 1             // relay number of the measured line (0 = no relay)
 #define TAMPER_OPEN_LEVEL HIGH   // with NC switch to GND + pull-up, HIGH = open
+#define PIN_UPS 2           // UPS signal input (only with UPS_ENABLE 1, see "optional parts")
+#define UPS_ACTIVE_LEVEL LOW     // level of PIN_UPS that means "running on the UPS":
+                                 //   LOW  = contact / open collector to GND (internal pull-up is used)
+                                 //   HIGH = 3.3 V logic signal (internal pull-down is used; never 5 V / 12 V directly)
 
 // ---------------------------------------------------------------- optional parts (0 = not fitted)
 // A part switched off here is left out of the firmware completely (smaller binary).
 #define HAS_DS3231 0        // DS3231 RTC module on PIN_I2C_SDA / PIN_I2C_SCL (keeps the time without Wi-Fi)
 #define TAMPER_ENABLE 1     // tamper / panel switch on PIN_TAMPER
+#define UPS_ENABLE 0        // UPS signal input on PIN_UPS: event + notification while the UPS runs on battery
 #define TEMP_DS18B20 0      // DS18B20 temperature sensor(s) on PIN_TEMP (see "temperature" below)
 #define TEMP_SHT 0          // SHT20 / SHT3x / SHT4x temperature + humidity sensor(s) on the I2C bus
 // (BATTERY_ENABLE and MESH_ENABLE are in their own sections below.)
@@ -124,6 +129,7 @@
                                   // (OFF is always immediate; only the next ON waits)
 #define RELAY_CHATTER_SWITCHES 6  // more relay changes than this within 60 s = warning on serial + event
 #define TAMPER_DEBOUNCE_TICKS 4   // tamper input must be stable this many ticks (x 250 ms) to count
+#define UPS_DEBOUNCE_MS 2000      // UPS input must be stable this long to count
 #define VOLT_OUT_READS 3          // operating voltage: out of range for 3 reads (~3 s) to trigger
 #define VOLT_OK_READS 10          // ...and back in range for 10 reads (~10 s) to clear
 #define WS_PING_INTERVAL_MS 30000

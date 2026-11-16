@@ -3,7 +3,7 @@
 //   - schedule : up to 14 time windows (local time; chosen week days or one date) with ON or OFF, otherwise a
 //                default state
 //   - event    : ON / OFF while a condition holds (temperature, humidity, current, power, kWh balance, session,
-//                tamper, over-current trip, voltage protection, no Wi-Fi, no server); per channel or any channel
+//                tamper, over-current trip, voltage protection, no Wi-Fi, no server, UPS input, battery %); per channel or any channel
 // "Override" lets a manual ON / OFF win over the automation until the automation changes state again.
 // Runs on the meter, so it keeps working offline. Shared by both firmwares (firmware/tools/check_shared.py).
 #pragma once
@@ -28,6 +28,8 @@ struct Inputs {
   bool voltOut = false;    // voltage outside the allowed range
   bool noWifi = false;     // Wi-Fi not connected
   bool noServer = false;   // paired, but no link to the server (also: internet problem)
+  bool ups = false;        // UPS input active: running on the UPS (UPS_ENABLE)
+  float batPct = NAN;      // battery % remaining (BATTERY_ENABLE), NAN = not measured
   bool disabled = false;   // meter disabled by the server: every AUX relay off
   Inputs() {
     for (uint8_t i = 0; i < MAX_CH; i++) balance[i] = NAN;

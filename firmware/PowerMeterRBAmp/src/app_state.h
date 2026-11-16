@@ -109,6 +109,7 @@ struct AppState {
   bool everStarted = false;    // (unused since 0.7.2: sessions start with Renew)
   bool disabled = false;       // disabled by the server: relays off, no session (persisted)
   bool tamper = false;
+  bool ups = false;            // UPS input: running on the UPS (UPS_ENABLE)
   bool ac = true;
   bool sensorEverOk = false;
   bool voltOut = false;        // voltage outside the operating range (debounced)

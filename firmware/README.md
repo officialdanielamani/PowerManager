@@ -162,3 +162,10 @@ for 5 minutes (`MQTT_FALLBACK_MS`). `NET_MQTT 0` saves about 18 KB of flash. `NE
 
 PC test of the MQTT client (real broker + real server code, no ESP32):
 `python3 tools/mqttlink_test/run.py <ArduinoJson/src>` (needs `pip install amqtt paho-mqtt`, g++, OpenSSL headers).
+
+## 8. UPS signal input (optional)
+
+`UPS_ENABLE 1` in `config.h`: `PIN_UPS` reads a UPS's "on battery" signal. `UPS_ACTIVE_LEVEL LOW` = dry contact /
+open collector to GND (internal pull-up), `HIGH` = 3.3 V logic signal (internal pull-down; never 5 V or 12 V
+directly, use an optocoupler or divider). The meter reports `ups_on` / `ups_off` (notification + historical event
+on the server) and AUX relays can react to it, and to the battery % when `BATTERY_ENABLE 1`.
