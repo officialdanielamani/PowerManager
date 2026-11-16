@@ -2,7 +2,7 @@
 // ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
 #pragma once
 
-#define FW_VERSION "0.9.3"
+#define FW_VERSION "0.9.4"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 
@@ -143,6 +143,7 @@
 #define WS_PONG_TIMEOUT_MS 10000
 #define ACK_TIMEOUT_MS 5000       // resend unacked outbox items after this
 #define WIFI_FALLBACK_AP_MS (3UL * 60UL * 1000UL)   // open setup AP if Wi-Fi fails this long
+#define WIFI_MAIN_CHECK_MS (5UL * 60UL * 1000UL)    // on the backup Wi-Fi: look for the main one this often
 #define AP_CLOSE_AFTER_STA_MS (5UL * 60UL * 1000UL) // close fallback AP after STA is back
 #define FACTORY_RESET_HOLD_MS 10000
 #define WEB_SESSION_TTL_S (12UL * 3600UL)

@@ -80,6 +80,8 @@ def issue(device, c, params=None, user=None):
                 old.cancelled = True
     if c in SECRET:  # only the latest settings matter
         for old in Command.query.filter_by(device_fk=device.id, c=c, sent_at=None, cancelled=False).all():
+            if (old.params or {}).get("slot") != params.get("slot"):  # main and backup Wi-Fi are separate
+                continue
             old.cancelled = True
             old.params = _scrub(old.params)
     cmd = Command(device_fk=device.id, c=c, params=params,

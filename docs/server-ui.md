@@ -238,7 +238,12 @@ docs/multichannel.md § AUX relays.
 - **Configure Meter → Connection** (admin / manager; meters with MQTT firmware): *Change Wi-Fi* (SSID typed by hand +
   password; the meter keeps the old Wi-Fi if the new one does not connect, and a Meter status notification tells the
   result) and *MQTT*: server broker / WebSocket only / own broker for this meter.
-- **Meter Info** shows *Link to server* (MQTT or WebSocket).
+- **Configure Meter → Connection → Backup Wi-Fi** (firmware PZEM 0.7.4 / rbAmp 0.9.4): a second network (another
+  router, a phone hotspot). The meter tries main and backup in turn while it has no Wi-Fi, and on the backup it
+  looks for the main network every 5 minutes and moves back when it is there. Saved without a test; *Remove*
+  deletes it. A Meter status notification tells when the meter moves to the backup and back. It can also be set
+  on the meter's own page (Settings → Wi-Fi).
+- **Meter Info** shows *Link to server* (MQTT or WebSocket) and, on the backup network, "(backup)" behind the Wi-Fi name.
 - The broker login alone is not enough to read as or control a meter: messages are signed with the meter's key
   (docs/protocol.md §7).
 

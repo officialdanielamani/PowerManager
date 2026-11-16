@@ -265,6 +265,29 @@ def connection(pk):
     if not (device.caps or {}).get("mqtt") and f.get("what") == "mqtt":
         flash("This meter's firmware has no MQTT support.", "warning")
         return back
+    if f.get("what") == "wifi2":  # backup Wi-Fi: saved on the meter as it is; empty name = remove it
+        ssid, pw = (f.get("ssid") or "").strip(), f.get("wifi_pass") or ""
+        if not (device.caps or {}).get("wifi2"):
+            flash("Backup Wi-Fi needs firmware PZEM 0.7.4 / rbAmp 0.9.4 or newer.", "warning")
+        elif f.get("remove") == "1":
+            ssid, pw = "", ""
+        elif not 1 <= len(ssid.encode()) <= 32:
+            flash("Backup Wi-Fi name (SSID): 1–32 characters", "danger")
+            return back
+        elif pw and not 8 <= len(pw) <= 63:
+            flash("Wi-Fi password: 8–63 characters (empty for an open network)", "danger")
+            return back
+        if (device.caps or {}).get("wifi2"):
+            cmd, err = commands.issue(device, "set_wifi", {"slot": "backup", "ssid": ssid, "pass": pw}, current_user)
+            ingest.server_event(device, "wifi_backup_requested", {"by": current_user.username, "ssid": ssid})
+            net = dict(device.net or {})
+            net["wifi2"] = ssid
+            device.net = net
+            db.session.commit()
+            what = f"Backup Wi-Fi '{ssid}'" if ssid else "Removing the backup Wi-Fi"
+            flash(f"{what} sent to the meter." if cmd is not None and cmd.sent_at else
+                  f"The meter is offline: {what[0].lower() + what[1:]} is sent when it reconnects.", "success")
+        return back
     if f.get("what") == "wifi":
         ssid, pw = (f.get("ssid") or "").strip(), f.get("wifi_pass") or ""
         if not 1 <= len(ssid.encode()) <= 32:
@@ -283,6 +306,8 @@ def connection(pk):
     if f.get("what") == "mqtt":
         mode = f.get("mqtt_mode") if f.get("mqtt_mode") in ("server", "off", "custom") else "server"
         net = {"mqtt": mode}
+        if (device.net or {}).get("wifi2"):
+            net["wifi2"] = device.net["wifi2"]  # the backup Wi-Fi name is kept here too
         if mode == "custom":
             host = (f.get("host") or "").strip()
             for pre in ("wss://", "ws://", "https://", "http://"):

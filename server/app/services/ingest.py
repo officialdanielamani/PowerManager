@@ -459,7 +459,7 @@ def h_info(conn, device, msg):
     keep = ("ip", "ssid", "rssi", "mac", "heap", "heap_min", "psram", "psram_free", "fw", "hw", "hw_info",
             "bat_v", "bat_pct", "uptime", "boot", "core", "chip", "flash", "outbox", "time_src",
             "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "sensor_detail", "relay_board", "clamps",
-            "sensor_boards", "temp_sensors", "transport", "mqtt")
+            "sensor_boards", "temp_sensors", "transport", "mqtt", "wifi_net", "wifi2")
     device.last_info = {k: msg[k] for k in keep if k in msg}
     device.last_info_at = now()
 
@@ -637,6 +637,11 @@ def process_event(device, ev):
         else:
             notify.notify(device, "meter_status",
                           f"Wi-Fi change failed (could not connect): the meter stays on '{d.get('ssid', '?')}'")
+    elif e == "wifi_backup":  # the meter moved to its backup Wi-Fi, or back to the main one
+        if d.get("on"):
+            notify.notify(device, "meter_status", f"Main Wi-Fi not reachable: the meter is on its backup Wi-Fi '{d.get('ssid', '?')}'")
+        else:
+            notify.notify(device, "meter_status", f"The meter is back on its main Wi-Fi '{d.get('ssid', '?')}'")
     elif e == "temp_high":
         incidents.open_incident(device.id, "temp", ev.ts, event=ev, estimated=est,
                                 detail={"i": d.get("i"), "c": d.get("c"), "max": d.get("max"), "action": d.get("action")})

@@ -167,6 +167,56 @@ static bool wifiTestLoop() {
   return true;
 }
 
+#ifndef WIFI_MAIN_CHECK_MS
+#define WIFI_MAIN_CHECK_MS (5UL * 60UL * 1000UL)
+#endif
+static void stopWs();
+
+// Main / backup Wi-Fi. Without a link the two are tried in turn (30 s each, main first). On the backup the
+// meter looks for the main network now and then (a scan, the link stays up) and moves back when it is there.
+static uint8_t wifiTry = 0;          // attempts since the link dropped
+static bool onBackup = false;        // connected to the backup network
+static uint32_t mainCheckMs = WIFI_MAIN_CHECK_MS, lastMainCheckMs = 0;
+static bool mainScan = false;
+
+static void beginSavedWifi(bool backup) {
+  if (backup) WiFi.begin(store::wifi2Ssid().c_str(), store::wifi2Pass().c_str());
+  else WiFi.begin(store::wifiSsid().c_str(), store::wifiPass().c_str());
+}
+
+static void backToMainLoop(uint32_t now) {
+  if (!onBackup || leafMode) {
+    mainScan = false;
+    return;
+  }
+  if (!mainScan) {
+    if (now - lastMainCheckMs < mainCheckMs) return;
+    lastMainCheckMs = now;
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;  // the meter's own page is scanning
+    WiFi.scanDelete();
+    WiFi.scanNetworks(true);
+    mainScan = true;
+    return;
+  }
+  int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) return;
+  mainScan = false;
+  bool seen = false;
+  String want = store::wifiSsid();
+  for (int i = 0; i < n; i++)
+    if (WiFi.SSID(i) == want && WiFi.RSSI(i) > -82) seen = true;
+  WiFi.scanDelete();
+  if (!seen) return;
+  Serial.printf("[net] main Wi-Fi '%s' is back: leaving the backup\n", want.c_str());
+  // If the main network refuses us (wrong password) we come back to the backup: look less often then.
+  mainCheckMs = mainCheckMs * 2 > 3600000UL ? 3600000UL : mainCheckMs * 2;
+  stopWs();
+  WiFi.disconnect();
+  wifiTry = 0;
+  lastWifiRetryMs = now;
+  beginSavedWifi(false);
+}
+
 static void wifiLoop() {
   if (wifiTestLoop()) return;
   if (!store::hasWifi()) {
@@ -180,7 +230,10 @@ static void wifiLoop() {
     if (!wifiDownSinceMs) wifiDownSinceMs = now;
     if (now - lastWifiRetryMs > 30000) {  // keep trying, the driver may give up on its own
       lastWifiRetryMs = now;
-      WiFi.begin(store::wifiSsid().c_str(), store::wifiPass().c_str());
+      bool backup = store::hasWifi2() && (wifiTry & 1);  // main, backup, main, ...
+      wifiTry++;
+      if (store::hasWifi2()) Serial.printf("[net] Wi-Fi: trying the %s network\n", backup ? "backup" : "main");
+      beginSavedWifi(backup);
     }
     if (now - wifiDownSinceMs > WIFI_FALLBACK_AP_MS) startAp();  // let the user fix Wi-Fi
     setNet(NET_WIFI_CONNECTING);
@@ -189,9 +242,21 @@ static void wifiLoop() {
   wifiDownSinceMs = 0;
   if (!wifiUpSinceMs) {
     wifiUpSinceMs = now;
-    Serial.printf("[net] Wi-Fi connected, IP %s\n", WiFi.localIP().toString().c_str());
+    wifiTry = 0;
+    bool backup = store::hasWifi2() && WiFi.SSID() == store::wifi2Ssid() && WiFi.SSID() != store::wifiSsid();
+    if (backup != onBackup) {
+      onBackup = backup;
+      control::emitEvent("wifi_backup", [](JsonObject o, void *) {
+        o["on"] = onBackup;
+        o["ssid"] = WiFi.SSID();
+      });
+    }
+    if (!backup) mainCheckMs = WIFI_MAIN_CHECK_MS;
+    lastMainCheckMs = now;
+    Serial.printf("[net] Wi-Fi connected%s, IP %s\n", backup ? " (backup network)" : "", WiFi.localIP().toString().c_str());
   }
   if (g.apActive && store::hasAdmin() && now - wifiUpSinceMs > AP_CLOSE_AFTER_STA_MS) stopAp();
+  backToMainLoop(now);
   if (!mdnsStarted) {
     String host = "power-" + store::deviceId();
     host.toLowerCase();
@@ -369,6 +434,7 @@ static void fillCaps(JsonObject caps) {
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
+  caps["wifi2"] = true;            // backup Wi-Fi (set_wifi with slot "backup")
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
   float maxA = 0;
   JsonArray r = caps["ratings"].to<JsonArray>();
@@ -598,6 +664,8 @@ static void sendInfo() {
     doc["leaves"] = mesh::leafCount();
   }
   doc["ssid"] = WiFi.SSID();
+  doc["wifi_net"] = onBackup ? "backup" : "main";
+  if (store::hasWifi2()) doc["wifi2"] = store::wifi2Ssid();
   doc["rssi"] = WiFi.RSSI();
   doc["mac"] = WiFi.macAddress();
   doc["heap"] = ESP.getFreeHeap();
@@ -712,10 +780,16 @@ static void handleCommand(JsonObject m) {
     }
   } else if (!strcmp(c, "set_wifi")) {
     // New Wi-Fi from the server: tried for 20 s and saved only if it connects; else back to the old one.
+    // "slot": "backup" = the backup network: saved as it is (it cannot be tried without leaving the main
+    // one); an empty ssid removes it.
     String ssid = m["ssid"] | "", pass = m["pass"] | "";
-    if (ssid.length() < 1 || ssid.length() > 32 || (pass.length() && (pass.length() < 8 || pass.length() > 63))) {
+    bool backup = !strcmp(m["slot"] | "main", "backup");
+    if (ssid.length() > 32 || (!backup && ssid.length() < 1) || (pass.length() && (pass.length() < 8 || pass.length() > 63))) {
       ok = false;
       err = "bad_wifi";
+    } else if (backup) {
+      store::setWifi2(ssid, pass);
+      Serial.printf("[net] backup Wi-Fi %s by the server\n", ssid.length() ? "set" : "removed");
     } else if (leafMode) {
       ok = false;
       err = "mesh_leaf";

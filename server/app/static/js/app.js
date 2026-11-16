@@ -414,7 +414,7 @@ var PM = (function () {
       var i = d.info || {}, rows = [
         ['Connection', i.link === 'mesh' ? 'Mesh via ' + i.gateway + (i.mesh_ch ? ' (channel ' + i.mesh_ch + ')' : '') :
           i.link === 'wifi' ? 'Wi-Fi' + (i.leaves ? ' · gateway for ' + i.leaves + ' meter(s)' : '') : i.link],
-        ['IP address', i.ip || null], ['Wi-Fi', i.link !== 'mesh' && i.ssid ? i.ssid + (i.rssi ? ' (' + i.rssi + ' dBm)' : '') : null], ['MAC', i.mac],
+        ['IP address', i.ip || null], ['Wi-Fi', i.link !== 'mesh' && i.ssid ? i.ssid + (i.wifi_net === 'backup' ? ' (backup)' : '') + (i.rssi ? ' (' + i.rssi + ' dBm)' : '') + (i.wifi2 && i.wifi_net !== 'backup' ? ' · backup: ' + i.wifi2 : '') : null], ['MAC', i.mac],
         ['Battery', i.bat_v != null ? Number(i.bat_v).toFixed(2) + ' V' + (i.bat_pct != null ? ' · ~' + i.bat_pct + ' %' : '') : 'not enabled (config.h)'],
         ['Free heap', i.heap != null ? Math.round(i.heap / 1024) + ' KB' + (i.heap_min != null ? ' (lowest ' + Math.round(i.heap_min / 1024) + ' KB)' : '') : null],
         ['PSRAM', i.psram ? Math.round(i.psram / 1024) + ' KB' + (i.psram_free != null ? ' (' + Math.round(i.psram_free / 1024) + ' KB free)' : '') : 'none'],

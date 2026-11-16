@@ -91,7 +91,10 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <label>Confirm</label><input id="np2" type="password" maxlength="64">
 <p><button onclick="chpw()">Change password</button></p></div>
 <div class="card"><h2>Wi-Fi</h2><p class="mut">Connected to <b id="curSsid"></b>. Changing it restarts the meter.</p>
-<button class="sec" onclick="show('wifi');scan(1)">Change Wi-Fi</button></div>
+<button class="sec" onclick="show('wifi');scan(1)">Change Wi-Fi</button>
+<p class="mut" style="margin-top:14px">Backup Wi-Fi (used when the main one is not reachable; the meter goes back to the main one when it returns): <b id="curSsid2"></b></p>
+<label>Backup network name (SSID)</label><input id="ws2" maxlength="32"><label>Password</label><input id="wp2" type="password" maxlength="63">
+<p><button class="sec" onclick="post('/api/wifi2',{ssid:$('ws2').value,pass:$('wp2').value}).then(function(r){note(r.message||r.error,r.ok?'inf':'err');$('wp2').value=''})">Save backup Wi-Fi</button> <button class="sec" onclick="post('/api/wifi2',{ssid:'',pass:''}).then(function(r){note(r.message||r.error,r.ok?'inf':'err');$('ws2').value=''})">Remove</button></p></div>
 <div class="card"><h2>Mesh</h2><p class="mut">Auto: Wi-Fi first. Without Wi-Fi for 90 s the meter talks through a nearby meter that is online (gateway), and an online meter relays for others. Wi-Fi only: never uses or offers the mesh.</p>
 <div class="row"><select id="mrole"><option value="auto">Auto (recommended)</option><option value="wifi">Wi-Fi only</option></select>
 <button class="sec" style="flex:0" onclick="post('/api/mesh',{role:$('mrole').value}).then(r=>note(r.message||r.error,r.ok?'inf':'err'))">Save</button></div></div>
@@ -142,7 +145,7 @@ function pill(t,k){return'<span class="pill '+k+'">'+esc(t)+'</span>'}
 function stat(x){return'<div class="stat"><small>'+x[0]+'</small><b>'+x[1]+'</b></div>'}
 function load(){api('/api/state').then(function(d){if(d._s==401)return route();if(!d.state)return;var st=d.state,r=d.reading||{};
  var netMap={online:[d.link=='mesh'?'Online (mesh)':'Online','ok'],connecting:['Server offline','bad'],not_paired:['Not paired','warn'],wifi_connecting:['Wi-Fi connecting','warn'],setup:['Setup','warn']};
- var nm=netMap[d.net]||[d.net,''];$('dNet').innerHTML=pill(nm[0],nm[1]);$('curSsid').textContent=d.mesh_only?'(mesh only)':d.ssid;$('mrole').value=d.role||'auto';
+ var nm=netMap[d.net]||[d.net,''];$('dNet').innerHTML=pill(nm[0],nm[1]);$('curSsid').textContent=d.mesh_only?'(mesh only)':(d.on_ssid||d.ssid)+(d.on_ssid&&d.ssid2&&d.on_ssid==d.ssid2&&d.on_ssid!=d.ssid?' (backup)':'');$('curSsid2').textContent=d.ssid2||'none';$('mrole').value=d.role||'auto';
  $('pairCard').classList.toggle('hide',d.paired);if(d.unauthorized)note('The server no longer accepts this meter. Pair it again.');
  $('dTime').textContent=(d.time?fmt(d.time):'Clock not set')+' · time from '+d.time_src+(d.rtc!=null?' · RTC (DS3231): '+(d.rtc?fmt(d.rtc):'not readable'):'');
  var c=d.cfg||{},cs=c.ch||[],ind=c.mode=='independent',sl=ind?(st.sessions||[]):[st.sess||{}],act={run:'run as usual',hold:'relay off',end:'end session'};

@@ -23,6 +23,10 @@ bool hasWifi();
 String wifiSsid();
 String wifiPass();
 void setWifi(const String &ssid, const String &pass);
+bool hasWifi2();                 // backup Wi-Fi (used when the main one is not reachable)
+String wifi2Ssid();
+String wifi2Pass();
+void setWifi2(const String &ssid, const String &pass);  // empty ssid = no backup
 
 bool hasAdmin();
 String adminUser();

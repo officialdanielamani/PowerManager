@@ -103,6 +103,19 @@ void setWifi(const String &ssid, const String &pass) {
   pm.putString("wpass", pass);
 }
 
+bool hasWifi2() { return pm.getString("wssid2", "").length() > 0; }
+String wifi2Ssid() { return pm.getString("wssid2", ""); }
+String wifi2Pass() { return pm.getString("wpass2", ""); }
+void setWifi2(const String &ssid, const String &pass) {
+  if (!ssid.length()) {
+    pm.remove("wssid2");
+    pm.remove("wpass2");
+    return;
+  }
+  pm.putString("wssid2", ssid);
+  pm.putString("wpass2", pass);
+}
+
 bool hasAdmin() { return pm.getString("auser", "").length() > 0; }
 String adminUser() { return pm.getString("auser", ""); }
 void setAdmin(const String &user, const String &pass) {

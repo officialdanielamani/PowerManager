@@ -255,6 +255,18 @@ static void hWifi() {
   sys::reboot(1500);
 }
 
+// Backup Wi-Fi: saved as it is (used when the main network is not reachable). Empty SSID = remove it.
+static void hWifi2() {
+  if (!requireAuth()) return;
+  JsonDocument b;
+  if (!body(b)) return;
+  String ssid = b["ssid"] | "", pass = b["pass"] | "";
+  if (ssid.length() > 32) return sendErr(400, "SSID must be at most 32 characters");
+  if (pass.length() && (pass.length() < 8 || pass.length() > 63)) return sendErr(400, "Wi-Fi password must be 8-63 characters");
+  store::setWifi2(ssid, pass);
+  sendOk(ssid.length() ? "Backup Wi-Fi saved" : "Backup Wi-Fi removed");
+}
+
 static void hWifiStatus() {
   if (!requireAuth()) return;
   JsonDocument d;
@@ -298,6 +310,8 @@ static void hState() {
   d["ip"] = net::ipAddress();
   d["rssi"] = net::rssi();
   d["ssid"] = store::wifiSsid();
+  d["ssid2"] = store::wifi2Ssid();
+  d["on_ssid"] = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
   d["server"] = net::serverHost();
   d["link"] = net::linkMode();
   d["gateway"] = net::meshGateway();
@@ -499,6 +513,7 @@ void begin() {
   server.on("/api/wifi/scan", HTTP_GET, hScan);
   server.on("/api/wifi", HTTP_POST, hWifi);
   server.on("/api/wifi/status", HTTP_GET, hWifiStatus);
+  server.on("/api/wifi2", HTTP_POST, hWifi2);
   server.on("/api/wifi/meshonly", HTTP_POST, hMeshOnly);
   server.on("/api/mesh", HTTP_POST, hMeshRole);
   server.on("/api/state", HTTP_GET, hState);

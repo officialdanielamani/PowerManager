@@ -361,3 +361,13 @@ Config `aux[i]` (firmware PZEM 0.7.3 / rbAmp 0.9.3):
 - `hello.caps.hum` = true when an SHT (humidity) sensor is configured.
 
 A configuration saved by older firmware (4 schedules) is converted on the first start.
+
+## 9. Backup Wi-Fi (`hello.caps.wifi2`)
+
+- `set_wifi` with `"slot": "backup"`: `ssid`, `pass` are saved as the backup network without a test; an empty
+  `ssid` removes it. (Without `slot` the command changes the main network as before.)
+- Event `wifi_backup` `{"on": true|false, "ssid": "..."}`: the meter connected to the backup network / is back on
+  the main one.
+- `info`: `wifi_net` (`main` / `backup`) and `wifi2` (name of the backup network, if any).
+- Without Wi-Fi the meter tries main, backup, main … every 30 s. On the backup it scans for the main SSID every
+  `WIFI_MAIN_CHECK_MS` (5 min; doubled up to 1 h after each return that did not hold) and reconnects to it when seen.
