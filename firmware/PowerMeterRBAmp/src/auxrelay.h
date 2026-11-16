@@ -1,7 +1,9 @@
 // AUX relays: relay outputs that no measured channel uses (see hwmap.h). Each one is
 //   - manual   : ON / OFF from the server or the meter's own page
-//   - schedule : up to 4 time windows (local time, chosen days) with ON or OFF, otherwise a default state
-//   - event    : ON / OFF while a condition holds (temperature, humidity, current, power, kWh balance, session)
+//   - schedule : up to 14 time windows (local time; chosen week days or one date) with ON or OFF, otherwise a
+//                default state
+//   - event    : ON / OFF while a condition holds (temperature, humidity, current, power, kWh balance, session,
+//                tamper, over-current trip, voltage protection, no Wi-Fi, no server); per channel or any channel
 // "Override" lets a manual ON / OFF win over the automation until the automation changes state again.
 // Runs on the meter, so it keeps working offline. Shared by both firmwares (firmware/tools/check_shared.py).
 #pragma once
@@ -12,7 +14,7 @@ namespace auxrelay {
 
 static const uint8_t MAX = 16;      // AUX relays handled (names / automation)
 static const uint8_t MAX_CH = 16;   // measured channels seen by event rules
-static const uint8_t SCHED_MAX = 4;
+static const uint8_t SCHED_MAX = 14;
 
 // Live values for event rules, filled by control every pass.
 struct Inputs {
@@ -21,6 +23,11 @@ struct Inputs {
   float a[MAX_CH] = {0}, w[MAX_CH] = {0};
   float balance[MAX_CH];   // kWh left in the session that governs the channel (NAN = no limit / no session)
   bool running[MAX_CH] = {false};  // that session is running (relay allowed by the session)
+  bool tripped[MAX_CH] = {false};  // over-current trip latched on the channel
+  bool tamper = false;     // tamper input active
+  bool voltOut = false;    // voltage outside the allowed range
+  bool noWifi = false;     // Wi-Fi not connected
+  bool noServer = false;   // paired, but no link to the server (also: internet problem)
   bool disabled = false;   // meter disabled by the server: every AUX relay off
   Inputs() {
     for (uint8_t i = 0; i < MAX_CH; i++) balance[i] = NAN;

@@ -142,12 +142,13 @@ relays**. They are not measured and not tied to limits, sessions or protections;
 them off. Each one is set on the server (Configuration → AUX relays):
 
 - **Manual**: ON / OFF buttons (Info page, the meter's own page). The state survives a reboot.
-- **Schedule**: up to 4 windows `start → end` (local time, any days), each ON or OFF; outside them the
-  "otherwise" state. The first matching window wins; an end before the start runs over midnight; end 23:59 =
+- **Schedule**: up to 14 windows `start → end` (local time; by week day, or by date: one date or the same date
+  every year), each ON or OFF; outside them the "otherwise" state. The first matching window wins; an end before the start runs over midnight; end 23:59 =
   to midnight.
 - **Event**: ON (or OFF) while a condition holds, the opposite otherwise: Temperature / Humidity of a sensor
-  (T1 …), Current / Power of a channel (or all channels), kWh balance of a session (≥ / ≤ a value), or a
-  session running / ended. Small hysteresis (1 °C, 2 %RH, 0.1 A, 10 W, 0.01 kWh) and at most one change per
+  (T1 …), Current / Power of a channel (any channel, or all channels together), kWh balance of a session
+  (≥ / ≤ a value), a session running / ended, or Tamper / Over-current trip / Voltage protection / No Wi-Fi /
+  No server active or not. Small hysteresis (1 °C, 2 %RH, 0.1 A, 10 W, 0.01 kWh) and at most one change per
   5 s; a missing value (sensor unplugged) keeps the last state.
 - **Enable override**: with an automation, the ON / OFF buttons still work and win until the automation
   changes state again (e.g. switched OFF at 01:05 inside a 01:00–02:00 ON window: stays OFF, and the next

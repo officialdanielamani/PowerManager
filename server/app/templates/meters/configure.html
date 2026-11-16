@@ -304,7 +304,7 @@
   <div class="col-12">
     <div class="card"><div class="card-header fw-semibold">AUX relays</div><div class="card-body">
       <p class="small text-body-secondary mb-2">Relay outputs that no measured channel uses. Not metered and not tied to limits or sessions.
-        Each one is <strong>Manual</strong> (ON / OFF buttons), on a <strong>Schedule</strong> (up to 4 time windows, local time {{ tz_label() }}) or driven by an <strong>Event</strong>.
+        Each one is <strong>Manual</strong> (ON / OFF buttons), on a <strong>Schedule</strong> (up to {{ aux_sched_max }} time windows by week day{{ ' or by date' if aux_v2 }}, local time {{ tz_label() }}) or driven by an <strong>Event</strong>.
         The meter runs the automation itself, so it keeps working while offline. <em>Enable override</em>: the ON / OFF buttons still work and win until the automation changes state again.</p>
       {% for a in aux_cfg %}{% set j = loop.index0 %}
       {% set mode = val('aux_mode_' ~ j, a.get('mode', 'manual')) %}
@@ -321,46 +321,65 @@
         </div>
         {# schedule #}
         <div class="mt-2 pm-aux-sched">
-          {% for k in range(4) %}
+          {% for k in range(aux_sched_max) %}
           {% set s = (a.get('sched') or [])[k] if k < (a.get('sched') or [])|length else none %}
-          {% set days = (f.getlist('aux_s' ~ k ~ '_days_' ~ j)|map('int')|list) if f else ((s.days if s else [0, 1, 2, 3, 4, 5, 6])) %}
-          <div class="d-flex flex-wrap gap-2 align-items-center mb-1 small">
-            <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="aux_s{{ k }}_use_{{ j }}" id="aux_s{{ k }}_use_{{ j }}" {{ chk('aux_s' ~ k ~ '_use_' ~ j, s is not none) }}>
-              <label class="form-check-label" for="aux_s{{ k }}_use_{{ j }}">{{ k + 1 }}.</label></div>
+          {% set used = (f.get('aux_s' ~ k ~ '_use_' ~ j) == 'on') if f else (s is not none) %}
+          {% set days = (f.getlist('aux_s' ~ k ~ '_days_' ~ j)|map('int')|list) if f else ((s.get('days') or []) if s else [0, 1, 2, 3, 4, 5, 6]) %}
+          {% set kind = val('aux_s' ~ k ~ '_kind_' ~ j, 'date' if (s and s.get('date')) else 'day') %}
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-1 small pm-aux-row {{ '' if used or k == 0 else 'd-none' }}">
+            <div class="form-check mb-0"><input class="form-check-input pm-aux-use" type="checkbox" name="aux_s{{ k }}_use_{{ j }}" id="aux_s{{ k }}_use_{{ j }}" {{ 'checked' if used }}>
+              <label class="form-check-label" for="aux_s{{ k }}_use_{{ j }}" style="min-width:1.6em">{{ k + 1 }}.</label></div>
             {% set son = val('aux_s' ~ k ~ '_on_' ~ j, 'on' if (s is none or s.get('on', true)) else 'off') %}
             <select class="form-select form-select-sm" style="width:80px" name="aux_s{{ k }}_on_{{ j }}"><option value="on" {{ 'selected' if son == 'on' }}>ON</option><option value="off" {{ 'selected' if son == 'off' }}>OFF</option></select>
             <input class="form-control form-control-sm" style="width:130px" type="time" name="aux_s{{ k }}_start_{{ j }}" value="{{ val('aux_s' ~ k ~ '_start_' ~ j, s.start if s else '18:00') }}">
             <span>→</span>
             <input class="form-control form-control-sm" style="width:130px" type="time" name="aux_s{{ k }}_end_{{ j }}" value="{{ val('aux_s' ~ k ~ '_end_' ~ j, s.end if s else '23:59') }}">
-            <div class="form-check form-check-inline mb-0 ms-1"><input class="form-check-input pm-aux-all" type="checkbox" id="aux_s{{ k }}_all_{{ j }}" {{ 'checked' if days|length == 7 }}><label class="form-check-label" for="aux_s{{ k }}_all_{{ j }}">All</label></div>
-            {% for dn in aux_days %}{% set di = loop.index0 %}
-            <div class="form-check form-check-inline mb-0 me-1"><input class="form-check-input pm-aux-day" type="checkbox" name="aux_s{{ k }}_days_{{ j }}" value="{{ di }}" id="aux_s{{ k }}_d{{ di }}_{{ j }}" {{ 'checked' if di in days }}><label class="form-check-label" for="aux_s{{ k }}_d{{ di }}_{{ j }}">{{ dn }}</label></div>
-            {% endfor %}
+            {% if aux_v2 %}
+            <select class="form-select form-select-sm pm-aux-kind" style="width:100px" name="aux_s{{ k }}_kind_{{ j }}"><option value="day" {{ 'selected' if kind == 'day' }}>By day</option><option value="date" {{ 'selected' if kind == 'date' }}>By date</option></select>
+            {% endif %}
+            <span class="pm-aux-days d-inline-flex flex-wrap align-items-center {{ 'd-none' if kind == 'date' }}">
+              <div class="form-check form-check-inline mb-0 ms-1"><input class="form-check-input pm-aux-all" type="checkbox" id="aux_s{{ k }}_all_{{ j }}" {{ 'checked' if days|length == 7 }}><label class="form-check-label" for="aux_s{{ k }}_all_{{ j }}">All</label></div>
+              {% for dn in aux_days %}{% set di = loop.index0 %}
+              <div class="form-check form-check-inline mb-0 me-1"><input class="form-check-input pm-aux-day" type="checkbox" name="aux_s{{ k }}_days_{{ j }}" value="{{ di }}" id="aux_s{{ k }}_d{{ di }}_{{ j }}" {{ 'checked' if di in days }}><label class="form-check-label" for="aux_s{{ k }}_d{{ di }}_{{ j }}">{{ dn }}</label></div>
+              {% endfor %}
+            </span>
+            {% if aux_v2 %}
+            <span class="pm-aux-date d-flex gap-2 align-items-center {{ 'd-none' if kind != 'date' }}">
+              <input class="form-control form-control-sm" style="width:150px" type="date" name="aux_s{{ k }}_date_{{ j }}" value="{{ val('aux_s' ~ k ~ '_date_' ~ j, (s.get('date') or '') if s else '') }}">
+              <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="aux_s{{ k }}_yearly_{{ j }}" id="aux_s{{ k }}_yearly_{{ j }}" {{ chk('aux_s' ~ k ~ '_yearly_' ~ j, s.get('yearly') if s else false) }}>
+                <label class="form-check-label" for="aux_s{{ k }}_yearly_{{ j }}">Every year</label></div>
+            </span>
+            {% endif %}
           </div>
           {% endfor %}
+          <button type="button" class="btn btn-sm btn-outline-secondary pm-aux-add mt-1"><i class="bi bi-plus-lg me-1"></i>Add schedule</button>
+          <span class="small text-body-secondary ms-1">up to {{ aux_sched_max }} · untick a line to remove it</span>
           {% set els = val('aux_else_' ~ j, a.get('else', 'off')) %}
-          <div class="d-flex align-items-center gap-2 small mt-1"><span>Outside these times the relay is</span>
+          <div class="d-flex flex-wrap align-items-center gap-2 small mt-2"><span>Outside these times the relay is</span>
             <select class="form-select form-select-sm" style="width:80px" name="aux_else_{{ j }}"><option value="off" {{ 'selected' if els == 'off' }}>OFF</option><option value="on" {{ 'selected' if els == 'on' }}>ON</option></select>
-            <span class="text-body-secondary">· the first matching window wins · an end before the start runs over midnight · end 23:59 = to midnight</span></div>
+            <span class="text-body-secondary">· the first matching line wins · an end before the start runs over midnight · end 23:59 = to midnight</span></div>
         </div>
         {# event #}
-        {% set esrc = val('aux_ev_src_' ~ j, ev.get('src', 'temp')) %}
+        {% set esrc = val('aux_ev_src_' ~ j, ev.get('src', '')) %}
+        {% if esrc not in aux_sources %}{% set esrc = (aux_sources|list)[0] %}{% endif %}
         {% set eidx = val('aux_ev_idx_' ~ j, ev.get('idx', 0))|string %}
+        {% set indep = d.is_mc and d.mc_mode == 'independent' %}
         <div class="mt-2 pm-aux-event d-flex flex-wrap gap-2 align-items-center small">
           <span>When</span>
-          <select class="form-select form-select-sm pm-aux-src" style="width:150px" name="aux_ev_src_{{ j }}">
+          <select class="form-select form-select-sm pm-aux-src" style="width:190px" name="aux_ev_src_{{ j }}">
             {% for k, label in aux_sources.items() %}<option value="{{ k }}" {{ 'selected' if esrc == k }}>{{ label }}</option>{% endfor %}
           </select>
-          <select class="form-select form-select-sm pm-aux-idx" style="width:170px" name="aux_ev_idx_{{ j }}">
+          <select class="form-select form-select-sm pm-aux-idx" style="width:190px" name="aux_ev_idx_{{ j }}">
             {% for t in range(n_temp) %}<option data-src="temp hum" value="{{ t }}" {{ 'selected' if eidx == t|string and esrc in ('temp', 'hum') }}>T{{ t + 1 }}</option>{% endfor %}
             {% if d.is_mc %}
-              <option data-src="amp watt" value="255" {{ 'selected' if eidx == '255' and esrc in ('amp', 'watt') }}>All channels</option>
-              {% for c in range(n_channels) %}<option data-src="amp watt" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('amp', 'watt') }}>{{ d.channel_name(c) }}</option>{% endfor %}
-              {% if d.mc_mode == 'independent' %}
+              {% if aux_v2 %}<option data-src="amp watt trip{{ ' kwh session' if indep }}" value="254" {{ 'selected' if eidx == '254' }}>Any channel</option>{% endif %}
+              <option data-src="amp watt" value="255" {{ 'selected' if eidx == '255' and esrc in ('amp', 'watt') }}>All channels together</option>
+              {% for c in range(n_channels) %}<option data-src="amp watt trip" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('amp', 'watt', 'trip') }}>{{ d.channel_name(c) }}</option>{% endfor %}
+              {% if indep %}
                 {% for c in range(n_channels) %}<option data-src="kwh session" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('kwh', 'session') }}>Session of {{ d.channel_name(c) }}</option>{% endfor %}
-              {% else %}<option data-src="kwh session" value="0" selected>Meter session</option>{% endif %}
+              {% else %}<option data-src="kwh session" value="0">Meter session</option>{% endif %}
             {% else %}
-              <option data-src="amp watt" value="0">The measured line</option>
+              <option data-src="amp watt trip" value="0">The measured line</option>
               <option data-src="kwh session" value="0">The session</option>
             {% endif %}
           </select>
@@ -374,6 +393,9 @@
           {% set erun = val('aux_ev_running_' ~ j, 'running' if ev.get('running', true) else 'ended') %}
           <span class="pm-aux-sess d-flex gap-2 align-items-center"><span>is</span>
             <select class="form-select form-select-sm" style="width:110px" name="aux_ev_running_{{ j }}"><option value="running" {{ 'selected' if erun == 'running' }}>running</option><option value="ended" {{ 'selected' if erun == 'ended' }}>ended</option></select></span>
+          {% set eact = val('aux_ev_active_' ~ j, 'active' if ev.get('active', true) else 'clear') %}
+          <span class="pm-aux-flag d-flex gap-2 align-items-center"><span>is</span>
+            <select class="form-select form-select-sm" style="width:120px" name="aux_ev_active_{{ j }}"><option value="active" {{ 'selected' if eact == 'active' }}>active</option><option value="clear" {{ 'selected' if eact == 'clear' }}>not active</option></select></span>
           {% set eon = val('aux_ev_on_' ~ j, 'on' if ev.get('on', true) else 'off') %}
           <span>the relay is</span>
           <select class="form-select form-select-sm" style="width:80px" name="aux_ev_on_{{ j }}"><option value="on" {{ 'selected' if eon == 'on' }}>ON</option><option value="off" {{ 'selected' if eon == 'off' }}>OFF</option></select>
@@ -472,7 +494,7 @@
     });
   });
   // AUX relays: show the fields of the chosen mode / event source
-  var UNITS = {temp: '°C', hum: '%RH', amp: 'A', watt: 'W', kwh: 'kWh'};
+  var UNITS = {temp: '°C', hum: '%RH', amp: 'A', watt: 'W', kwh: 'kWh'}, FLAGS = {{ aux_flags|list|tojson }};
   function syncAux(box) {
     var mode = box.querySelector('.pm-aux-mode').value;
     box.querySelector('.pm-aux-sched').classList.toggle('d-none', mode !== 'schedule');
@@ -486,17 +508,34 @@
       if (show && o.selected) selVisible = true;
     });
     if (!selVisible && firstVisible) firstVisible.selected = true;
-    box.querySelector('.pm-aux-num').classList.toggle('d-none', src === 'session');
+    var flag = FLAGS.indexOf(src) >= 0;
+    idx.classList.toggle('d-none', !firstVisible);
+    box.querySelector('.pm-aux-num').classList.toggle('d-none', src === 'session' || flag);
     box.querySelector('.pm-aux-sess').classList.toggle('d-none', src !== 'session');
+    box.querySelector('.pm-aux-flag').classList.toggle('d-none', !flag);
+    box.querySelectorAll('.pm-aux-row').forEach(function (row) {
+      var k = row.querySelector('.pm-aux-kind'), byDate = k && k.value === 'date';
+      row.querySelector('.pm-aux-days').classList.toggle('d-none', !!byDate);
+      var dt = row.querySelector('.pm-aux-date');
+      if (dt) dt.classList.toggle('d-none', !byDate);
+    });
+    box.querySelector('.pm-aux-add').classList.toggle('d-none', !box.querySelector('.pm-aux-row.d-none'));
     box.querySelector('.pm-aux-unit').textContent = UNITS[src] || '';
   }
   document.querySelectorAll('.pm-aux').forEach(function (box) {
     syncAux(box);
+    box.querySelector('.pm-aux-add').addEventListener('click', function () {
+      var row = box.querySelector('.pm-aux-row.d-none');
+      if (!row) return;
+      row.classList.remove('d-none');
+      row.querySelector('.pm-aux-use').checked = true;
+      row.querySelector('.pm-aux-use').dispatchEvent(new Event('change', {bubbles: true}));
+    });
     box.addEventListener('change', function (e) {
       if (e.target.classList.contains('pm-aux-all')) {
-        e.target.closest('.d-flex').querySelectorAll('.pm-aux-day').forEach(function (c) { c.checked = e.target.checked; });
+        e.target.closest('.pm-aux-row').querySelectorAll('.pm-aux-day').forEach(function (c) { c.checked = e.target.checked; });
       } else if (e.target.classList.contains('pm-aux-day')) {
-        var row = e.target.closest('.d-flex'), all = row.querySelectorAll('.pm-aux-day:checked').length === 7;
+        var row = e.target.closest('.pm-aux-row'), all = row.querySelectorAll('.pm-aux-day:checked').length === 7;
         row.querySelector('.pm-aux-all').checked = all;
       }
       syncAux(box);

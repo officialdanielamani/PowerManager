@@ -11,15 +11,21 @@
 namespace auxrelay {
 
 enum Mode : uint8_t { M_MANUAL = 0, M_SCHEDULE = 1, M_EVENT = 2 };
-enum Src : uint8_t { S_TEMP = 0, S_HUM = 1, S_AMP = 2, S_WATT = 3, S_KWH = 4, S_SESSION = 5 };
+enum Src : uint8_t {
+  S_TEMP = 0, S_HUM = 1, S_AMP = 2, S_WATT = 3, S_KWH = 4, S_SESSION = 5,
+  S_TAMPER = 6, S_TRIP = 7, S_VOLT = 8, S_WIFI = 9, S_SERVER = 10, S_COUNT = 11
+};
 static const char *MODE_NAME[] = {"manual", "schedule", "event"};
-static const char *SRC_NAME[] = {"temp", "hum", "amp", "watt", "kwh", "session"};
-static const float HYST[] = {1.0f, 2.0f, 0.1f, 10.0f, 0.01f, 0};  // a condition clears this far back
+static const char *SRC_NAME[] = {"temp", "hum", "amp", "watt", "kwh", "session", "tamper", "trip", "volt", "wifi", "server"};
+static const float HYST[] = {1.0f, 2.0f, 0.1f, 10.0f, 0.01f, 0, 0, 0, 0, 0, 0};  // a condition clears this far back
 static const uint32_t MIN_SWITCH_MS = 5000;                      // event mode: at most one change per 5 s
 static const uint8_t TOTAL = 255;                                 // amp / watt: all channels together
+static const uint8_t ANY = 254;                                   // any channel (amp, watt, kWh, session, trip)
 
 struct Sched {
-  uint8_t used = 0, on = 1, days = 0x7F;  // days: bit 0 = Monday ... bit 6 = Sunday
+  uint8_t used = 0, on = 1, days = 0x7F;  // days: bit 0 = Monday ... bit 6 = Sunday; 0 = by date (below)
+  uint8_t mon = 0, day = 0;               // by date: month 1..12, day 1..31
+  uint16_t year = 0;                      // by date: year, 0 = every year
   uint16_t start = 0, end = 0;            // minutes of the local day; end 1439 (23:59) = end of the day
 };
 struct Rule {
@@ -33,9 +39,26 @@ struct Cfg {
   Rule ev;
 };
 struct Blob {
-  uint8_t version = 1;
+  uint8_t version = 2;
   int16_t tz = 0;  // local time = UTC + tz minutes (sent by the server, which knows the time zone)
   Cfg c[MAX];
+};
+
+// Saved by firmware before 0.9.3 / 0.7.3 (4 schedules, days only): converted once in begin().
+struct OldSched {
+  uint8_t used, on, days;
+  uint16_t start, end;
+};
+struct OldCfg {
+  char name[21];
+  uint8_t mode, override, elseOn;
+  OldSched s[4];
+  Rule ev;
+};
+struct OldBlob {
+  uint8_t version;
+  int16_t tz;
+  OldCfg c[MAX];
 };
 
 struct Run {
@@ -73,9 +96,32 @@ static void saveWant() {
 
 void begin() {
   prefs.begin("aux", true);
-  if (prefs.getBytesLength("cfg") == sizeof(Blob)) {
+  size_t len = prefs.getBytesLength("cfg");
+  if (len == sizeof(Blob)) {
     prefs.getBytes("cfg", &active, sizeof(active));
-    if (active.version != 1) active = Blob();
+    if (active.version != 2) active = Blob();
+  } else if (len == sizeof(OldBlob)) {
+    OldBlob *o = new OldBlob;
+    prefs.getBytes("cfg", o, sizeof(OldBlob));
+    if (o->version == 1) {
+      active.tz = o->tz;
+      for (uint8_t i = 0; i < MAX; i++) {
+        Cfg &c = active.c[i];
+        memcpy(c.name, o->c[i].name, sizeof(c.name));
+        c.mode = o->c[i].mode;
+        c.override = o->c[i].override;
+        c.elseOn = o->c[i].elseOn;
+        c.ev = o->c[i].ev;
+        for (uint8_t k = 0; k < 4; k++) {
+          c.s[k].used = o->c[i].s[k].used;
+          c.s[k].on = o->c[i].s[k].on;
+          c.s[k].days = o->c[i].s[k].days;
+          c.s[k].start = o->c[i].s[k].start;
+          c.s[k].end = o->c[i].s[k].end;
+        }
+      }
+    }
+    delete o;
   }
   uint16_t want = prefs.getUShort("want", 0);
   prefs.end();
@@ -92,13 +138,14 @@ void wipe() {
 // ------------------------------------------------------------------ config from the server
 
 static int srcOf(const char *s) {
-  for (uint8_t k = 0; k < 6; k++)
+  for (uint8_t k = 0; k < S_COUNT; k++)
     if (!strcmp(s, SRC_NAME[k])) return k;
   return -1;
 }
 
 bool parse(JsonArrayConst list, int tzMin, const char *&err) {
-  Blob b;
+  static Blob b;  // too big for the stack
+  b = Blob();
   if (tzMin < -840 || tzMin > 840) {
     err = "tz_min";
     return false;
@@ -117,10 +164,17 @@ bool parse(JsonArrayConst list, int tzMin, const char *&err) {
     for (JsonObjectConst s : a["sched"].as<JsonArrayConst>()) {
       if (k >= SCHED_MAX) break;
       int st = s["start"] | -1, en = s["end"] | -1, days = s["days"] | 0x7F;
-      if (st < 0 || st > 1439 || en < 0 || en > 1439 || days < 1 || days > 0x7F) {
+      JsonArrayConst date = s["date"];  // [year (0 = every year), month, day]: this date instead of week days
+      int y = date[0] | 0, mo = date[1] | 0, da = date[2] | 0;
+      if (!date.isNull()) days = 0;
+      if (st < 0 || st > 1439 || en < 0 || en > 1439 || days < 0 || days > 0x7F ||
+          (date.isNull() ? days < 1 : (mo < 1 || mo > 12 || da < 1 || da > 31 || y < 0 || (y && (y < 2020 || y > 2199))))) {
         err = "aux.sched";
         return false;
       }
+      c.s[k].year = y;
+      c.s[k].mon = mo;
+      c.s[k].day = da;
       c.s[k].used = 1;
       c.s[k].start = st;
       c.s[k].end = en;
@@ -132,7 +186,7 @@ bool parse(JsonArrayConst list, int tzMin, const char *&err) {
     if (!e.isNull()) {
       int src = srcOf(e["src"] | "");
       int idx = e["idx"] | 0;
-      if (src < 0 || idx < 0 || (idx >= MAX_CH && idx != TOTAL)) {
+      if (src < 0 || idx < 0 || (idx >= MAX_CH && idx != TOTAL && idx != ANY)) {
         err = "aux.event";
         return false;
       }
@@ -140,7 +194,7 @@ bool parse(JsonArrayConst list, int tzMin, const char *&err) {
       c.ev.idx = idx;
       c.ev.over = strcmp(e["cmp"] | "over", "under") != 0;
       c.ev.value = e["value"] | 0.0f;
-      c.ev.running = e["running"] | true;
+      c.ev.running = e["active"] | (e["running"] | true);  // session: running; tamper, trip, ...: active
       c.ev.on = e["on"] | true;
     } else if (c.mode == M_EVENT) {
       err = "aux.event";
@@ -165,21 +219,40 @@ void commit() {
 
 // ------------------------------------------------------------------ automation
 
-static bool dayOn(uint8_t days, int d) { return days & (1u << ((d + 7) % 7)); }
+// Year / month / day of a day number (days since 1970-01-01).
+static void civil(int32_t z, int &y, int &m, int &d) {
+  z += 719468;
+  int32_t era = (z >= 0 ? z : z - 146096) / 146097;
+  uint32_t doe = (uint32_t)(z - era * 146097);
+  uint32_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  uint32_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  uint32_t mp = (5 * doy + 2) / 153;
+  d = (int)(doy - (153 * mp + 2) / 5 + 1);
+  m = (int)(mp < 10 ? mp + 3 : mp - 9);
+  y = (int)(yoe + era * 400 + (m <= 2));
+}
+
+// Does the window start on this local day (day number since 1970)? By week day, or by date.
+static bool dayOn(const Sched &s, int32_t dayNo) {
+  if (s.days) return s.days & (1u << ((dayNo + 3) % 7));  // 1970-01-01 was a Thursday; bit 0 = Monday
+  int y, m, d;
+  civil(dayNo, y, m, d);
+  return m == s.mon && d == s.day && (!s.year || y == s.year);
+}
 
 static bool evalSchedule(const Cfg &c, bool &st) {
   if (!timekeep::valid()) return false;  // no clock yet: keep the last state
   int64_t local = (int64_t)timekeep::now() + (int64_t)active.tz * 60;
   int m = (int)((local % 86400 + 86400) % 86400) / 60;
-  int d = (int)(((local / 86400) + 3) % 7);  // 1970-01-01 was a Thursday; 0 = Monday
+  int32_t d = (int32_t)(local / 86400);  // local day number
   for (uint8_t k = 0; k < SCHED_MAX; k++) {
     const Sched &s = c.s[k];
     if (!s.used) continue;
     int end = s.end == 1439 ? 1440 : s.end;  // "until 23:59" = to the end of the day
     bool hit;
-    if (s.start == end) hit = dayOn(s.days, d);                                          // whole day
-    else if (s.start < end) hit = dayOn(s.days, d) && m >= s.start && m < end;
-    else hit = (m >= s.start && dayOn(s.days, d)) || (m < end && dayOn(s.days, d - 1));  // over midnight
+    if (s.start == end) hit = dayOn(s, d);                                     // whole day
+    else if (s.start < end) hit = dayOn(s, d) && m >= s.start && m < end;
+    else hit = (m >= s.start && dayOn(s, d)) || (m < end && dayOn(s, d - 1));  // over midnight
     if (hit) {
       st = s.on;
       return true;
@@ -189,37 +262,71 @@ static bool evalSchedule(const Cfg &c, bool &st) {
   return true;
 }
 
-static float valueOf(const Rule &r, const Inputs &in, bool &known) {
-  known = true;
-  switch (r.src) {
-    case S_TEMP: return temp::value(r.idx);
-    case S_HUM: return temp::humidity(r.idx);
-    case S_AMP:
-    case S_WATT: {
-      if (!in.readOk) return NAN;
-      const float *v = r.src == S_AMP ? in.a : in.w;
-      if (r.idx != TOTAL) return r.idx < in.nch ? v[r.idx] : NAN;
-      float t = 0;
-      for (uint8_t i = 0; i < in.nch; i++) t += v[i];
-      return t;
-    }
-    case S_KWH: return r.idx < in.nch ? in.balance[r.idx] : NAN;
-    default: known = false; return NAN;
-  }
+// One channel's value for a numeric rule (NAN = no value now).
+static float channelValue(uint8_t src, uint8_t i, const Inputs &in) {
+  if (i >= in.nch) return NAN;
+  if (src == S_KWH) return in.balance[i];
+  if (!in.readOk) return NAN;
+  return src == S_AMP ? in.a[i] : in.w[i];
+}
+
+static bool compare(const Rule &r, bool latched, float v) {
+  float h = HYST[r.src % S_COUNT];
+  return r.over ? (latched ? v > r.value - h : v >= r.value) : (latched ? v < r.value + h : v <= r.value);
 }
 
 static bool evalEvent(const Cfg &c, Run &rn, const Inputs &in, bool &st) {
   const Rule &r = c.ev;
-  bool cond;
-  if (r.src == S_SESSION) {
-    if (r.idx >= in.nch) return false;
-    cond = in.running[r.idx] == (bool)r.running;
-  } else {
-    bool known;
-    float v = valueOf(r, in, known);
-    if (!known || isnan(v)) return false;  // no value (sensor missing, no reading): keep the last state
-    float h = HYST[r.src % 6];
-    cond = r.over ? (rn.latched ? v > r.value - h : v >= r.value) : (rn.latched ? v < r.value + h : v <= r.value);
+  bool cond = false;
+  switch (r.src) {
+    case S_TEMP:
+    case S_HUM: {
+      float v = r.src == S_TEMP ? temp::value(r.idx) : temp::humidity(r.idx);
+      if (isnan(v)) return false;  // sensor missing: keep the last state
+      cond = compare(r, rn.latched, v);
+      break;
+    }
+    case S_AMP:
+    case S_WATT:
+    case S_KWH: {
+      if (r.idx == ANY || r.idx == TOTAL) {  // any channel meets it / all channels together (amp, watt)
+        bool some = false, any = false;
+        float total = 0;
+        for (uint8_t i = 0; i < in.nch; i++) {
+          float v = channelValue(r.src, i, in);
+          if (isnan(v)) continue;
+          some = true;
+          total += v;
+          if (compare(r, rn.latched, v)) any = true;
+        }
+        if (!some) return false;
+        cond = r.idx == ANY ? any : compare(r, rn.latched, total);
+      } else {
+        float v = channelValue(r.src, r.idx, in);
+        if (isnan(v)) return false;  // no reading / no kWh limit: keep the last state
+        cond = compare(r, rn.latched, v);
+      }
+      break;
+    }
+    case S_SESSION:
+    case S_TRIP: {
+      const bool *v = r.src == S_SESSION ? in.running : in.tripped;
+      bool state = false;
+      if (r.idx == ANY) {
+        for (uint8_t i = 0; i < in.nch; i++) state = state || v[i];
+      } else if (r.idx < in.nch) {
+        state = v[r.idx];
+      } else {
+        return false;
+      }
+      cond = state == (bool)r.running;
+      break;
+    }
+    case S_TAMPER: cond = in.tamper == (bool)r.running; break;
+    case S_VOLT: cond = in.voltOut == (bool)r.running; break;
+    case S_WIFI: cond = in.noWifi == (bool)r.running; break;
+    case S_SERVER: cond = in.noServer == (bool)r.running; break;
+    default: return false;
   }
   rn.latched = cond;
   st = cond ? r.on : !r.on;

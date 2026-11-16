@@ -94,3 +94,43 @@ def test_timezone_change_repushes_schedules(app, admin):
     with app.app_context():
         assert db.session.get(Device, pk).cfg_ver_wanted == before + 1
         assert devconfig.to_device(db.session.get(Device, pk).cfg, 1)["cfg"]["tz_min"] == 540
+
+
+def test_aux_v2_dates_any_channel_and_flags(app, admin):
+    """Newer firmware (caps.aux_v 2): 14 schedules, by date, 'any channel', tamper / Wi-Fi events; event
+    sources follow the sensors the meter has."""
+    pk = _mc_with_aux(app, admin)
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        assert "tamper" not in auxcfg.sources(d) and auxcfg.sched_max(d) == 4  # old firmware
+        d.caps = dict(d.caps, aux_v=2, tamper=True, temp=0)
+        d.last_reading = {}
+        db.session.commit()
+        src = auxcfg.sources(d)
+        assert "temp" not in src and "hum" not in src and {"tamper", "trip", "volt", "wifi", "server"} <= set(src)
+    form = {"aux_mode_0": "schedule", "aux_mode_1": "event", "aux_ev_src_1": "watt", "aux_ev_idx_1": "254",
+            "aux_ev_cmp_1": "over", "aux_ev_value_1": "100", "aux_ev_on_1": "on",
+            "aux_mode_2": "event", "aux_ev_src_2": "server", "aux_ev_active_2": "active", "aux_ev_on_2": "off"}
+    for k in range(13):
+        form.update({f"aux_s{k}_use_0": "on", f"aux_s{k}_start_0": "08:00", f"aux_s{k}_end_0": "09:00",
+                     f"aux_s{k}_days_0": [str(k % 7)]})
+    form.update({"aux_s13_use_0": "on", "aux_s13_kind_0": "date", "aux_s13_date_0": "2026-12-25",
+                 "aux_s13_yearly_0": "on", "aux_s13_start_0": "20:00", "aux_s13_end_0": "02:00"})
+    r = admin.post(f"/meters/{pk}/configure", data=_form(**form))
+    assert r.status_code in (200, 302) and "alert-danger" not in r.get_data(as_text=True)
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        a0, a1, a2 = devconfig.to_device(d.cfg, 1)["cfg"]["aux"]
+        assert len(a0["sched"]) == 14 and a0["sched"][13] == {"on": True, "start": 1200, "end": 120, "date": [0, 12, 25]}
+        assert a1["event"] == {"src": "watt", "idx": 254, "cmp": "over", "value": 100.0, "on": True}
+        assert a2["event"] == {"src": "server", "idx": 0, "active": True, "on": False}
+        assert "12-25 every year" in auxcfg.describe(d.cfg["aux"][0], d)
+        assert "any channel" in auxcfg.describe(d.cfg["aux"][1], d)
+        assert auxcfg.describe(d.cfg["aux"][2], d) == "Event: OFF while No server / internet"
+    page = admin.get(f"/meters/{pk}/configure").get_data(as_text=True)
+    assert 'name="aux_s13_date_0" value="2026-12-25"' in page and "Any channel" in page
+    # temperature is not offered (no sensor), and choosing it anyway is refused
+    assert '<option value="temp"' not in page
+    r = admin.post(f"/meters/{pk}/configure", data=_form(**{"aux_mode_0": "event", "aux_ev_src_0": "temp",
+                                                              "aux_ev_value_0": "30"}))
+    assert r.status_code == 200 and "choose what the relay reacts to" in r.get_data(as_text=True)

@@ -35,7 +35,7 @@ flashing the renamed sketch keeps the meter's data, pairing and history.) Exampl
 | Flash Size | 4MB |
 | Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** |
 
-Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h`, then Upload.
+Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h` (or make it with the server's **Firmware → config.h Generator**), then Upload.
 
 If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** for game controllers), the Tools → Board menu has an "ESP32S3 Dev Module" in each of them. Pick the one under **esp32**. Bluepad32's package is based on the older 2.0.x core. The sketch builds on it too, but it is meant for Bluetooth controllers, not tested here, and stays behind on fixes.
 

@@ -358,6 +358,8 @@ static String pairBody(const PairRequest &r) {
   caps["channels"] = SENSOR_CHANNELS;
   caps["relays"] = CHANNEL_RELAY ? 1 : 0;
   caps["aux"] = auxrelay::count();  // AUX relays (every relay output except CHANNEL_RELAY)
+  caps["aux_v"] = 2;  // 14 schedules (by day or date), extra event sources, "any channel"
+  if (temp::hasHumidity()) caps["hum"] = true;
   caps["inputs"].to<JsonArray>().add("tamper");
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
@@ -535,6 +537,8 @@ static void sendHello() {
   caps["sensor"] = METER_DC ? "pzem017" : "pzem004t";
   caps["mc"] = false;  // single-channel firmware (the server detects a change of hardware type)
   caps["aux"] = auxrelay::count();
+  caps["aux_v"] = 2;  // 14 schedules (by day or date), extra event sources, "any channel"
+  if (temp::hasHumidity()) caps["hum"] = true;
   caps["channels"] = SENSOR_CHANNELS;
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;

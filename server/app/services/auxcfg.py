@@ -4,17 +4,57 @@ Stored in device.cfg["aux"] in display form (local "HH:MM", day list) and sent t
 the local day + a day bit mask, with "tz_min" (UTC offset of the display time zone) so the meter evaluates
 schedules in local time on its own, also offline. See docs/protocol.md (config "aux").
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from . import settings
 
 MODES = {"manual": "Manual (ON / OFF buttons)", "schedule": "Schedule", "event": "Event"}
 SOURCES = {"temp": "Temperature", "hum": "Humidity", "amp": "Current (A)", "watt": "Power (W)",
-           "kwh": "kWh balance", "session": "Session"}
+           "kwh": "kWh balance", "session": "Session", "tamper": "Tamper", "trip": "Over-current trip",
+           "volt": "Voltage protection", "wifi": "No Wi-Fi", "server": "No server / internet"}
 UNITS = {"temp": "°C", "hum": "%RH", "amp": "A", "watt": "W", "kwh": "kWh"}
+FLAGS = ("tamper", "trip", "volt", "wifi", "server")  # on / off conditions ("active" or "not active")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-SCHED_MAX = 4
+SCHED_MAX = 14
+SCHED_OLD = 4  # firmware before 0.9.3 / 0.7.3 (caps.aux_v missing)
 TOTAL = 255  # amp / watt of all channels together
+ANY = 254    # any channel
+
+
+def v2(device):
+    """Firmware with 14 schedules, schedules by date, the extra event sources and "any channel"."""
+    return device is None or int(((device.caps or {}).get("aux_v")) or 0) >= 2
+
+
+def sched_max(device):
+    return SCHED_MAX if v2(device) else SCHED_OLD
+
+
+def temp_count(device):
+    if device is None:
+        return 1
+    return max(int((device.caps or {}).get("temp") or 0), len((device.last_reading or {}).get("t") or []))
+
+
+def sources(device):
+    """Event sources this meter can use: no temperature / humidity without the sensor, no tamper without
+    the input, the newer ones only with firmware that knows them."""
+    caps = (device.caps or {}) if device is not None else {}
+    new = v2(device)
+    out = {}
+    for k, label in SOURCES.items():
+        if k == "temp" and not temp_count(device):
+            continue
+        if k == "hum" and not (temp_count(device) and (caps.get("hum") or not new or device is None)):
+            continue
+        if k in FLAGS and not new:
+            continue
+        if k == "tamper" and device is not None and not caps.get("tamper"):
+            continue
+        if k == "volt" and caps.get("voltage") is False:
+            continue
+        out[k] = label
+    return out
 
 
 def default():
@@ -43,7 +83,15 @@ def _minutes(hhmm):
     return int(h) * 60 + int(m)
 
 
-def parse_form(form, n, errors):
+def _date(raw):
+    try:
+        d = date.fromisoformat(str(raw or "").strip())
+        return d if 2020 <= d.year <= 2199 else None
+    except ValueError:
+        return None
+
+
+def parse_form(form, n, errors, device=None):
     """AUX relays from the Configuration form (field names: aux_<field>_<j>, schedule rows aux_s<k>_...)."""
     out = []
     for j in range(n):
@@ -58,25 +106,42 @@ def parse_form(form, n, errors):
         a["mode"] = mode if mode in MODES else "manual"
         a["override"] = form.get(f"aux_override_{j}") == "on"
         a["else"] = "on" if form.get(f"aux_else_{j}") == "on" else "off"
-        for k in range(SCHED_MAX):
+        for k in range(sched_max(device)):
             if form.get(f"aux_s{k}_use_{j}") != "on":
                 continue
             start, end = _hhmm(form.get(f"aux_s{k}_start_{j}")), _hhmm(form.get(f"aux_s{k}_end_{j}"))
-            days = sorted({int(d) for d in form.getlist(f"aux_s{k}_days_{j}") if str(d).isdigit() and int(d) < 7})
             if not start or not end:
                 errors.append(f"{label} schedule {k + 1}: enter a start and an end time")
                 continue
-            if not days:
-                errors.append(f"{label} schedule {k + 1}: pick at least one day")
-                continue
-            a["sched"].append({"on": form.get(f"aux_s{k}_on_{j}", "on") == "on", "start": start, "end": end, "days": days})
-        src = form.get(f"aux_ev_src_{j}", "temp")
-        if src in SOURCES:
+            row = {"on": form.get(f"aux_s{k}_on_{j}", "on") == "on", "start": start, "end": end}
+            if form.get(f"aux_s{k}_kind_{j}") == "date" and v2(device):
+                d = _date(form.get(f"aux_s{k}_date_{j}"))
+                if not d:
+                    errors.append(f"{label} schedule {k + 1}: pick a date")
+                    continue
+                row["date"] = d.isoformat()
+                row["yearly"] = form.get(f"aux_s{k}_yearly_{j}") == "on"
+            else:
+                days = sorted({int(d) for d in form.getlist(f"aux_s{k}_days_{j}") if str(d).isdigit() and int(d) < 7})
+                if not days:
+                    errors.append(f"{label} schedule {k + 1}: pick at least one day")
+                    continue
+                row["days"] = days
+            a["sched"].append(row)
+        allowed = sources(device)
+        src = form.get(f"aux_ev_src_{j}", "")
+        if src not in allowed and a["mode"] == "event":
+            errors.append(f"{label} event: choose what the relay reacts to")
+        if src in allowed:
             idx = form.get(f"aux_ev_idx_{j}", "0")
-            idx = int(idx) if str(idx).isdigit() and (int(idx) < 16 or int(idx) == TOTAL) else 0
+            idx = int(idx) if str(idx).isdigit() and (int(idx) < 16 or int(idx) == TOTAL or (int(idx) == ANY and v2(device))) else 0
+            if src in ("tamper", "volt", "wifi", "server"):
+                idx = 0
             ev = {"src": src, "idx": idx, "on": form.get(f"aux_ev_on_{j}", "on") == "on"}
             if src == "session":
                 ev["running"] = form.get(f"aux_ev_running_{j}", "running") == "running"
+            elif src in FLAGS:
+                ev["active"] = form.get(f"aux_ev_active_{j}", "active") == "active"
             else:
                 ev["cmp"] = "under" if form.get(f"aux_ev_cmp_{j}") == "under" else "over"
                 raw = (form.get(f"aux_ev_value_{j}") or "").strip()
@@ -103,12 +168,20 @@ def to_device(items):
         doc = {"i": j, "name": a.get("name", ""), "mode": a["mode"], "override": bool(a.get("override")),
                "else": a.get("else", "off")}
         if a["mode"] == "schedule":
-            doc["sched"] = [{"on": bool(s.get("on", True)), "start": _minutes(s["start"]), "end": _minutes(s["end"]),
-                             "days": sum(1 << int(d) for d in s.get("days") or [])}
-                            for s in (a.get("sched") or [])[:SCHED_MAX] if _hhmm(s.get("start")) and _hhmm(s.get("end"))]
+            doc["sched"] = []
+            for s in (a.get("sched") or [])[:SCHED_MAX]:
+                if not (_hhmm(s.get("start")) and _hhmm(s.get("end"))):
+                    continue
+                row = {"on": bool(s.get("on", True)), "start": _minutes(s["start"]), "end": _minutes(s["end"])}
+                d = _date(s.get("date"))
+                if d:
+                    row["date"] = [0 if s.get("yearly") else d.year, d.month, d.day]
+                else:
+                    row["days"] = sum(1 << int(x) for x in s.get("days") or [])
+                doc["sched"].append(row)
         if a["mode"] == "event" and a.get("event"):
             ev = a["event"]
-            doc["event"] = {k: ev[k] for k in ("src", "idx", "cmp", "value", "running", "on") if k in ev}
+            doc["event"] = {k: ev[k] for k in ("src", "idx", "cmp", "value", "running", "active", "on") if k in ev}
         out.append(doc)
     return out
 
@@ -125,23 +198,34 @@ def describe(a, device=None):
         parts = []
         for s in a.get("sched") or []:
             days = s.get("days") or []
-            d = "Every day" if len(days) == 7 else ", ".join(DAYS[i] for i in days)
+            if s.get("date"):
+                d = (s["date"][5:] + " every year") if s.get("yearly") else s["date"]
+            else:
+                d = "Every day" if len(days) == 7 else ", ".join(DAYS[i] for i in days)
             parts.append(f"{'ON' if s.get('on', True) else 'OFF'} {d} {s.get('start')}-{s.get('end')}")
         return "Schedule: " + "; ".join(parts) + f" (otherwise {a.get('else', 'off').upper()})"
     if a["mode"] == "event" and a.get("event"):
         ev = a["event"]
         what = "ON" if ev.get("on", True) else "OFF"
+        mc = bool(device and device.is_mc)
+        if ev.get("src") in FLAGS:
+            who = ""
+            if ev.get("src") == "trip" and mc:
+                who = " (any channel)" if ev.get("idx") == ANY else f" ({device.channel_name(ev.get('idx', 0))})"
+            state = "" if ev.get("active", True) else " is clear"
+            return f"Event: {what} while {SOURCES[ev['src']]}{who}{state}"
         if ev.get("src") == "session":
             who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else \
-                f"the session of {device.channel_name(ev.get('idx', 0))}"
+                ("any session" if ev.get("idx") == ANY else f"the session of {device.channel_name(ev.get('idx', 0))}")
             return f"Event: {what} while {who} is {'running' if ev.get('running', True) else 'ended'}"
         src = ev.get("src")
         if src in ("temp", "hum"):
             who = f"T{int(ev.get('idx', 0)) + 1}"
         elif src in ("amp", "watt"):
-            who = "all channels" if ev.get("idx") == TOTAL else (device.channel_name(ev.get("idx", 0)) if device and device.is_mc else "the line")
+            who = "all channels" if ev.get("idx") == TOTAL else "any channel" if ev.get("idx") == ANY else (device.channel_name(ev.get("idx", 0)) if device and device.is_mc else "the line")
         else:
-            who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else device.channel_name(ev.get("idx", 0))
+            who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else \
+                ("any session" if ev.get("idx") == ANY else device.channel_name(ev.get("idx", 0)))
         cmp = "≥" if ev.get("cmp", "over") == "over" else "≤"
         return f"Event: {what} while {SOURCES.get(src, src)} {who} {cmp} {ev.get('value')} {UNITS.get(src, '')}".strip()
     return "Manual"

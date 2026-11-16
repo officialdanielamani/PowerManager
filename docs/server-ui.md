@@ -107,7 +107,13 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 | Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID). The token is write-only like a password: after saving the field is empty with a `••••` placeholder; leave it empty to keep the saved token, or tick *Remove the saved token* |
 
 ### Firmware (admin, manager)
-Placeholder page for future OTA updates. The meter's own page has a greyed-out **Check OTA Update** button.
+**config.h Generator**: choose the meter type, power sensor boards / channels, relay boards, temperature / humidity
+sensors, other parts (RTC, tamper, battery) and defaults (WebSocket / MQTT, mesh, setup Wi-Fi password, pins,
+intervals), click *Generate*, then *Copy all* or *Download* and replace the sketch's `config.h`. The page checks
+the choices (I2C address or GPIO used twice, relay used by two channels, too many outputs for a board) and lists the
+relay numbering, the AUX relays and the I2C addresses. The result is the config.h of the firmware version shipped
+with the server (`server/app/firmware_cfg/`, kept equal to `firmware/*/config.h` by `tests/test_cfggen.py`).
+OTA updates: placeholder for a later version. The meter's own page has a greyed-out **Check OTA Update** button.
 
 ## Password fields
 
@@ -188,9 +194,21 @@ Clear positive power (> 30 W) clears the flag. No-load noise (a few negative wat
 ## AUX relay automation
 
 Configuration → **AUX relays** (any meter with AUX relays): per relay a name and the mode **Manual**, **Schedule**
-(up to 4 windows: ON / OFF, start → end, days with *All* / Mon … Sun, plus the state outside them) or **Event**
-(When [Temperature / Humidity / Current / Power / kWh balance / Session] [sensor / channel] is [≥ / ≤] [value] —
-or the session is [running / ended] — the relay is [ON / OFF], otherwise the opposite), and **Enable override**.
+or **Event**, and **Enable override**.
+
+- **Schedule**: up to 14 lines (*Add schedule*; untick a line to remove it). Each line: ON / OFF, start → end, and
+  **By day** (default: *All* / Mon … Sun) or **By date** (one date, optionally *Every year*), plus the state outside
+  all lines. The first matching line wins, so put a date line (a holiday) above the week-day lines it overrides.
+- **Event**: When [source] [sensor / channel] is [≥ / ≤ value | running / ended | active / not active] the relay is
+  [ON / OFF], otherwise the opposite. Sources: Temperature, Humidity, Current, Power, kWh balance, Session, Tamper,
+  Over-current trip, Voltage protection, No Wi-Fi, No server / internet. Current, Power, trip (and kWh balance /
+  Session with independent channels) can watch one channel or **Any channel**; Current / Power also *All channels
+  together*.
+- Only what the meter has is offered: no Temperature without a temperature sensor, no Humidity without an SHT
+  sensor, no Tamper without the tamper input. 14 lines, *By date*, *Any channel* and the sources from Tamper on need
+  firmware PZEM 0.7.3 / rbAmp 0.9.3; older meters keep 4 lines by day and the first six sources.
+- "No server / internet" is true while the meter is paired but has no link to the server (whatever the reason).
+
 The Info page shows each AUX relay with its mode, a one-line description of the automation, *overridden* while a
 manual switch wins, and ON / OFF buttons (hidden for automated relays without override). Details:
 docs/multichannel.md § AUX relays.

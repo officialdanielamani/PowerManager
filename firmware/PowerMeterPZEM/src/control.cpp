@@ -713,6 +713,11 @@ static void auxTick() {
     in.nch = 1;
     in.readOk = g.reading.ok && g.ac;
     in.disabled = g.disabled;
+    in.tamper = g.tamper;
+    in.voltOut = g.voltOut;
+    in.noWifi = g.net <= NET_WIFI_CONNECTING;
+    in.noServer = g.paired && g.offlineSinceMs != 0;
+    in.tripped[0] = g.tripped;
     in.a[0] = g.reading.a;
     in.w[0] = g.reading.w;
     in.running[0] = g.sess.sid && g.sess.status == SESS_ACTIVE && !g.disabled;

@@ -245,9 +245,9 @@ def configure(pk):
                            managers=access.managers() if current_user.is_admin else [],
                            aux_relays={a.get("i"): a.get("relay") for a in (device.last_state or {}).get("aux") or []
                                        if isinstance(a, dict)},
-                           n_temp=max(int((device.caps or {}).get("temp") or 0), len((device.last_reading or {}).get("t") or []), 1),
+                           n_temp=auxcfg.temp_count(device), aux_sched_max=auxcfg.sched_max(device), aux_v2=auxcfg.v2(device),
                            mqtt_meter=mqtt_bridge.meter_config(),
-                           aux_sources=auxcfg.SOURCES, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
+                           aux_sources=auxcfg.sources(device), aux_flags=auxcfg.FLAGS, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
                            aux_cfg=auxcfg.fit(cfg.get("aux"), devconfig.aux_count(device)),
                            n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,

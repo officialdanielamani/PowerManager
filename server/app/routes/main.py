@@ -263,4 +263,17 @@ def firmware():
     if not current_user.is_staff:
         from flask import abort
         abort(403)
-    return render_template("firmware.html")
+    from ..services import cfggen
+    return render_template("firmware.html", gen=cfggen)
+
+
+@bp.post("/firmware/config")
+@login_required
+def firmware_config():
+    """config.h generator: the chosen hardware -> the firmware's config.h as text."""
+    if not current_user.is_staff:
+        from flask import abort
+        abort(403)
+    from ..services import cfggen
+    text, errors, notes = cfggen.generate(request.get_json(silent=True) or {})
+    return jsonify(ok=text is not None, text=text, errors=errors, notes=notes)

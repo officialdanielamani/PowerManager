@@ -1014,7 +1014,12 @@ static void auxTick() {
     in.nch = g.nch < auxrelay::MAX_CH ? g.nch : auxrelay::MAX_CH;
     in.readOk = g.readOk && g.ac;
     in.disabled = g.disabled;
+    in.tamper = g.tamper;
+    in.voltOut = g.voltOut;
+    in.noWifi = g.net <= NET_WIFI_CONNECTING;
+    in.noServer = g.paired && g.offlineSinceMs != 0;
     for (uint8_t i = 0; i < in.nch; i++) {
+      in.tripped[i] = g.ch[i].tripped;
       in.a[i] = g.ch[i].r.a;
       in.w[i] = g.ch[i].r.w;
       uint8_t s = slotOf(i);

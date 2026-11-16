@@ -347,3 +347,17 @@ the broker again after `MQTT_RETRY_MS` (30 min). With `NET_WEBSOCKET 0` it keeps
 After `set_wifi` the meter reports event `wifi_change` `{"ok": true|false, "ssid": "..."}`. The server wipes the
 password from the stored command once it is acknowledged. `info` now also carries `transport` (`mqtt` / `websocket`)
 and `mqtt` (`host:port`); `hello.caps` has `mqtt` and `ws` (what the firmware was built with).
+
+## 8. AUX automation v2 (`hello.caps.aux_v` = 2)
+
+Config `aux[i]` (firmware PZEM 0.7.3 / rbAmp 0.9.3):
+
+- `sched`: up to 14 entries `{"on", "start", "end"}` (minutes of the local day) with either `"days"` (bit 0 = Monday
+  … bit 6 = Sunday) or `"date": [year, month, day]` (year 0 = every year). First match wins.
+- `event.src`: `temp`, `hum`, `amp`, `watt`, `kwh`, `session`, and new `tamper`, `trip`, `volt`, `wifi`, `server`.
+  The new ones are on / off conditions: `"active": true|false` (`wifi` / `server` are active while the link is
+  missing). `event.idx`: channel / sensor, `255` = all channels together (amp, watt), `254` = any channel (amp,
+  watt, kwh, session, trip).
+- `hello.caps.hum` = true when an SHT (humidity) sensor is configured.
+
+A configuration saved by older firmware (4 schedules) is converted on the first start.

@@ -21,6 +21,12 @@ DIFFERENT = ["app_state.h", "app_state.cpp", "control.cpp", "control.h", "storag
 bad = [f for f in SHARED if not filecmp.cmp(A / f, B / f, shallow=False)]
 for f in bad:
     print(f"DIFFERS: {f}  (PowerMeterPZEM/src vs PowerMeterRBAmp/src)")
+# The server's config.h generator works on copies of the two config.h files.
+GEN = A.parent.parent.parent / "server" / "app" / "firmware_cfg"
+for sketch, name in ((A, "pzem_config.h"), (B, "rbamp_config.h")):
+    if GEN.exists() and not filecmp.cmp(sketch.parent / "config.h", GEN / name, shallow=False):
+        print(f"DIFFERS: {sketch.parent.name}/config.h vs server/app/firmware_cfg/{name}  (copy it over)")
+        bad.append(name)
 print("shared files identical" if not bad else f"{len(bad)} shared file(s) differ")
 print("differ on purpose (check by hand): " + ", ".join(DIFFERENT))
 sys.exit(1 if bad else 0)

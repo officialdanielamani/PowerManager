@@ -324,7 +324,7 @@ def parse_form(form, device):
     if device.is_mc:
         _parse_mc(form, device, cfg, errors)
     if aux_count(device):
-        cfg["aux"] = auxcfg.parse_form(form, aux_count(device), errors)
+        cfg["aux"] = auxcfg.parse_form(form, aux_count(device), errors, device)
     return cfg, errors
 
 

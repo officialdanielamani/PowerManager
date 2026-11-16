@@ -47,7 +47,34 @@ int main() {
   step(T(3, 5, 59)); assert(on(3));       // Tuesday 05:59 (started Monday)
   step(T(3, 6, 0)); assert(!on(3));
   step(T(3, 23, 0)); assert(!on(3));      // Tuesday 23:00: not a Monday start
+  // By date: 2026-12-25 20:00 -> 02:00 next day, and every year on 1 Jan (whole day)
+  deserializeJson(d, R"([
+    {"i":0,"mode":"schedule","else":"off","sched":[{"on":true,"start":1200,"end":120,"date":[2026,12,25]},
+                                                   {"on":true,"start":0,"end":0,"date":[0,1,1]}]},
+    {"i":1,"mode":"event","event":{"src":"watt","idx":254,"cmp":"over","value":100,"on":true}},
+    {"i":2,"mode":"event","event":{"src":"tamper","active":true,"on":true}}])");
+  assert(auxrelay::parse(d.as<JsonArrayConst>(), 480, err));
+  auxrelay::commit();
+  const int XMAS = 48;  // days from Sat 2026-11-07 to Fri 2026-12-25
+  step(T(XMAS, 19, 59)); assert(!on(1));
+  step(T(XMAS, 20, 0)); assert(on(1));
+  step(T(XMAS + 1, 1, 59)); assert(on(1));   // 26 Dec 01:59: started on the 25th
+  step(T(XMAS + 1, 2, 0)); assert(!on(1));
+  step(T(XMAS + 1, 21, 0)); assert(!on(1));  // 26 Dec evening: not the date
+  step(T(XMAS + 7, 12, 0)); assert(on(1));   // 1 Jan 2027 (every year)
+  step(T(XMAS + 8, 0, 0)); assert(!on(1));
+  step(T(XMAS + 7 + 365, 12, 0)); assert(on(1));  // 1 Jan 2028
+  // Any channel over 100 W
+  in.nch = 3; in.w[0] = 20; in.w[1] = 30; in.w[2] = 40;
+  step(T(60, 12, 0)); assert(!on(2));        // 90 W together, but no single channel over 100 W
+  in.w[2] = 150; step(T(60, 12, 1)); assert(on(2));
+  in.w[2] = 95; step(T(60, 12, 2)); assert(on(2));   // hysteresis 10 W
+  in.w[2] = 80; step(T(60, 12, 3)); assert(!on(2));
+  // Tamper
+  assert(!on(3)); in.tamper = true; step(T(60, 12, 4)); assert(on(3));
+  in.tamper = false; step(T(60, 12, 10)); assert(!on(3));
   // Disabled meter: everything off
-  in.disabled = true; step(T(7, 19, 0)); assert(!on(1));
+  in.tamper = true; step(T(60, 12, 20)); assert(on(3));
+  in.disabled = true; step(T(60, 12, 30)); assert(!on(3));
   printf("all AUX automation checks passed (%d events)\n", events);
 }

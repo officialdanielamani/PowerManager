@@ -363,6 +363,8 @@ static void fillCaps(JsonObject caps) {
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
+  caps["aux_v"] = 2;  // 14 schedules (by day or date), extra event sources, "any channel"
+  if (temp::hasHumidity()) caps["hum"] = true;
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
