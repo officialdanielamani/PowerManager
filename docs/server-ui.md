@@ -107,9 +107,8 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 | Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID). The token is write-only like a password: after saving the field is empty with a `••••` placeholder; leave it empty to keep the saved token, or tick *Remove the saved token* |
 
 ### Firmware (admin, manager)
-**List of firmware**: the three firmwares (multi-channel rbAmp, PZEM AC, PZEM DC) with the sketch folder, the
-version shipped with the server, how many of your meters run it (and how many must be updated), and a
-**Generate config.h** button each. Below it: OTA updates are coming in a later version.
+**List of firmware** with one **Generate config.h** button; the list itself is empty for now (OTA updates are
+coming in a later version). A warning shows when some of your meters run firmware older than 1.0.0.
 
 **Generate config.h** (own page, `/firmware/config`): choose the meter type, power sensor boards / channels, relay
 boards, temperature / humidity sensors, other parts (RTC, tamper, UPS input, battery) and defaults (WebSocket /

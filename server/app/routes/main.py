@@ -263,20 +263,8 @@ def firmware():
     if not current_user.is_staff:
         from flask import abort
         abort(403)
-    from ..services import cfggen, devconfig
-    devices = list(access.visible_devices(current_user))
-    rows = []
-    for key, label in cfggen.METERS.items():
-        mine = [d for d in devices if _fw_key(d) == key]
-        rows.append({"key": key, "label": label.split(" - ")[0], "sketch": "PowerMeterRBAmp" if key == "rbamp" else "PowerMeterPZEM",
-                     "version": cfggen.version(key), "meters": len(mine),
-                     "outdated": sum(1 for d in mine if devconfig.fw_outdated(d))})
-    return render_template("firmware.html", firmwares=rows, min_fw=".".join(map(str, devconfig.MIN_FW)))
-
-
-def _fw_key(device):
-    """Which firmware a paired meter runs (config.h generator key)."""
-    return "rbamp" if device.is_mc else "pzem_dc" if device.kind == "dc" else "pzem_ac"
+    outdated = sum(1 for d in access.visible_devices(current_user) if devconfig.fw_outdated(d))
+    return render_template("firmware.html", outdated=outdated, min_fw=".".join(map(str, devconfig.MIN_FW)))
 
 
 @bp.get("/firmware/config")

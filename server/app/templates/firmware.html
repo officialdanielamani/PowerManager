@@ -2,25 +2,12 @@
 {% block title %}Firmware · PowerManager{% endblock %}
 {% block content %}
 <h1 class="h4 mb-3">Firmware</h1>
-<div class="card mb-3" style="max-width:1000px">
-  <div class="card-header fw-semibold">List of firmware</div>
-  <div class="table-responsive"><table class="table align-middle mb-0">
-    <thead><tr class="small text-body-secondary"><th>Firmware</th><th>Sketch (Arduino IDE)</th><th>Version</th><th>Your meters</th><th></th></tr></thead>
-    <tbody>
-      {% for f in firmwares %}
-      <tr>
-        <td class="fw-semibold">{{ f.label }}</td>
-        <td><code>firmware/{{ f.sketch }}</code></td>
-        <td>{{ f.version }}</td>
-        <td>{{ f.meters }}{% if f.outdated %} <span class="badge text-bg-warning" title="Older than {{ min_fw }}: no longer supported, flash the current firmware">{{ f.outdated }} to update</span>{% endif %}</td>
-        <td class="text-end"><a class="btn btn-sm btn-outline-primary text-nowrap" href="{{ url_for('main.firmware_config_page', meter=f.key) }}"><i class="bi bi-file-earmark-code me-1"></i>Generate config.h</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table></div>
-  <div class="card-footer small text-body-secondary">Meters need firmware {{ min_fw }} or newer. Make the <code>config.h</code> for your hardware here, replace the one in the sketch folder, then compile and upload with the Arduino IDE.</div>
-</div>
-<div class="card border-dashed" style="max-width:1000px">
+{% if outdated %}<div class="alert alert-warning" style="max-width:1000px"><i class="bi bi-exclamation-triangle me-1"></i>{{ outdated }} meter(s) run firmware older than {{ min_fw }}, which this server no longer supports. Flash the current firmware.</div>{% endif %}
+<div class="card" style="max-width:1000px">
+  <div class="card-header d-flex align-items-center gap-2">
+    <span class="fw-semibold">List of firmware</span>
+    <a class="btn btn-sm btn-primary ms-auto text-nowrap" href="{{ url_for('main.firmware_config_page') }}"><i class="bi bi-file-earmark-code me-1"></i>Generate config.h</a>
+  </div>
   <div class="card-body d-flex align-items-center gap-3">
     <i class="bi bi-cloud-arrow-down fs-2 text-body-tertiary"></i>
     <div><div class="fw-semibold">Over-the-air (OTA) updates are coming in a later version.</div>
