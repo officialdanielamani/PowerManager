@@ -44,23 +44,6 @@ struct Blob {
   Cfg c[MAX];
 };
 
-// Saved by firmware before 0.9.3 / 0.7.3 (4 schedules, days only): converted once in begin().
-struct OldSched {
-  uint8_t used, on, days;
-  uint16_t start, end;
-};
-struct OldCfg {
-  char name[21];
-  uint8_t mode, override, elseOn;
-  OldSched s[4];
-  Rule ev;
-};
-struct OldBlob {
-  uint8_t version;
-  int16_t tz;
-  OldCfg c[MAX];
-};
-
 struct Run {
   bool want = false;      // manual state (persisted)
   bool autoState = false, autoKnown = false;
@@ -96,32 +79,9 @@ static void saveWant() {
 
 void begin() {
   prefs.begin("aux", true);
-  size_t len = prefs.getBytesLength("cfg");
-  if (len == sizeof(Blob)) {
+  if (prefs.getBytesLength("cfg") == sizeof(Blob)) {
     prefs.getBytes("cfg", &active, sizeof(active));
-    if (active.version != 2) active = Blob();
-  } else if (len == sizeof(OldBlob)) {
-    OldBlob *o = new OldBlob;
-    prefs.getBytes("cfg", o, sizeof(OldBlob));
-    if (o->version == 1) {
-      active.tz = o->tz;
-      for (uint8_t i = 0; i < MAX; i++) {
-        Cfg &c = active.c[i];
-        memcpy(c.name, o->c[i].name, sizeof(c.name));
-        c.mode = o->c[i].mode;
-        c.override = o->c[i].override;
-        c.elseOn = o->c[i].elseOn;
-        c.ev = o->c[i].ev;
-        for (uint8_t k = 0; k < 4; k++) {
-          c.s[k].used = o->c[i].s[k].used;
-          c.s[k].on = o->c[i].s[k].on;
-          c.s[k].days = o->c[i].s[k].days;
-          c.s[k].start = o->c[i].s[k].start;
-          c.s[k].end = o->c[i].s[k].end;
-        }
-      }
-    }
-    delete o;
+    if (active.version != 2) active = Blob();  // other layout: defaults, the server re-sends the config
   }
   uint16_t want = prefs.getUShort("want", 0);
   prefs.end();

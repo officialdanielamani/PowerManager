@@ -56,6 +56,8 @@ def test_generate_pzem_and_errors():
 
 def test_firmware_page(admin):
     page = admin.get("/firmware").get_data(as_text=True)
-    assert "config.h Generator" in page
+    assert "List of firmware" in page and "/firmware/config?meter=rbamp" in page and "Over-the-air" in page
+    page = admin.get("/firmware/config?meter=pzem_dc").get_data(as_text=True)
+    assert "Generate config.h" in page and '<option value="pzem_dc" selected>' in page
     r = admin.post("/firmware/config", json=dict(BASE, meter="pzem_ac", pin_pzem_rx=5, pin_pzem_tx=6, channel_relay=0)).get_json()
     assert r["ok"] and "#define CHANNEL_RELAY 0" in r["text"]

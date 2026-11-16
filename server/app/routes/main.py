@@ -58,7 +58,7 @@ def meter_summary(d, show_price=None, user=None):
     w_t = sum((c.get("w") or 0) for c in chans_t) if chans_t else None
     kwh_t = None
     if tare and sess.get("kwh_t") is not None:
-        kwh_t = round(float(sess["kwh_t"]), 4)  # the meter's own tared value (firmware 0.3+), used for its limit
+        kwh_t = round(float(sess["kwh_t"]), 4)  # the meter's own tared value, used for its limit
     elif kwh_now is not None:
         secs = ((sess_end or now()) - sess_start) if sess_start else 0
         kwh_t = round(tare_svc.kwh(float(kwh_now), secs, tare), 4)
@@ -263,8 +263,31 @@ def firmware():
     if not current_user.is_staff:
         from flask import abort
         abort(403)
+    from ..services import cfggen, devconfig
+    devices = list(access.visible_devices(current_user))
+    rows = []
+    for key, label in cfggen.METERS.items():
+        mine = [d for d in devices if _fw_key(d) == key]
+        rows.append({"key": key, "label": label.split(" - ")[0], "sketch": "PowerMeterRBAmp" if key == "rbamp" else "PowerMeterPZEM",
+                     "version": cfggen.version(key), "meters": len(mine),
+                     "outdated": sum(1 for d in mine if devconfig.fw_outdated(d))})
+    return render_template("firmware.html", firmwares=rows, min_fw=".".join(map(str, devconfig.MIN_FW)))
+
+
+def _fw_key(device):
+    """Which firmware a paired meter runs (config.h generator key)."""
+    return "rbamp" if device.is_mc else "pzem_dc" if device.kind == "dc" else "pzem_ac"
+
+
+@bp.get("/firmware/config")
+@login_required
+def firmware_config_page():
+    if not current_user.is_staff:
+        from flask import abort
+        abort(403)
     from ..services import cfggen
-    return render_template("firmware.html", gen=cfggen)
+    meter = request.args.get("meter")
+    return render_template("firmware_config.html", gen=cfggen, meter=meter if meter in cfggen.METERS else "rbamp")
 
 
 @bp.post("/firmware/config")

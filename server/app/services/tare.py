@@ -2,7 +2,7 @@
 
 Raw values are always stored as measured; tared values are computed when displayed or exported.
 The offsets are part of the meter config, so with "tare_limits" (default) the meter itself
-uses tared values for its kWh limit and max current (firmware 0.3+). Voltage is never tared.
+uses tared values for its kWh limit and max current. Voltage is never tared.
 """
 
 

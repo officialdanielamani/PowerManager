@@ -245,7 +245,7 @@ def configure(pk):
                            managers=access.managers() if current_user.is_admin else [],
                            aux_relays={a.get("i"): a.get("relay") for a in (device.last_state or {}).get("aux") or []
                                        if isinstance(a, dict)},
-                           n_temp=auxcfg.temp_count(device), aux_sched_max=auxcfg.sched_max(device), aux_v2=auxcfg.v2(device),
+                           n_temp=auxcfg.temp_count(device), aux_sched_max=auxcfg.SCHED_MAX, fw_old=devconfig.fw_outdated(device),
                            mqtt_meter=mqtt_bridge.meter_config(),
                            aux_sources=auxcfg.sources(device), aux_flags=auxcfg.FLAGS, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
                            aux_cfg=auxcfg.fit(cfg.get("aux"), devconfig.aux_count(device)),
@@ -263,13 +263,11 @@ def connection(pk):
     f = request.form
     back = redirect(url_for("meters.configure", pk=pk) + "#connection")
     if not (device.caps or {}).get("mqtt") and f.get("what") == "mqtt":
-        flash("This meter's firmware has no MQTT support.", "warning")
+        flash("This meter's firmware was built without MQTT (NET_MQTT 0).", "warning")
         return back
     if f.get("what") == "wifi2":  # backup Wi-Fi: saved on the meter as it is; empty name = remove it
         ssid, pw = (f.get("ssid") or "").strip(), f.get("wifi_pass") or ""
-        if not (device.caps or {}).get("wifi2"):
-            flash("Backup Wi-Fi needs firmware PZEM 0.7.4 / rbAmp 0.9.4 or newer.", "warning")
-        elif f.get("remove") == "1":
+        if f.get("remove") == "1":
             ssid, pw = "", ""
         elif not 1 <= len(ssid.encode()) <= 32:
             flash("Backup Wi-Fi name (SSID): 1–32 characters", "danger")
@@ -277,16 +275,15 @@ def connection(pk):
         elif pw and not 8 <= len(pw) <= 63:
             flash("Wi-Fi password: 8–63 characters (empty for an open network)", "danger")
             return back
-        if (device.caps or {}).get("wifi2"):
-            cmd, err = commands.issue(device, "set_wifi", {"slot": "backup", "ssid": ssid, "pass": pw}, current_user)
-            ingest.server_event(device, "wifi_backup_requested", {"by": current_user.username, "ssid": ssid})
-            net = dict(device.net or {})
-            net["wifi2"] = ssid
-            device.net = net
-            db.session.commit()
-            what = f"Backup Wi-Fi '{ssid}'" if ssid else "Removing the backup Wi-Fi"
-            flash(f"{what} sent to the meter." if cmd is not None and cmd.sent_at else
-                  f"The meter is offline: {what[0].lower() + what[1:]} is sent when it reconnects.", "success")
+        cmd, err = commands.issue(device, "set_wifi", {"slot": "backup", "ssid": ssid, "pass": pw}, current_user)
+        ingest.server_event(device, "wifi_backup_requested", {"by": current_user.username, "ssid": ssid})
+        net = dict(device.net or {})
+        net["wifi2"] = ssid
+        device.net = net
+        db.session.commit()
+        what = f"Backup Wi-Fi '{ssid}'" if ssid else "Removing the backup Wi-Fi"
+        flash(f"{what} sent to the meter." if cmd is not None and cmd.sent_at else
+              f"The meter is offline: {what[0].lower() + what[1:]} is sent when it reconnects.", "success")
         return back
     if f.get("what") == "wifi":
         ssid, pw = (f.get("ssid") or "").strip(), f.get("wifi_pass") or ""
@@ -1029,7 +1026,6 @@ def _bulk_apply(cfg, new, groups):
     for c in out["ch"]:  # the same limits for every channel of every selected meter
         if "kwh" in groups:
             c["kwh_max"], c["kwh_action"] = new["ch"][0]["kwh_max"], new["ch"][0]["kwh_action"]
-            c.pop("kwh_end", None)
         if "amp" in groups:
             c["amp_max"] = new["ch"][0]["amp_max"]
     return out

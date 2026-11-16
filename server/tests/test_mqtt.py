@@ -111,13 +111,7 @@ def test_change_wifi_and_broker_from_the_server(app, admin, broker):
     assert admin.post(f"/meters/{pk}/connection", data={"what": "wifi", "ssid": "x", "wifi_pass": "short"}).status_code == 302
     with app.app_context():
         assert Command.query.filter_by(device_fk=pk, c="set_wifi").count() == 1  # bad password: nothing sent
-    # backup Wi-Fi: needs newer firmware (caps.wifi2); own slot, does not cancel a waiting main change
-    admin.post(f"/meters/{pk}/connection", data={"what": "wifi2", "ssid": "Hotspot", "wifi_pass": "abcdefgh"})
-    with app.app_context():
-        assert Command.query.filter_by(device_fk=pk, c="set_wifi").count() == 1
-        d = db.session.get(Device, pk)
-        d.caps = dict(d.caps, wifi2=True)
-        db.session.commit()
+    # backup Wi-Fi: own slot, does not cancel a waiting main change
     admin.post(f"/meters/{pk}/connection", data={"what": "wifi2", "ssid": "Hotspot", "wifi_pass": "abcdefgh"})
     assert broker.inner("cmd")[-1]["slot"] == "backup" and broker.inner("cmd")[-1]["ssid"] == "Hotspot"
     with app.app_context():

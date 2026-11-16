@@ -1,48 +1,55 @@
-// PowerMeter MC (multi-channel AC) firmware configuration. See docs/multichannel.md.
-// ESP32-S3 Super Mini + rbAmp BASIC (SCT-013 clamps, I2C) + DS3231 + tamper switch + I2C relay board.
+// PowerMeter rbAmp (multi-channel AC) firmware configuration. See docs/multichannel.md.
+// ESP32-S3 + rbAmp BASIC (SCT-013 clamps, I2C) + I2C relay board.
+// The server can make this file for you: Firmware -> Generate config.h.
 #pragma once
 
-#define FW_VERSION "0.9.5"
+// ================================================================ [1] BOARD INFO
+#define FW_VERSION "1.0.0"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
-
 #define METER_KIND "ac"
 #define SENSOR_NAME "AC Power Sensor"
-#define MC_MAX_CH 16              // channels the firmware can hold (the CHANNELS table below sets how many are used)
+#define MC_MAX_CH 16              // channels the firmware can hold (the CHANNELS table sets how many are used)
 #define FW_TYPE "rbamp-mc"        // stored on the meter: a different firmware type clears old state
+#define HW_INFO "AC Power Sensor (multi-channel)"  // free text shown in "Get meter info" on the server
 
-// ---------------------------------------------------------------- pins (check your board)
-#define PIN_I2C_SDA 8       // shared I2C bus: rbAmp, DS3231, relay board
-#define PIN_I2C_SCL 9
-#define I2C_FREQ_HZ 50000   // rbAmp recommendation for ESP32 hosts (do not use 400 kHz)
-#define PIN_DRDY 5           // rbAmp DRDY of board 1 (open-drain, internal pull-up; add 10 k to 3.3 V for long wires)
-                             // -1 = DRDY not wired: Normal mode only (the module is read once a second)
-#define PIN_TAMPER 4        // NC switch to GND; open = panel open (INPUT_PULLUP)
-#define PIN_LED 48          // WS2812 RGB LED (onboard on most Super Mini boards)
-#define PIN_BOOT_BUTTON 0   // hold 10 s = factory reset
-
-#define TAMPER_OPEN_LEVEL HIGH   // with NC switch to GND + pull-up, HIGH = open
-#define PIN_UPS 2           // UPS signal input (only with UPS_ENABLE 1, see "optional parts")
-#define UPS_ACTIVE_LEVEL LOW     // level of PIN_UPS that means "running on the UPS":
-                                 //   LOW  = contact / open collector to GND (internal pull-up is used)
-                                 //   HIGH = 3.3 V logic signal (internal pull-down is used; never 5 V / 12 V directly)
-
-// ---------------------------------------------------------------- optional parts (0 = not fitted)
+// ================================================================ [2] ENABLE FLAGS (1 = on, 0 = off)
 // A part switched off here is left out of the firmware completely (smaller binary).
-#define HAS_DS3231 1        // DS3231 RTC module on the I2C bus (keeps the time without Wi-Fi)
+#define HAS_DS3231 1        // DS3231 clock (RTC) on the I2C bus: keeps the time without Wi-Fi
 #define TAMPER_ENABLE 1     // tamper / panel switch on PIN_TAMPER
 #define UPS_ENABLE 0        // UPS signal input on PIN_UPS: event + notification while the UPS runs on battery
-#define TEMP_DS18B20 0      // DS18B20 temperature sensor(s) on PIN_TEMP (see "temperature" below)
+#define BATTERY_ENABLE 0    // battery voltage on PIN_BATTERY_ADC (through a resistor divider)
+#define TEMP_DS18B20 0      // DS18B20 temperature sensor(s) on PIN_TEMP
 #define TEMP_SHT 0          // SHT20 / SHT3x / SHT4x temperature + humidity sensor(s) on the I2C bus
-// (BATTERY_ENABLE and MESH_ENABLE are in their own sections below.)
+#define NET_WEBSOCKET 1     // link to the server: its own WebSocket
+#define NET_MQTT 1          // link to the server: through an MQTT broker (keep at least one of the two)
+#define MESH_ENABLE 1       // ESP-NOW mesh: reach the server through a nearby meter when there is no Wi-Fi
+#define AP_PASSWORD_IS_DEVICE_ID 1  // setup Wi-Fi "Power_<DeviceID>": 1 = password is the Device ID,
+                                    // 0 = random password made on first boot (printed on serial)
 
-// ---------------------------------------------------------------- power sensor boards: rbAmp BASIC
-// One entry per rbAmp module on the I2C bus: its I2C address. Board 1 = first entry, board 2 = second...
+// ================================================================ [3] PIN OUT (check your board)
+#define PIN_I2C_SDA 8        // shared I2C bus: rbAmp, DS3231, relay board, SHT sensors
+#define PIN_I2C_SCL 9
+#define I2C_FREQ_HZ 50000    // rbAmp recommendation for ESP32 hosts (do not use 400 kHz)
+#define PIN_DRDY 5           // rbAmp DRDY of board 1 (open-drain, internal pull-up; 10 k to 3.3 V for long wires)
+                             // -1 = not wired: Normal mode only (the module is read once a second)
+#define PIN_LED 48           // WS2812 RGB LED (onboard on most Super Mini boards)
+#define PIN_BOOT_BUTTON 0    // hold 10 s = factory reset
+#define PIN_TAMPER 4         // NC switch to GND; open = panel open (internal pull-up)
+#define TAMPER_OPEN_LEVEL HIGH
+#define PIN_UPS 2            // UPS signal input
+#define UPS_ACTIVE_LEVEL LOW // level that means "running on the UPS": LOW = contact to GND (pull-up),
+                             // HIGH = 3.3 V logic signal (pull-down; never 5 V / 12 V directly)
+#define PIN_TEMP 6           // DS18B20 1-Wire pin (4.7 k pull-up to 3.3 V)
+#define PIN_BATTERY_ADC 1    // battery divider tap (ADC1; keep the pin below ~3.1 V)
+
+// ================================================================ [4] OPTIONS / CONFIGURATION
+// ---- power sensor boards: rbAmp BASIC
+// One entry per rbAmp module: its I2C address. Board 1 = first entry, board 2 = second ...
 // New modules all answer at 0x50: give every extra module its own address ONCE, with only that module
-// connected, by typing in the Serial Monitor:   rbamp addr 0x50 0x51
-// ("i2c scan" lists what answers on the bus.) DRDY is taken from board 1.
+// connected, in the Serial Monitor:   rbamp addr 0x50 0x51      ("i2c scan" lists what answers.)
 #define RBAMP_BOARDS { 0x50 }              // e.g. { 0x50, 0x51 } = an rbAmp UI5 + an rbAmp I7
-#define SUPPLY_LOST_VOLTAGE 50.0f          // below this = AC lost (the module keeps answering: it has its own 5 V)
+#define SUPPLY_LOST_VOLTAGE 50.0f          // below this = AC lost
 
 // Clamp models (written to the module at start-up). CT-series modules with factory-paired clamps: SCT_KEEP.
 #define SCT_KEEP 0
@@ -54,7 +61,7 @@
 #define SCT_60A 7     // SCT-013-060
 #define SCT_100A 5    // SCT-013-100
 
-// ---------------------------------------------------------------- relay outputs
+// ---- relay outputs
 // One entry per relay board / pin group: { driver, I2C address, relays used, active high }.
 //   RELAY_MCP23017 MCP23017 I/O expander, 16 push-pull outputs GPA0-7 = 0-7, GPB0-7 = 8-15 (0x20-0x27); active high 1
 //                  (recommended for SSRs: each output sources / sinks up to 25 mA, 125 mA for the whole chip)
@@ -70,7 +77,7 @@
 #define RELAY_BOARDS { {RELAY_XL9535, 0x20, 2, 1} }
 #define RELAY_GPIO_PINS { -1 }      // pins for RELAY_GPIO entries, in order (-1 = none)
 
-// ---------------------------------------------------------------- channels: what is wired where
+// ---- channels: what is wired where
 // One line per measured channel, in order: the first line is CH1, the second CH2 ...
 //   board: 1 = first rbAmp in RBAMP_BOARDS      input: current input on that board (1..7)
 //   clamp: SCT_* model of the clamp on it       relay: relay number switching it (0 = no relay)
@@ -88,7 +95,7 @@
 //                      {1, 5, SCT_30A, 5}, {2, 1, SCT_20A, 9}, {2, 2, SCT_20A, 10}, {2, 3, SCT_20A, 11} }
 //   -> relays 6, 7, 8 and 12..16 are AUX relays.
 
-// ---------------------------------------------------------------- temperature / humidity
+// ---- temperature / humidity
 // Numbering: T1, T2 ... = first the SHT sensors (in the order of SHT_SENSORS), then the DS18B20s sorted by
 // serial number (a sensor keeps its number over a restart). Both kinds can be used together.
 //
@@ -101,34 +108,22 @@
 #define SHT_SENSORS { {SHT_4X, 0x44} }
 //
 // DS18B20 (TEMP_DS18B20 1): on their own 1-Wire pin PIN_TEMP with a 4.7 k pull-up to 3.3 V (several sensors
-// on the same wire). PIN_TEMP is not used when TEMP_DS18B20 is 0.
-#define PIN_TEMP 6
+// on the same wire).
 #define TEMP_MAX_SENSORS 4        // DS18B20s at most (SHT sensors: as many as listed above)
 #define TEMP_READ_MS 10000        // read (and record) the sensors (SHT and DS18B20) this often
 #define TEMP_HYST 5.0f            // over-temperature clears this many degC below the limit
 
-// ---------------------------------------------------------------- battery (optional)
-// Measures the DC UPS / backup battery through a resistor divider into an ADC pin:
-//   battery + ── R1 ──┬── R2 ── GND        BATTERY_DIVIDER = (R1 + R2) / R2
-//                     └── PIN_BATTERY_ADC   (keep the pin below ~3.1 V)
-// Example: 1S Li-ion (4.2 V max) with R1 = R2 = 100 k  ->  divider 2.0.
-#define BATTERY_ENABLE 0
-#define PIN_BATTERY_ADC 1          // GPIO1 = ADC1 channel 0 (ADC1 works while Wi-Fi is on)
-#define BATTERY_DIVIDER 2.0f
+// ---- battery (BATTERY_ENABLE): battery + -- R1 --+-- R2 -- GND, tap to PIN_BATTERY_ADC
+#define BATTERY_DIVIDER 2.0f       // (R1 + R2) / R2
 #define BATTERY_V_EMPTY 3.30f      // 0 %   (1S Li-ion; e.g. 11.0 / 12.6 for a 3S pack)
 #define BATTERY_V_FULL 4.20f       // 100 %
 
-// ---------------------------------------------------------------- setup Wi-Fi (access point)
-// SSID is always "Power_<DeviceID>".
-// 1 = password is the same Device ID (easy: SSID Power_K7P29QXM, password K7P29QXM).
-//     Anyone who can see the SSID can join, so finish setup (create the admin) promptly.
-// 0 = random 8-character password made on first boot (printed on serial; write it on a label).
-#define AP_PASSWORD_IS_DEVICE_ID 1
-
-// ---------------------------------------------------------------- LED
+// ---- LED and defaults
 #define LED_BRIGHTNESS 40         // 0-255, kept low on purpose
+#define DEFAULT_REPORT_S 60       // send to the server every ... s
+#define DEFAULT_READ_S 60         // record a reading every ... s (sent in batches every report_s)
 
-// ---------------------------------------------------------------- timing
+// ---- timing
 #define STACK_NET 20480           // bytes; TLS handshake + JSON + mesh need room
 #define STACK_WEB 10240
 #define STACK_CONTROL 8192
@@ -138,13 +133,17 @@
 #define ENERGY_PERIOD_MS 1000     // close an rbAmp period (energy) this often
 #define ENERGY_SAVE_MS 300000     // save the kWh counters to NVS this often (and on session changes)
 #define TRIP_CONFIRM_READS 2      // over-current must be seen this many reads in a row
-#define RELAY_MIN_OFF_MS 2000     // anti-chatter: after switching OFF, stay OFF at least this long
-                                  // (OFF is always immediate; only the next ON waits)
+#define RELAY_MIN_OFF_MS 2000     // after switching OFF, stay OFF at least this long (OFF is always immediate)
 #define RELAY_CHATTER_SWITCHES 6  // more relay changes than this within 60 s = warning on serial + event
 #define TAMPER_DEBOUNCE_MS 1000   // tamper input must be stable this long to count
 #define UPS_DEBOUNCE_MS 2000      // UPS input must be stable this long to count
 #define VOLT_OUT_MS 3000          // operating voltage: out of range this long to trigger
 #define VOLT_OK_MS 10000          // ...and back in range this long to clear
+
+// ---- link to the server (NET_WEBSOCKET / NET_MQTT). With both, MQTT is used when the server has a broker
+// and the WebSocket otherwise (and as a fallback). Pairing always uses HTTPS.
+#define MQTT_FALLBACK_MS (5UL * 60UL * 1000UL)   // broker unreachable this long -> use the WebSocket
+#define MQTT_RETRY_MS (30UL * 60UL * 1000UL)     // ...and try the broker again after this
 #define WS_PING_INTERVAL_MS 30000
 #define WS_PONG_TIMEOUT_MS 10000
 #define ACK_TIMEOUT_MS 5000       // resend unacked outbox items after this
@@ -154,24 +153,7 @@
 #define FACTORY_RESET_HOLD_MS 10000
 #define WEB_SESSION_TTL_S (12UL * 3600UL)
 
-// ---------------------------------------------------------------- link to the server
-// How the meter talks to the server. Keep both (default), or switch one off to make the firmware smaller:
-//   NET_WEBSOCKET  the server's own WebSocket (wss://server/ws/device)
-//   NET_MQTT       through an MQTT broker over WebSocket (ws:// / wss://, e.g. a broker behind Cloudflare).
-//                  The broker address comes from the server when the meter is paired ("auto link") and can
-//                  be changed from the server later. Messages are signed with the meter's own key.
-// With both, MQTT is used when the server has a broker, and the WebSocket otherwise (and as a fallback).
-// Pairing itself always uses HTTPS to the server.
-#define NET_WEBSOCKET 1
-#define NET_MQTT 1
-#define MQTT_FALLBACK_MS (5UL * 60UL * 1000UL)   // broker unreachable this long -> use the WebSocket
-#define MQTT_RETRY_MS (30UL * 60UL * 1000UL)     // ...and try the broker again after this
-
-// ---------------------------------------------------------------- mesh (ESP-NOW)
-// Auto role: Wi-Fi first; if Wi-Fi is down for MESH_LEAF_AFTER_MS the meter becomes a "leaf" and
-// reaches the server through a nearby "gateway" meter (any Auto meter that is online on Wi-Fi).
-// One hop only. See docs/mesh.md.
-#define MESH_ENABLE 1                                 // 0 = no ESP-NOW at all (behaves like firmware 0.3)
+// ---- mesh (MESH_ENABLE): Wi-Fi first; without Wi-Fi the meter talks through a nearby online meter. docs/mesh.md
 #define MESH_LEAF_AFTER_MS (90UL * 1000UL)            // Wi-Fi down this long -> leaf
 #define MESH_WIFI_RETRY_MS (10UL * 60UL * 1000UL)     // leaf with a working mesh link: try Wi-Fi this often
 #define MESH_NOLINK_RETRY_MS (2UL * 60UL * 1000UL)    // leaf without a gateway this long -> try Wi-Fi
@@ -182,7 +164,7 @@
 #define MESH_SCAN_DWELL_MS 300                         // leaf: listen time per channel when searching
 #define MESH_BATCH_MAX 8                               // telemetry items per message on the mesh
 
-// ---------------------------------------------------------------- outbox (offline buffer)
+// ---- outbox (offline buffer)
 // Stored in the LittleFS partition: choose Tools > Partition Scheme >
 // "Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)".
 #define OUTBOX_SEGMENT_ITEMS 50   // items per segment file (~8 KB)
@@ -191,8 +173,3 @@
 #define OUTBOX_RAM_BYTES 64000   // ...and at most this much (DRDY: ~90 s of 2-channel windows)
 #define OUTBOX_RAM_MAX_AGE_MS 120000 // ...or still unsent after this long (DRDY send interval up to 90 s)
 #define OUTBOX_BATCH_MAX 50       // items per "tel" message
-
-// ---------------------------------------------------------------- defaults
-#define DEFAULT_REPORT_S 60       // send to the server every ... s
-#define DEFAULT_READ_S 60         // record a reading every ... s (sent in batches every report_s)
-#define HW_INFO "AC Power Sensor (multi-channel)"  // free text shown in "Get meter info" on the server

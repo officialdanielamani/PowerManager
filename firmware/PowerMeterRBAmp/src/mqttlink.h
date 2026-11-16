@@ -12,12 +12,6 @@
 #include <WebSocketsClient.h>
 #include "../config.h"
 
-#ifndef NET_MQTT
-#define NET_MQTT 1
-#endif
-#ifndef NET_WEBSOCKET
-#define NET_WEBSOCKET 1
-#endif
 #if !NET_MQTT && !NET_WEBSOCKET
 #error "config.h: enable NET_WEBSOCKET or NET_MQTT (or both)"
 #endif

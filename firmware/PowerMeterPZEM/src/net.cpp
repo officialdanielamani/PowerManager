@@ -168,9 +168,6 @@ static bool wifiTestLoop() {
   return true;
 }
 
-#ifndef WIFI_MAIN_CHECK_MS
-#define WIFI_MAIN_CHECK_MS (5UL * 60UL * 1000UL)
-#endif
 static void stopWs();
 
 // Main / backup Wi-Fi. Without a link the two are tried in turn (30 s each, main first). On the backup the
@@ -299,7 +296,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   int report = c["report_s"] | 60;
   if (report < 10 || report > 3600) { err = "report_s"; return false; }
   m.report_s = report;
-  int readS = c["read_s"] | report;  // older servers: one reading per send
+  int readS = c["read_s"] | report;
   if (readS < 1 || readS > report) { err = "read_s"; return false; }
   m.read_s = readS;
   int off = c["offline_off_min"] | 0;
@@ -367,7 +364,6 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   const char *act = ch["kwh_action"] | "";
   if (!strcmp(act, "hold")) m.kwh_action = KWH_HOLD;
   else if (!strcmp(act, "warn")) m.kwh_action = KWH_WARN;
-  else if (!*act && !(ch["kwh_end"] | true)) m.kwh_action = KWH_WARN;  // server v0.2.x
   else m.kwh_action = KWH_END;
   m.amp_max = amp;
   const char *aerr = nullptr;  // AUX relays: names + automation (applied with the rest in applyConfig)
@@ -424,14 +420,12 @@ static String pairBody(const PairRequest &r) {
   caps["channels"] = SENSOR_CHANNELS;
   caps["relays"] = CHANNEL_RELAY ? 1 : 0;
   caps["aux"] = auxrelay::count();  // AUX relays (every relay output except CHANNEL_RELAY)
-  caps["aux_v"] = 3;  // 2: 14 schedules (day / date), more events, "any channel"; 3: UPS + battery % events
   if (temp::hasHumidity()) caps["hum"] = true;
   caps["inputs"].to<JsonArray>().add("tamper");
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
-  caps["wifi2"] = true;            // backup Wi-Fi (set_wifi with slot "backup")
   caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
   caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
@@ -606,14 +600,12 @@ static void sendHello() {
   caps["sensor"] = METER_DC ? "pzem017" : "pzem004t";
   caps["mc"] = false;  // single-channel firmware (the server detects a change of hardware type)
   caps["aux"] = auxrelay::count();
-  caps["aux_v"] = 3;  // 2: 14 schedules (day / date), more events, "any channel"; 3: UPS + battery % events
   if (temp::hasHumidity()) caps["hum"] = true;
   caps["channels"] = SENSOR_CHANNELS;
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
-  caps["wifi2"] = true;            // backup Wi-Fi (set_wifi with slot "backup")
   caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
   caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();

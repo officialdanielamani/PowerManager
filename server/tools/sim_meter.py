@@ -238,7 +238,7 @@ class Meter:
             kmax = self.ch_cfg().get("kwh_max", 0)
             if kmax and self.session_status() == "active" and self.session_kwh_limit() >= kmax:
                 ch = self.ch_cfg()
-                action = ch.get("kwh_action") or ("end" if ch.get("kwh_end", True) else "warn")
+                action = ch.get("kwh_action") or "end"
                 if action == "warn":
                     if not self.sess.get("over"):
                         self.sess["over"] = True

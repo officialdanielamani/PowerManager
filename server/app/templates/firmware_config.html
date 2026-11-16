@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}Generate config.h · PowerManager{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="{{ url_for('main.firmware') }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> Firmware</a>
+  <h1 class="h4 mb-0">Generate config.h</h1>
+</div>
+<div class="card mb-3" style="max-width:1000px">
+  <div class="card-body">
+    <p class="small text-body-secondary">Choose the hardware of the meter, click <strong>Generate</strong> and copy the result over the
+      <code>config.h</code> of the sketch (Arduino IDE), then upload. Everything not asked here keeps the firmware's default.</p>
+    <form id="genForm" autocomplete="off">
+      <div class="row g-3">
+        <div class="col-md-10">
+          <label class="form-label fw-semibold">Meter type</label>
+          <select class="form-select" name="meter" id="gMeter">
+            {% for k, label in gen.METERS.items() %}<option value="{{ k }}" {{ 'selected' if k == meter }}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+
+      {# ---------------- power sensor #}
+      <h2 class="h6 mt-4 border-bottom pb-1">Power sensor</h2>
+      <div class="g-rbamp">
+        <div class="row g-2 align-items-end mb-2">
+          <div class="col-auto"><label class="form-label small mb-1">rbAmp boards (I2C address of each)</label>
+            <div class="d-flex gap-2" id="gBoards"></div></div>
+          <div class="col-auto"><button type="button" class="btn btn-sm btn-outline-secondary" id="gAddBoard"><i class="bi bi-plus-lg"></i> Board</button></div>
+          <div class="col-auto ms-md-3"><div class="form-check"><input class="form-check-input" type="checkbox" name="drdy" id="gDrdy" checked>
+            <label class="form-check-label small" for="gDrdy">DRDY wired, on GPIO</label></div></div>
+          <div class="col-auto"><input class="form-control form-control-sm" style="width:70px" name="pin_drdy" value="5"></div>
+        </div>
+        <div class="table-responsive"><table class="table table-sm align-middle mb-1" style="max-width:720px">
+          <thead><tr class="small"><th>Channel</th><th>Board</th><th>Input</th><th>Clamp</th><th>Relay (0 = none)</th><th></th></tr></thead>
+          <tbody id="gChannels"></tbody></table></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="gAddCh"><i class="bi bi-plus-lg"></i> Channel</button>
+        <span class="small text-body-secondary ms-1">Relays that no channel uses become AUX relays.</span>
+      </div>
+      <div class="g-pzem d-none">
+        <div class="row g-2">
+          <div class="col-auto"><label class="form-label small mb-1">PZEM RX pin</label><input class="form-control form-control-sm" style="width:90px" name="pin_pzem_rx" value="5"></div>
+          <div class="col-auto"><label class="form-label small mb-1">PZEM TX pin</label><input class="form-control form-control-sm" style="width:90px" name="pin_pzem_tx" value="6"></div>
+          <div class="col-auto g-dc"><label class="form-label small mb-1">RS485 DE pin (-1 = auto)</label><input class="form-control form-control-sm" style="width:90px" name="pin_de" value="-1"></div>
+          <div class="col-auto g-dc"><label class="form-label small mb-1">Shunt</label>
+            <select class="form-select form-select-sm" name="shunt">{% for a in gen.SHUNTS %}<option value="{{ a }}" {{ 'selected' if a == 100 }}>{{ a }} A</option>{% endfor %}<option value="0">Leave as it is</option></select></div>
+          <div class="col-auto"><label class="form-label small mb-1">Relay of the measured line (0 = none)</label><input class="form-control form-control-sm" style="width:90px" name="channel_relay" value="1"></div>
+        </div>
+      </div>
+
+      {# ---------------- relays #}
+      <h2 class="h6 mt-4 border-bottom pb-1">Relay boards / outputs</h2>
+      <div class="table-responsive"><table class="table table-sm align-middle mb-1" style="max-width:820px">
+        <thead><tr class="small"><th>Relays</th><th>Type</th><th>I2C address</th><th>Outputs used</th><th>Active high</th><th></th></tr></thead>
+        <tbody id="gRelays"></tbody></table></div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="gAddRelay"><i class="bi bi-plus-lg"></i> Relay board</button>
+      <div class="row g-2 mt-1"><div class="col-auto"><label class="form-label small mb-1">GPIO pins of the "ESP32 pins" relays, in order</label>
+        <input class="form-control form-control-sm" style="width:220px" name="gpio_pins" placeholder="e.g. 10, 11"></div></div>
+
+      {# ---------------- environment + parts #}
+      <h2 class="h6 mt-4 border-bottom pb-1">Sensors and other parts</h2>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-2"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="ds18b20" id="gDs">
+            <label class="form-check-label" for="gDs">DS18B20 temperature, on GPIO</label></div>
+            <input class="form-control form-control-sm" style="width:70px" name="pin_temp" value="6">
+            <span class="small">up to</span><input class="form-control form-control-sm" style="width:60px" name="ds_max" value="4"><span class="small">sensors</span></div>
+          <div class="small mb-1">SHT temperature + humidity sensors (I2C)</div>
+          <div id="gSht"></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="gAddSht"><i class="bi bi-plus-lg"></i> SHT sensor</button>
+        </div>
+        <div class="col-md-6">
+          <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="rtc" id="gRtc"><label class="form-check-label" for="gRtc">DS3231 clock (RTC) on the I2C bus</label></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-2"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="tamper" id="gTamper" checked>
+            <label class="form-check-label" for="gTamper">Tamper / panel switch, on GPIO</label></div><input class="form-control form-control-sm" style="width:70px" name="pin_tamper" value="4"></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-2"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="ups" id="gUps">
+            <label class="form-check-label" for="gUps">UPS signal input, on GPIO</label></div><input class="form-control form-control-sm" style="width:70px" name="pin_ups" value="2">
+            <span class="small">on UPS when</span><select class="form-select form-select-sm" style="width:210px" name="ups_level"><option value="LOW">LOW (contact to GND)</option><option value="HIGH">HIGH (3.3 V signal)</option></select></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center"><div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="battery" id="gBat">
+            <label class="form-check-label" for="gBat">Battery voltage, ADC GPIO</label></div><input class="form-control form-control-sm" style="width:70px" name="pin_battery" value="1"></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center small mt-1 ms-4"><span>divider</span><input class="form-control form-control-sm" style="width:70px" name="bat_div" value="2.0">
+            <span>empty</span><input class="form-control form-control-sm" style="width:70px" name="bat_empty" value="3.30"><span>V · full</span><input class="form-control form-control-sm" style="width:70px" name="bat_full" value="4.20"><span>V</span></div>
+        </div>
+      </div>
+
+      {# ---------------- defaults #}
+      <h2 class="h6 mt-4 border-bottom pb-1">Defaults</h2>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="net_ws" id="gWs" checked><label class="form-check-label" for="gWs">Link to the server: WebSocket</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="net_mqtt" id="gMqtt" checked><label class="form-check-label" for="gMqtt">Link to the server: MQTT</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="mesh" id="gMesh" checked><label class="form-check-label" for="gMesh">Mesh (reach the server through a nearby meter)</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="ap_pass_id" id="gAp" checked><label class="form-check-label" for="gAp">Setup Wi-Fi password = Device ID <span class="text-body-secondary small">(off = random password, printed on serial)</span></label></div>
+        </div>
+        <div class="col-md-6">
+          <div class="d-flex flex-wrap gap-2 align-items-center small mb-2"><span>I2C pins: SDA</span><input class="form-control form-control-sm" style="width:60px" name="pin_sda" value="8">
+            <span>SCL</span><input class="form-control form-control-sm" style="width:60px" name="pin_scl" value="9"><span>· LED pin</span><input class="form-control form-control-sm" style="width:60px" name="pin_led" value="48">
+            <span>brightness</span><input class="form-control form-control-sm" style="width:70px" name="led" value="40"></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center small mb-2"><span>Record a reading every</span><input class="form-control form-control-sm" style="width:70px" name="read_s" value="60">
+            <span>s · send every</span><input class="form-control form-control-sm" style="width:70px" name="report_s" value="60"><span>s</span></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center small"><span>Hardware note</span><input class="form-control form-control-sm" style="width:260px" name="hw_info" maxlength="60" placeholder="optional, shown in Get meter info"></div>
+        </div>
+      </div>
+
+      <div class="mt-4 d-flex gap-2 align-items-center">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-gear-wide-connected me-1"></i>Generate</button>
+        <span class="small text-body-secondary" id="gBusy"></span>
+      </div>
+    </form>
+
+    <div id="gErrors" class="mt-3"></div>
+    <div id="gOut" class="mt-3 d-none">
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <span class="fw-semibold">config.h</span>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="gCopy"><i class="bi bi-clipboard me-1"></i>Copy all</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="gDownload"><i class="bi bi-download me-1"></i>Download</button>
+      </div>
+      <ul class="small mb-2" id="gNotes"></ul>
+      <textarea class="form-control font-monospace" id="gText" rows="24" readonly spellcheck="false" style="font-size:.8rem;white-space:pre;overflow:auto"></textarea>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var DRIVERS = {{ gen.DRIVERS|tojson }}, CLAMPS = {{ gen.CLAMPS|tojson }}, SHT = {{ gen.SHT|tojson }};
+  var $ = function (id) { return document.getElementById(id); };
+  function opts(map, sel, label) {
+    return Object.keys(map).map(function (k) {
+      return '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + (label ? label(map[k]) : map[k]) + '</option>';
+    }).join('');
+  }
+  var del = '<button type="button" class="btn btn-sm btn-outline-danger g-del" title="Remove"><i class="bi bi-x-lg"></i></button>';
+  function addBoard(addr) {
+    var d = document.createElement('div');
+    d.className = 'input-group input-group-sm g-board'; d.style.width = '120px';
+    d.innerHTML = '<input class="form-control" value="' + addr + '">' + del;
+    $('gBoards').appendChild(d);
+  }
+  function addChannel(board, input, clamp, relay) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td class="g-no small"></td>' +
+      '<td><input class="form-control form-control-sm g-b" style="width:70px" value="' + board + '"></td>' +
+      '<td><input class="form-control form-control-sm g-i" style="width:70px" value="' + input + '"></td>' +
+      '<td><select class="form-select form-select-sm g-c" style="width:240px">' + opts(CLAMPS, clamp) + '</select></td>' +
+      '<td><input class="form-control form-control-sm g-r" style="width:80px" value="' + relay + '"></td><td>' + del + '</td>';
+    $('gChannels').appendChild(tr);
+  }
+  function addRelay(driver, addr, n, high) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td class="g-range small text-nowrap"></td>' +
+      '<td><select class="form-select form-select-sm g-d" style="width:300px">' + opts(DRIVERS, driver, function (v) { return v[0]; }) + '</select></td>' +
+      '<td><input class="form-control form-control-sm g-a" style="width:80px" value="' + addr + '"></td>' +
+      '<td><input class="form-control form-control-sm g-n" style="width:80px" value="' + n + '"></td>' +
+      '<td><input class="form-check-input g-h" type="checkbox"' + (high ? ' checked' : '') + '></td><td>' + del + '</td>';
+    $('gRelays').appendChild(tr);
+  }
+  function addSht(type, addr) {
+    var d = document.createElement('div');
+    d.className = 'd-flex gap-2 mb-1 g-sht';
+    d.innerHTML = '<select class="form-select form-select-sm g-t" style="width:220px">' + opts(SHT, type) + '</select>' +
+      '<input class="form-control form-control-sm g-a" style="width:80px" value="' + addr + '">' + del;
+    $('gSht').appendChild(d);
+  }
+  function renumber() {
+    var n = 0;
+    document.querySelectorAll('#gChannels tr').forEach(function (tr, i) { tr.querySelector('.g-no').textContent = 'CH' + (i + 1); });
+    document.querySelectorAll('#gRelays tr').forEach(function (tr) {
+      var c = parseInt(tr.querySelector('.g-n').value, 10) || 0, gpio = tr.querySelector('.g-d').value === 'RELAY_GPIO';
+      tr.querySelector('.g-range').textContent = c ? (c === 1 ? 'Relay ' + (n + 1) : 'Relays ' + (n + 1) + '–' + (n + c)) : '';
+      tr.querySelector('.g-a').disabled = gpio;
+      n += c;
+    });
+    var m = $('gMeter').value;
+    document.querySelectorAll('.g-rbamp').forEach(function (e) { e.classList.toggle('d-none', m !== 'rbamp'); });
+    document.querySelectorAll('.g-pzem').forEach(function (e) { e.classList.toggle('d-none', m === 'rbamp'); });
+    document.querySelectorAll('.g-dc').forEach(function (e) { e.classList.toggle('d-none', m !== 'pzem_dc'); });
+  }
+  var form = $('genForm');
+  form.addEventListener('click', function (e) {
+    var b = e.target.closest('.g-del');
+    if (b) { b.closest('tr, .g-board, .g-sht').remove(); renumber(); }
+  });
+  form.addEventListener('input', renumber);
+  form.addEventListener('change', renumber);
+  $('gAddBoard').addEventListener('click', function () { addBoard('0x5' + Math.min(document.querySelectorAll('.g-board').length, 7)); });
+  $('gAddCh').addEventListener('click', function () {
+    var rows = document.querySelectorAll('#gChannels tr'), last = rows[rows.length - 1];
+    var b = last ? last.querySelector('.g-b').value : 1, i = last ? (parseInt(last.querySelector('.g-i').value, 10) || 0) + 1 : 1;
+    var r = last ? (parseInt(last.querySelector('.g-r').value, 10) || 0) : 0;
+    addChannel(b, i, last ? last.querySelector('.g-c').value : 'SCT_30A', r ? r + 1 : 0); renumber();
+  });
+  $('gAddRelay').addEventListener('click', function () { addRelay('RELAY_MCP23017', '0x2' + Math.min(document.querySelectorAll('#gRelays tr').length, 7), 8, true); renumber(); });
+  $('gAddSht').addEventListener('click', function () { addSht('SHT_3X', '0x44'); });
+  var lastMeter = null;
+  $('gMeter').addEventListener('change', function () {  // sensible relays for the chosen meter
+    var m = $('gMeter').value, pz = m !== 'rbamp';
+    if (lastMeter !== null && (lastMeter !== 'rbamp') === pz) return;
+    lastMeter = m;
+    $('gRelays').innerHTML = '';
+    if (pz) { addRelay('RELAY_GPIO', '', 1, true); form.gpio_pins.value = '7'; form.pin_temp.value = '10'; }
+    else { addRelay('RELAY_XL9535', '0x20', 2, true); form.gpio_pins.value = ''; form.pin_temp.value = '6'; }
+    renumber();
+  });
+  addBoard('0x50'); addChannel(1, 1, 'SCT_30A', 1); addChannel(1, 2, 'SCT_30A', 2);
+  $('gMeter').dispatchEvent(new Event('change'));
+
+  function collect() {
+    var o = {};
+    Array.prototype.forEach.call(form.elements, function (e) {
+      if (e.name) o[e.name] = e.type === 'checkbox' ? e.checked : e.value;
+    });
+    o.boards = Array.prototype.map.call(document.querySelectorAll('.g-board input'), function (i) { return i.value; });
+    o.channels = Array.prototype.map.call(document.querySelectorAll('#gChannels tr'), function (tr) {
+      return {board: tr.querySelector('.g-b').value, input: tr.querySelector('.g-i').value, clamp: tr.querySelector('.g-c').value, relay: tr.querySelector('.g-r').value};
+    });
+    o.relays = Array.prototype.map.call(document.querySelectorAll('#gRelays tr'), function (tr) {
+      return {driver: tr.querySelector('.g-d').value, addr: tr.querySelector('.g-a').value, n: tr.querySelector('.g-n').value, high: tr.querySelector('.g-h').checked};
+    });
+    o.sht = Array.prototype.map.call(document.querySelectorAll('.g-sht'), function (d) {
+      return {type: d.querySelector('.g-t').value, addr: d.querySelector('.g-a').value};
+    });
+    return o;
+  }
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    $('gBusy').textContent = 'Generating…';
+    PM.post("{{ url_for('main.firmware_config') }}", collect()).then(function (r) {
+      var err = $('gErrors');
+      err.innerHTML = '';
+      (r.errors || []).forEach(function (m) {
+        var d = document.createElement('div'); d.className = 'alert alert-danger py-2 mb-2'; d.textContent = m; err.appendChild(d);
+      });
+      $('gOut').classList.toggle('d-none', !r.ok);
+      if (!r.ok) { err.scrollIntoView({behavior: 'smooth', block: 'center'}); return; }
+      $('gText').value = r.text;
+      var ul = $('gNotes'); ul.innerHTML = '';
+      (r.notes || []).forEach(function (m) { var li = document.createElement('li'); li.textContent = m; ul.appendChild(li); });
+      $('gOut').scrollIntoView({behavior: 'smooth', block: 'start'});
+    }).catch(function () { PM.toast('No answer from the server', 'danger'); })
+      .finally(function () { $('gBusy').textContent = ''; });
+  });
+  $('gCopy').addEventListener('click', function () {
+    var t = $('gText');
+    function done() { PM.toast('config.h copied', 'success'); }
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t.value).then(done, function () { t.select(); document.execCommand('copy'); done(); });
+    else { t.select(); document.execCommand('copy'); done(); }
+  });
+  $('gDownload').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([$('gText').value], {type: 'text/plain'}));
+    a.download = 'config.h'; a.click(); URL.revokeObjectURL(a.href);
+  });
+})();
+</script>
+{% endblock %}

@@ -135,14 +135,12 @@ def test_kwh_action_option_reaches_device(app, device):
     with app.app_context():
         form = {"report_s": "60", "sess_mode": "duration", "dur_m": "5", "kwh_max_0": "2", "amp_max_0": "0",
                 "daily_at": "00:00"}
-        for action, legacy_end in (("end", True), ("hold", True), ("warn", False)):  # warn = "run as usual"
+        for action in ("end", "hold", "warn"):  # warn = "run as usual"
             cfg, errors = devconfig.parse_form({**form, "kwh_action_0": action}, device)
             ch = devconfig.to_device(cfg, 1)["cfg"]["ch"][0]
-            assert not errors and ch["kwh_action"] == action and ch["kwh_end"] is legacy_end
+            assert not errors and ch["kwh_action"] == action and "kwh_end" not in ch
         cfg, _ = devconfig.parse_form(form, device)  # nothing chosen -> default "hold"
         assert devconfig.to_device(cfg, 1)["cfg"]["ch"][0]["kwh_action"] == "hold"
-        # config saved by v0.2 (kwh_end only)
-        assert devconfig.to_device({"ch": [{"kwh_max": 1, "kwh_end": False}]}, 1)["cfg"]["ch"][0]["kwh_action"] == "warn"
 
 
 def _start(conn, device, sid, ts):

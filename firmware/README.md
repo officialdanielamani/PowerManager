@@ -35,7 +35,7 @@ flashing the renamed sketch keeps the meter's data, pairing and history.) Exampl
 | Flash Size | 4MB |
 | Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** |
 
-Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h` (or make it with the server's **Firmware → config.h Generator**), then Upload.
+Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h` (or make it with the server's **Firmware → Generate config.h**), then Upload.
 
 If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** for game controllers), the Tools → Board menu has an "ESP32S3 Dev Module" in each of them. Pick the one under **esp32**. Bluepad32's package is based on the older 2.0.x core. The sketch builds on it too, but it is meant for Bluetooth controllers, not tested here, and stays behind on fixes.
 
@@ -169,3 +169,11 @@ PC test of the MQTT client (real broker + real server code, no ESP32):
 open collector to GND (internal pull-up), `HIGH` = 3.3 V logic signal (internal pull-down; never 5 V or 12 V
 directly, use an optocoupler or divider). The meter reports `ups_on` / `ups_off` (notification + historical event
 on the server) and AUX relays can react to it, and to the battery % when `BATTERY_ENABLE 1`.
+
+## 9. config.h layout
+
+Both sketches use the same four parts: **[1] Board info** (version, type), **[2] Enable flags** (every optional
+part and link, 1 / 0), **[3] Pin out**, **[4] Options / configuration** (boards, relays, channels, sensors,
+timing). The server makes a complete file for your hardware: *Firmware → Generate config.h*. Firmware 1.0.0 does
+not read settings saved by older versions: after updating an older meter, save its configuration on the server
+once (kWh counters and AUX automation of the old version are not carried over).

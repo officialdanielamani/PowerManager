@@ -668,13 +668,13 @@ def process_event(device, ev):
         incidents.close_incident(device.id, "power", ev.ts, event=ev, estimated=est)
     elif e == "quota":
         # action: end (power off, session ends now) | hold (power off, session ends at its time
-        # limit) | warn (power stays on). Firmware 0.1.x sends only "end": true/false.
-        action = d.get("action") or ("end" if d.get("end", True) else "warn")
+        # limit) | warn (power stays on).
+        action = d.get("action") or "end"
         kwh = d.get("kwh", "?")
         pre = _chp(device, ev)
         if action == "end":
             # Close the session record here as well, so it ends at the limit even if the
-            # meter's session_end arrives late or never (older firmware only sent it on Renew).
+            # meter's session_end arrives late or never.
             sid = commands.session_state(device, mch).get("sid")
             if isinstance(sid, int):
                 s = _session(device, sid)
@@ -712,7 +712,7 @@ def process_event(device, ev):
                 s.end_reason = str(d.get("reason", ""))[:10] or None
             if d.get("kwh") is not None:  # always the raw kWh
                 s.kwh_used = _f(d.get("kwh")) or 0.0
-            if isinstance(d.get("sum"), dict):  # min / max / avg of the session (firmware 0.7.1 / 0.9.1+)
+            if isinstance(d.get("sum"), dict):  # min / max / avg of the session
                 s.stats = _session_stats(d["sum"])
     elif e == "server_back":
         last_off = (Incident.query

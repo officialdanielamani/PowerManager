@@ -183,7 +183,7 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch. With Tamper Protection on, `tamper_open` carries `action` |
 | `sensor_error` / `sensor_ok` | No valid reading for `sensor.timeout_s`: `{"kind": "no_reply"\|"bad", "after_s": 10, "action": "hold"}`; `sensor_ok` = first valid reading again |
-| `session_end` summary | Firmware PZEM 0.7.1 / rbAmp 0.9.1 add `"sum": {"n": 3600, "v": [min, max, avg], "a": [...], "w": [...]}` (shared multi-channel session: total current / power of all channels) |
+| `session_end` summary | The meter adds `"sum": {"n": 3600, "v": [min, max, avg], "a": [...], "w": [...]}` (shared multi-channel session: total current / power of all channels) |
 | `quota_cleared` | The kWh limit was raised (or removed) while the session was held at the old limit: the session continues (`kwh`, `max`, `ch`?) |
 | `temp_high` / `temp_ok` | A temperature sensor went above `temp.max`: `i` (sensor, 0 = T1), `c` (°C), `max`, `action`; `temp_ok` = every sensor back 5 °C below the limit (`i`, `c`), or the limit was switched off (`disabled`) |
 | `voltage_out` / `voltage_ok` | Voltage left / returned to the operating range: `v`, `min`, `max`, `dir` (`low`/`high`), `action` |
@@ -233,7 +233,7 @@ The server sends the whole config every time (no partial updates).
     "tare": {"a":0.012, "w":1.6, "limits":true},
     "tamper": {"protect":true, "action":"end"},
     "sensor": {"timeout_s":10, "action":"hold"},
-    "ch": [ {"i":0, "kwh_max":2.0, "kwh_action":"end", "kwh_end":true, "amp_max":10.2} ]
+    "ch": [ {"i":0, "kwh_max":2.0, "kwh_action":"end", "amp_max":10.2} ]
   }
 }
 ```
@@ -249,7 +249,6 @@ The server sends the whole config every time (no partial updates).
 | `sess.auto` | bool | false | |
 | `ch[].kwh_max` | 0–100000 | 0 | 0 = unlimited |
 | `ch[].kwh_action` | `warn` / `hold` / `end` | `hold` | What happens at `kwh_max`. **warn** = *Session run as usual* (`quota` event once + `sess.over`, power stays on). **hold** = *Off relay, but session continue* (relay OFF until the session ends at its time limit or is renewed). **end** = *End session* now (relay OFF until renewed). |
-| `ch[].kwh_end` | bool | true | Only for firmware 0.1.x, which predates `kwh_action`: `false` = warn, otherwise end. New firmware uses `kwh_action` when present. |
 | `volt.min`, `volt.max` | 0–400 V | 0 | Operating voltage range; 0 = no limit on that side; min < max |
 | `volt.action` | `run` / `hold` / `end` | `hold` | Out of range (3 readings in a row): **run** = event only; **hold** = relay OFF until back in range (10 readings in a row); **end** = end the session (`session_end` reason `voltage`) |
 | `tare.a`, `tare.w` | 0–5 A, 0–500 W | 0 | The meter's own consumption on the measured line |
@@ -348,9 +347,9 @@ After `set_wifi` the meter reports event `wifi_change` `{"ok": true|false, "ssid
 password from the stored command once it is acknowledged. `info` now also carries `transport` (`mqtt` / `websocket`)
 and `mqtt` (`host:port`); `hello.caps` has `mqtt` and `ws` (what the firmware was built with).
 
-## 8. AUX automation v2 (`hello.caps.aux_v` = 2)
+## 8. AUX automation
 
-Config `aux[i]` (firmware PZEM 0.7.3 / rbAmp 0.9.3):
+Config `aux[i]`:
 
 - `sched`: up to 14 entries `{"on", "start", "end"}` (minutes of the local day) with either `"days"` (bit 0 = Monday
   … bit 6 = Sunday) or `"date": [year, month, day]` (year 0 = every year). First match wins.
@@ -360,9 +359,7 @@ Config `aux[i]` (firmware PZEM 0.7.3 / rbAmp 0.9.3):
   watt, kwh, session, trip).
 - `hello.caps.hum` = true when an SHT (humidity) sensor is configured.
 
-A configuration saved by older firmware (4 schedules) is converted on the first start.
-
-## 9. Backup Wi-Fi (`hello.caps.wifi2`)
+## 9. Backup Wi-Fi
 
 - `set_wifi` with `"slot": "backup"`: `ssid`, `pass` are saved as the backup network without a test; an empty
   `ssid` removes it. (Without `slot` the command changes the main network as before.)
@@ -372,10 +369,16 @@ A configuration saved by older firmware (4 schedules) is converted on the first 
 - Without Wi-Fi the meter tries main, backup, main … every 30 s. On the backup it scans for the main SSID every
   `WIFI_MAIN_CHECK_MS` (5 min; doubled up to 1 h after each return that did not hold) and reconnects to it when seen.
 
-## 10. UPS input and battery % (`hello.caps.ups`, `hello.caps.battery`, `caps.aux_v` = 3)
+## 10. UPS input and battery % (`hello.caps.ups`, `hello.caps.battery`)
 
 - Firmware `UPS_ENABLE 1`: a signal input (`PIN_UPS`, active level `UPS_ACTIVE_LEVEL` LOW or HIGH, debounced
   `UPS_DEBOUNCE_MS`). Events `ups_on` (also with `"boot": 1` when already active at start-up) and `ups_off`; state
   field `ups`. The server opens / closes a historical event "On UPS power" and sends the *UPS power* notification.
 - AUX `event.src` `ups` (`"active": true|false`) and `bat` (battery % remaining from `BATTERY_ENABLE`, `cmp` /
   `value`, 2 % hysteresis). Offered by the server only when `caps.ups` / `caps.battery` are true.
+
+## 11. Supported firmware
+
+The server works with meter firmware **1.0.0 or newer** (both sketches). Older firmware is not supported: the
+meter's Configuration page and the Firmware page show that it must be updated. What a meter can do is taken from
+`hello.caps` (parts switched on in its `config.h`), not from its version number.

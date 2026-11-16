@@ -159,7 +159,7 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 7) return false;  // older layout: use defaults, the server re-sends the config
+  if (b.version != 7) return false;  // other layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }

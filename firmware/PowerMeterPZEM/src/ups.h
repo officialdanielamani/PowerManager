@@ -6,19 +6,6 @@
 #include <Arduino.h>
 #include "../config.h"
 
-#ifndef UPS_ENABLE
-#define UPS_ENABLE 0
-#endif
-#ifndef PIN_UPS
-#define PIN_UPS 2
-#endif
-#ifndef UPS_ACTIVE_LEVEL
-#define UPS_ACTIVE_LEVEL LOW   // level of PIN_UPS that means "on UPS"
-#endif
-#ifndef UPS_DEBOUNCE_MS
-#define UPS_DEBOUNCE_MS 2000
-#endif
-
 namespace ups {
 bool enabled();
 void begin();    // pin mode + first state (no debounce)

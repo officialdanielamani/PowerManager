@@ -96,14 +96,14 @@ def test_timezone_change_repushes_schedules(app, admin):
         assert devconfig.to_device(db.session.get(Device, pk).cfg, 1)["cfg"]["tz_min"] == 540
 
 
-def test_aux_v2_dates_any_channel_and_flags(app, admin):
-    """Newer firmware (caps.aux_v 2): 14 schedules, by date, 'any channel', tamper / Wi-Fi events; event
+def test_aux_dates_any_channel_and_flags(app, admin):
+    """14 schedules, by date, 'any channel', tamper / Wi-Fi events; event
     sources follow the sensors the meter has."""
     pk = _mc_with_aux(app, admin)
     with app.app_context():
         d = db.session.get(Device, pk)
-        assert "tamper" not in auxcfg.sources(d) and auxcfg.sched_max(d) == 4  # old firmware
-        d.caps = dict(d.caps, aux_v=2, tamper=True, temp=0)
+        assert "tamper" not in auxcfg.sources(d)  # no tamper input on this meter
+        d.caps = dict(d.caps, tamper=True, temp=0)
         d.last_reading = {}
         db.session.commit()
         src = auxcfg.sources(d)
@@ -144,8 +144,6 @@ def test_ups_input_and_battery_event(app, admin):
     pk = _mc_with_aux(app, admin)
     with app.app_context():
         d = db.session.get(Device, pk)
-        d.caps = dict(d.caps, aux_v=3)
-        db.session.commit()
         assert "ups" not in auxcfg.sources(d) and "bat" not in auxcfg.sources(d)
         d.caps = dict(d.caps, ups=True, battery=True)
         db.session.commit()

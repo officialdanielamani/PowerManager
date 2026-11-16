@@ -17,18 +17,8 @@ UNITS = {"temp": "°C", "hum": "%RH", "amp": "A", "watt": "W", "kwh": "kWh", "ba
 FLAGS = ("tamper", "trip", "volt", "wifi", "server", "ups")  # on / off conditions ("active" or "not active")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 SCHED_MAX = 14
-SCHED_OLD = 4  # firmware before 0.9.3 / 0.7.3 (caps.aux_v missing)
 TOTAL = 255  # amp / watt of all channels together
 ANY = 254    # any channel
-
-
-def v2(device):
-    """Firmware with 14 schedules, schedules by date, the extra event sources and "any channel"."""
-    return device is None or int(((device.caps or {}).get("aux_v")) or 0) >= 2
-
-
-def sched_max(device):
-    return SCHED_MAX if v2(device) else SCHED_OLD
 
 
 def temp_count(device):
@@ -38,27 +28,14 @@ def temp_count(device):
 
 
 def sources(device):
-    """Event sources this meter can use: no temperature / humidity without the sensor, no tamper without
-    the input, the newer ones only with firmware that knows them."""
-    caps = (device.caps or {}) if device is not None else {}
-    new = v2(device)
-    out = {}
-    for k, label in SOURCES.items():
-        if k == "temp" and not temp_count(device):
-            continue
-        if k == "hum" and not (temp_count(device) and (caps.get("hum") or not new or device is None)):
-            continue
-        if k in FLAGS and not new:
-            continue
-        if k in ("ups", "bat") and (device is None or int(caps.get("aux_v") or 0) < 3
-                                    or not caps.get("ups" if k == "ups" else "battery")):
-            continue  # UPS input / battery measurement not enabled in the meter's firmware
-        if k == "tamper" and device is not None and not caps.get("tamper"):
-            continue
-        if k == "volt" and caps.get("voltage") is False:
-            continue
-        out[k] = label
-    return out
+    """Event sources this meter can use: only what its firmware was built with (hello.caps) - no
+    temperature / humidity without the sensor, no tamper / UPS / battery without that part."""
+    if device is None:
+        return dict(SOURCES)
+    caps = device.caps or {}
+    need = {"temp": temp_count(device), "hum": temp_count(device) and caps.get("hum"), "tamper": caps.get("tamper"),
+            "volt": caps.get("voltage") is not False, "ups": caps.get("ups"), "bat": caps.get("battery")}
+    return {k: label for k, label in SOURCES.items() if need.get(k, True)}
 
 
 def default():
@@ -110,7 +87,7 @@ def parse_form(form, n, errors, device=None):
         a["mode"] = mode if mode in MODES else "manual"
         a["override"] = form.get(f"aux_override_{j}") == "on"
         a["else"] = "on" if form.get(f"aux_else_{j}") == "on" else "off"
-        for k in range(sched_max(device)):
+        for k in range(SCHED_MAX):
             if form.get(f"aux_s{k}_use_{j}") != "on":
                 continue
             start, end = _hhmm(form.get(f"aux_s{k}_start_{j}")), _hhmm(form.get(f"aux_s{k}_end_{j}"))
@@ -118,7 +95,7 @@ def parse_form(form, n, errors, device=None):
                 errors.append(f"{label} schedule {k + 1}: enter a start and an end time")
                 continue
             row = {"on": form.get(f"aux_s{k}_on_{j}", "on") == "on", "start": start, "end": end}
-            if form.get(f"aux_s{k}_kind_{j}") == "date" and v2(device):
+            if form.get(f"aux_s{k}_kind_{j}") == "date":
                 d = _date(form.get(f"aux_s{k}_date_{j}"))
                 if not d:
                     errors.append(f"{label} schedule {k + 1}: pick a date")
@@ -138,7 +115,7 @@ def parse_form(form, n, errors, device=None):
             errors.append(f"{label} event: choose what the relay reacts to")
         if src in allowed:
             idx = form.get(f"aux_ev_idx_{j}", "0")
-            idx = int(idx) if str(idx).isdigit() and (int(idx) < 16 or int(idx) == TOTAL or (int(idx) == ANY and v2(device))) else 0
+            idx = int(idx) if str(idx).isdigit() and (int(idx) < 16 or int(idx) == TOTAL or int(idx) == ANY) else 0
             if src in ("tamper", "volt", "wifi", "server", "ups", "bat"):
                 idx = 0
             ev = {"src": src, "idx": idx, "on": form.get(f"aux_ev_on_{j}", "on") == "on"}

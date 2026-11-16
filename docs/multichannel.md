@@ -176,7 +176,7 @@ Logic test on a PC: `firmware/tools/auxrelay_test/run.sh <ArduinoJson/src>`.
 
 ## No session after pairing
 
-Since firmware 0.6.4 / MC 0.7.2 a newly paired meter does not start a session on its own: it shows
+A newly paired meter does not start a session on its own: it shows
 **No session** and the relays stay off (`block: no_session`) until the admin presses **Renew**.
 
 ## Data modes (Configuration → General → Data)

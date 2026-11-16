@@ -107,13 +107,17 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 | Notifications (admin) | Telegram on/off + bot token (each user adds their own chat ID). The token is write-only like a password: after saving the field is empty with a `••••` placeholder; leave it empty to keep the saved token, or tick *Remove the saved token* |
 
 ### Firmware (admin, manager)
-**config.h Generator**: choose the meter type, power sensor boards / channels, relay boards, temperature / humidity
-sensors, other parts (RTC, tamper, battery) and defaults (WebSocket / MQTT, mesh, setup Wi-Fi password, pins,
-intervals), click *Generate*, then *Copy all* or *Download* and replace the sketch's `config.h`. The page checks
-the choices (I2C address or GPIO used twice, relay used by two channels, too many outputs for a board) and lists the
-relay numbering, the AUX relays and the I2C addresses. The result is the config.h of the firmware version shipped
-with the server (`server/app/firmware_cfg/`, kept equal to `firmware/*/config.h` by `tests/test_cfggen.py`).
-OTA updates: placeholder for a later version. The meter's own page has a greyed-out **Check OTA Update** button.
+**List of firmware**: the three firmwares (multi-channel rbAmp, PZEM AC, PZEM DC) with the sketch folder, the
+version shipped with the server, how many of your meters run it (and how many must be updated), and a
+**Generate config.h** button each. Below it: OTA updates are coming in a later version.
+
+**Generate config.h** (own page, `/firmware/config`): choose the meter type, power sensor boards / channels, relay
+boards, temperature / humidity sensors, other parts (RTC, tamper, UPS input, battery) and defaults (WebSocket /
+MQTT, mesh, setup Wi-Fi password, pins, intervals), click *Generate*, then *Copy all* or *Download* and replace
+the sketch's `config.h`. The page checks the choices (I2C address or GPIO used twice, relay used by two channels,
+too many outputs for a board) and lists the relay numbering, the AUX relays and the I2C addresses. The result is
+the config.h of the firmware version shipped with the server (`server/app/firmware_cfg/`, kept equal to
+`firmware/*/config.h` by `tests/test_cfggen.py`). The meter's own page has a greyed-out **Check OTA Update** button.
 
 ## Password fields
 
@@ -205,10 +209,9 @@ or **Event**, and **Enable override**.
   Session with independent channels) can watch one channel or **Any channel**; Current / Power also *All channels
   together*.
 - Only what the meter has is offered: no Temperature without a temperature sensor, no Humidity without an SHT
-  sensor, no Tamper without the tamper input. 14 lines, *By date*, *Any channel* and the sources from Tamper on need
-  firmware PZEM 0.7.3 / rbAmp 0.9.3; older meters keep 4 lines by day and the first six sources.
+  sensor, no Tamper without the tamper input.
 - **UPS power** (active / not active) and **Battery %** (≥ / ≤ a value) appear when the meter's firmware has the
-  UPS input (`UPS_ENABLE 1`) / the battery measurement (`BATTERY_ENABLE 1`); firmware PZEM 0.7.5 / rbAmp 0.9.5.
+  UPS input (`UPS_ENABLE 1`) / the battery measurement (`BATTERY_ENABLE 1`).
 - "No server / internet" is true while the meter is paired but has no link to the server (whatever the reason).
 
 The Info page shows each AUX relay with its mode, a one-line description of the automation, *overridden* while a
@@ -240,7 +243,7 @@ docs/multichannel.md § AUX relays.
 - **Configure Meter → Connection** (admin / manager; meters with MQTT firmware): *Change Wi-Fi* (SSID typed by hand +
   password; the meter keeps the old Wi-Fi if the new one does not connect, and a Meter status notification tells the
   result) and *MQTT*: server broker / WebSocket only / own broker for this meter.
-- **Configure Meter → Connection → Backup Wi-Fi** (firmware PZEM 0.7.4 / rbAmp 0.9.4): a second network (another
+- **Configure Meter → Connection → Backup Wi-Fi**: a second network (another
   router, a phone hotspot). The meter tries main and backup in turn while it has no Wi-Fi, and on the backup it
   looks for the main network every 5 minutes and moves back when it is there. Saved without a test; *Remove*
   deletes it. A Meter status notification tells when the meter moves to the backup and back. It can also be set
@@ -262,3 +265,11 @@ Generator): a signal from a UPS that tells "mains failed, running on the UPS". W
 an **On UPS** badge, Historical Events gets an "On UPS power" entry (start, end, duration) and accounts with the
 **UPS power** notification (Notification Options, on by default) are told when it starts and ends. It does not
 switch the measured relays; use an AUX relay event for that.
+
+## Configuration page layout
+
+The Configuration page is split into tabs: **General**, **Limits & protection**, **Channels** (single-channel
+meters: **Tare**), **AUX relays** (when the meter has them), **Data**, **Users** and **Connection**. One **Save**
+bar at the bottom saves every tab at once; Connection has its own *Send to meter* buttons. The page remembers the
+last tab, and a field the browser refuses opens its tab. A meter on firmware older than 1.0.0 shows a warning
+that it must be updated.

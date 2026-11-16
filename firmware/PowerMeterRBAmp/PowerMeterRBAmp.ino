@@ -35,7 +35,6 @@ static void loadState() {
   }
   for (uint8_t i = 0; i < MC_MAX_CH; i++) store::loadSession(i, g.sess[i]);
   g.sidCounter = store::loadSidCounter();
-  g.everStarted = store::loadEverStarted();
   uint16_t want, trip;
   store::loadFlags(want, trip);
   double e[MC_MAX_CH];

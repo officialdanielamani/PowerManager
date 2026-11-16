@@ -596,7 +596,6 @@ static void checkRules(bool firstPass) {
       o["ch"] = 0;
       o["kwh"] = serialized(String(c->kwh, 4));
       o["action"] = c->action;
-      o["end"] = strcmp(c->action, "warn") != 0;  // for server v0.2.x
     };
     if (g.cfg.kwh_action == KWH_WARN) {
       if (!g.sess.over) {  // warn once, keep the power on

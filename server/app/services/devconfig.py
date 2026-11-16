@@ -3,6 +3,8 @@
 The server keeps a UI-level config in Device.cfg. `to_device()` turns it into the protocol
 config (docs/protocol.md §3), e.g. converting the daily reset time to a UTC minute-of-day.
 """
+import re
+
 from . import auxcfg, settings
 
 NOTIFY_TYPES = [
@@ -23,6 +25,13 @@ NOTIFY_TYPES = [
 NOTIFY_DEFAULT_ON = {"meter_status", "temp_high", "ups"}
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
+MIN_FW = (1, 0, 0)  # oldest meter firmware this server works with (both sketches)
+
+
+def fw_outdated(device):
+    """True when the meter reported a firmware older than MIN_FW: it must be updated (no support for it)."""
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", device.fw or "")
+    return bool(m) and tuple(int(x) for x in m.groups()) < MIN_FW
 
 REPORT_MIN, REPORT_MAX = 10, 3600   # send to the server every ... s
 READ_MIN = 1                        # record a reading every ... s (read <= send)
@@ -53,8 +62,6 @@ def kwh_action(ch_cfg):
     a = ch_cfg.get("kwh_action")
     if a in KWH_ACTIONS:
         return a
-    if "kwh_end" in ch_cfg:  # config saved by v0.2
-        return "end" if ch_cfg["kwh_end"] else "warn"
     return DEFAULT_KWH_ACTION
 
 
@@ -385,8 +392,6 @@ def to_device(cfg, ver):
             "summary": bool(cfg.get("summary")),
             "ch": [
                 {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_action": kwh_action(c),
-                 # for meters on firmware 0.1.x that only know kwh_end ("hold" acts like "end" there)
-                 "kwh_end": kwh_action(c) != "warn",
                  "amp_max": float(c.get("amp_max", 0))}
                 for i, c in enumerate(cfg.get("ch", []))
             ],

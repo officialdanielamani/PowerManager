@@ -106,7 +106,6 @@ struct AppState {
   ChState ch[MC_MAX_CH];
   SessionState sess[MC_MAX_CH];
   uint32_t sidCounter = 0;     // session numbers, unique across channels
-  bool everStarted = false;    // (unused since 0.7.2: sessions start with Renew)
   bool disabled = false;       // disabled by the server: relays off, no session (persisted)
   bool tamper = false;
   bool ups = false;            // UPS input: running on the UPS (UPS_ENABLE)
