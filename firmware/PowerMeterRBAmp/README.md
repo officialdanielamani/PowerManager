@@ -1,4 +1,4 @@
-# PowerMeter MC — multi-channel AC meter firmware (ESP32-S3)
+# PowerMeterRBAmp — multi-channel AC meter firmware (ESP32-S3)
 
 A separate firmware for the multi-channel AC meter: **ESP32-S3 Super Mini + one or more rbAmp BASIC
 modules (SCT-013 clamps, I²C) + DS3231 + tamper limit switch + I²C relay board(s)**, optionally DS18B20

@@ -1,0 +1,4 @@
+# Development and test tools (not installed in the Docker image).
+-r requirements.txt
+pytest==9.2.0
+amqtt==0.12.1        # MQTT broker for firmware/tools/mqttlink_test

@@ -1,0 +1,24 @@
+# Test environment: the server (built from this folder) + an MQTT broker, with its own data folder.
+#   docker compose -f docker-compose.dev.yml up --build
+#   Server  http://localhost:5001   (setup token check is off)
+#   Broker  mqtt://localhost:1883 (TCP) and ws://localhost:9001 (MQTT over WebSocket, what the meters use)
+# In Settings -> MQTT use: host "mqtt", port 1883, transport TCP, TLS off; "How the meters connect":
+# your PC's LAN address, port 9001, TLS off.
+services:
+  powermanager:
+    build: .
+    ports:
+      - "5001:5000"
+    environment:
+      SETUP_TOKEN: "off"
+    volumes:
+      - ./instance-dev:/app/instance
+    depends_on:
+      - mqtt
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./dev/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro

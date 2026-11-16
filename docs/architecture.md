@@ -163,3 +163,18 @@ Remaining risks and how to reduce them:
 | Someone with **physical access** reads the secret from the meter's flash | Panel tamper switch + event; *Remove Device* revokes that one meter. Future: enable ESP32 flash + NVS encryption. |
 | Plain `ws://` on an untrusted LAN exposes the secret | Use TLS (Cloudflare) — on the LAN only if you trust it |
 | Bot / WAF challenges blocking meters | Bypass `/ws/device` and `/api/v1/pair` in Cloudflare Access/WAF only |
+
+## 9. Additions since the first design
+
+The sections above describe the original single-channel system. Added later, each documented where it lives:
+
+| Addition | Where |
+|---|---|
+| Multi-channel AC meter (rbAmp), AUX relays and their automation | `multichannel.md`, `protocol.md` §8 |
+| Mesh over ESP-NOW (meters without Wi-Fi reach the server through a neighbour) | `mesh.md`, `protocol.md` §6 |
+| MQTT link next to the WebSocket (broker behind Cloudflare, signed messages, fallback) | `protocol.md` §7 |
+| Backup Wi-Fi, UPS input, battery %, temperature / humidity sensors | `protocol.md` §9–10, `server-ui.md` |
+| Roles admin / manager / viewer, per-meter price, per-channel viewers | `server-ui.md` |
+| `config.h` generator, supported firmware versions | `server-ui.md`, `protocol.md` §11 |
+
+How to work on the project and what is verified: `handover.md`.

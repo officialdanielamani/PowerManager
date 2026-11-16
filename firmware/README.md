@@ -9,8 +9,7 @@ Two sketches (open the folder's `.ino` in Arduino IDE):
 | `PowerMeterPZEM/PowerMeterPZEM.ino` | single channel: PZEM-004T (AC) or PZEM-017 (DC) — this page |
 | `PowerMeterRBAmp/PowerMeterRBAmp.ino` | multi-channel AC: one or more rbAmp modules — see [`PowerMeterRBAmp/README.md`](PowerMeterRBAmp/README.md) |
 
-(Until 0.8 they were called `PowerMeter` and `PowerMeterMC`. The firmware type stored on the meter is unchanged, so
-flashing the renamed sketch keeps the meter's data, pairing and history.) Example configurations: [`examples/`](examples/).
+Example configurations: [`examples/`](examples/). The server needs firmware 1.0.0 or newer.
 
 **AC or DC meter:** one sketch, two firmwares. In `config.h` set `METER_DC 0` for the **AC meter** (PZEM-004T) or `METER_DC 1` for the **DC meter** (PZEM-017). Everything else (limits, sessions, mesh, offline buffer, local page) is the same. The meter tells the server its type when it pairs, so the server shows it as AC or DC automatically and uses the matching price. Design: [`../docs/firmware.md`](../docs/firmware.md), protocol: [`../docs/protocol.md`](../docs/protocol.md).
 
@@ -177,3 +176,16 @@ part and link, 1 / 0), **[3] Pin out**, **[4] Options / configuration** (boards,
 timing). The server makes a complete file for your hardware: *Firmware → Generate config.h*. Firmware 1.0.0 does
 not read settings saved by older versions: after updating an older meter, save its configuration on the server
 once (kWh counters and AUX automation of the old version are not carried over).
+
+## 10. Building and testing without the Arduino IDE
+
+```bash
+firmware/tools/setup_arduino.sh                 # once: esp32 core 3.3.5, ArduinoJson 7.1.0, WebSockets 2.7.2
+firmware/tools/build.sh PowerMeterRBAmp         # .bin in firmware/build/PowerMeterRBAmp-default/
+firmware/tools/build.sh PowerMeterPZEM dc       # variants: dc, example, all-parts, ws-only, mqtt-only
+firmware/tools/host_tests.sh                    # PC tests: shared files, AUX automation, MQTT link
+```
+
+`arduino-cli` must be installed. The PC tests need g++, OpenSSL headers and
+`pip install -r server/requirements-dev.txt`. CI runs all of this (`.github/workflows/ci.yml`).
+Rules for changing the firmware (shared files, `config.h` copies, versions): [`../docs/handover.md`](../docs/handover.md) §5.

@@ -15,3 +15,8 @@ firmware/**/build/
 .idea/
 server/.env
 .pytest_cache/
+
+# local tooling
+firmware/build/
+firmware/tools/.cache/
+server/instance-dev/
