@@ -90,8 +90,8 @@ inline hwp::Profile defaultProfile() {
   for (uint8_t i = 0; i < DEFAULT_BOARDS; i++) p.addr[i] = DEFAULT_BOARD_ADDR[i];
   p.nRelayBoards = DEFAULT_RELAY_BOARD_COUNT;
   for (uint8_t i = 0; i < DEFAULT_RELAY_BOARD_COUNT; i++)
-    p.relay[i] = {DEFAULT_RELAY_BOARD[i].driver, DEFAULT_RELAY_BOARD[i].address, DEFAULT_RELAY_BOARD[i].relays,
-                  DEFAULT_RELAY_BOARD[i].activeHigh};
+    p.relay[i] = {(uint8_t)(i + 1), DEFAULT_RELAY_BOARD[i].driver, DEFAULT_RELAY_BOARD[i].address,
+                  DEFAULT_RELAY_BOARD[i].relays, DEFAULT_RELAY_BOARD[i].activeHigh};  // Board A, B, C ... = position in config.h
   p.nCh = DEFAULT_NCH;
   for (uint8_t i = 0; i < DEFAULT_NCH; i++)
     p.ch[i] = {DEFAULT_CHANNEL[i].board, DEFAULT_CHANNEL[i].input, DEFAULT_CHANNEL[i].clamp, DEFAULT_CHANNEL[i].relayBoard,
@@ -112,11 +112,7 @@ inline void reload() {
   }
   NCH = p.nCh;
   for (uint8_t i = 0; i < p.nCh; i++) {
-    uint8_t relay = 0;  // (relay board, output) -> number across all relay boards
-    if (p.ch[i].rb) {
-      for (uint8_t k = 0; k + 1 < p.ch[i].rb; k++) relay += p.relay[k].relays;
-      relay += p.ch[i].ro;
-    }
+    uint8_t relay = hwp::relayNumber(p, p.ch[i].rb, p.ch[i].ro);  // (relay board id, output) -> number across all boards
     CHANNEL[i] = {p.ch[i].board, p.ch[i].input, p.ch[i].clamp, relay};
   }
   uint8_t aux = 0;

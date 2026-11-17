@@ -1,4 +1,4 @@
-// PowerManager meter firmware for ESP32-S3 Super Mini + PZEM-004T + SSR + WS2812.
+// PowerManager meter firmware for ESP32-S3 N16R8 + PZEM-004T + SSR + WS2812.
 // Arduino IDE 2.x, board package "esp32" by Espressif 3.x. See firmware/README.md.
 //
 // FreeRTOS tasks (docs/firmware.md §5):

@@ -263,15 +263,21 @@ def generate(o):
 
 
 def from_profile(profile):
-    """A hardware profile (docs/protocol.md §12) in the shape of the generator form: the meter's current wiring."""
+    """A hardware profile (docs/protocol.md §12) in the shape of the generator form: the meter's current wiring.
+
+    The profile keeps the letters of its relay boards (Board A removed: Board B stays B); config.h counts its relay
+    boards by position, so the boards are renumbered A, B ... here (`renumbered` = true when that changed a letter)."""
     drv = {"mcp23017": "RELAY_MCP23017", "xl9535": "RELAY_XL9535", "pcf8574": "RELAY_PCF8574", "gpio": "RELAY_GPIO"}
     clamp = {0: "SCT_KEEP", 5: "SCT_5A", 10: "SCT_10A", 20: "SCT_20A", 30: "SCT_30A", 50: "SCT_50A", 60: "SCT_60A",
              100: "SCT_100A"}
+    relays = sorted(profile.get("relays") or [], key=lambda r: r.get("id", 0))
+    position = {r.get("id"): k for k, r in enumerate(relays, 1)}
     return {
         "boards": [f"0x{a:02X}" for a in profile.get("boards") or []],
         "relays": [{"driver": drv.get(r.get("drv"), "RELAY_XL9535"), "addr": f"0x{int(r.get('addr') or 0):02X}" if r.get("addr") else "",
-                    "n": r.get("n"), "high": bool(r.get("hi"))} for r in profile.get("relays") or []],
+                    "n": r.get("n"), "high": bool(r.get("hi"))} for r in relays],
         "channels": [{"board": c.get("b"), "input": c.get("i"), "clamp": clamp.get(c.get("a"), "SCT_30A"),
-                      "relay_board": c.get("rb"), "relay_out": c.get("ro")}
+                      "relay_board": position.get(c.get("rb"), 0), "relay_out": c.get("ro") if c.get("rb") in position else 0}
                      for c in profile.get("ch") or []],
+        "renumbered": any(r.get("id") != k for k, r in enumerate(relays, 1)),
     }

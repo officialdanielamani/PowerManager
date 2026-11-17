@@ -286,7 +286,9 @@ Protocol, rollback and rules: [protocol.md §12](protocol.md).
    (with the reason, e.g. `no_reply 0x51`), *Rejected* (the meter refused it). The page polls every 2.5 s.
 3. **rbAmp boards**: one address (0x50–0x57) per module, board 1 first. **Relay boards**: type (MCP23017, XL9535 / TCA9535,
    PCF8574 / PCF8574A, ESP32 pins), address, outputs used, active high; the relay numbers of each row are shown.
-   Relay boards are shown as **Board A [2C]**, **Board B [8C]** … (the number is the outputs used).
+   Relay boards are shown as **Board A [2C]**, **Board B [8C]** … (the number is the outputs used). The letter belongs
+   to the board: **removing Board A leaves Board B as Board B** (its channels keep their relay); a new board takes the
+   first free letter.
    **Channels**: rbAmp board, input 1–7, clamp (5 … 100 A or *Keep*), and the relay as **[Board A] [relay 2]** (or none);
    outputs no channel uses become AUX relays (listed under the table as "Board B relay 3").
 4. **Scan Address**: the meter lists every I2C address that answers; rbAmp modules are confirmed, other addresses are labelled by
@@ -300,4 +302,5 @@ Protocol, rollback and rules: [protocol.md §12](protocol.md).
    address**. Refused while a session runs or if the new address is used.
 
 **Generate config.h** has *Start from the hardware of a meter*: fills the rbAmp boards, relay boards and channels with what the
-meter uses now, so a re-flash keeps changes made here.
+meter uses now, so a re-flash keeps changes made here. `config.h` counts relay boards by position (A, B, C … in order), so a
+gap left by a removed board is closed in the generated file (the page says so).

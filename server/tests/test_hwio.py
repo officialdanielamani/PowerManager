@@ -138,7 +138,7 @@ def test_generator_starts_from_the_meter(app, admin, mc):
         db.session.commit()
     j = admin.get(f"/firmware/config/from-meter/{mc}").get_json()
     assert j["boards"] == ["0x50", "0x51"]
-    assert j["relays"] == [{"driver": "RELAY_MCP23017", "addr": "0x21", "n": 8, "high": True}]
+    assert j["relays"] == [{"driver": "RELAY_MCP23017", "addr": "0x21", "n": 8, "high": True}] and j["renumbered"] is False
     assert j["channels"][0] == {"board": 1, "input": 1, "clamp": "SCT_10A", "relay_board": 1, "relay_out": 1}
     assert j["channels"][5]["clamp"] == "SCT_100A" and len(j["channels"]) == 7
     html = admin.get("/firmware/config").get_data(as_text=True)
@@ -195,3 +195,33 @@ def test_old_firmware_is_outdated(app):
     assert devconfig.fw_outdated(D)
     D.fw = "1.1.0"
     assert not devconfig.fw_outdated(D)
+
+
+def test_generator_closes_the_gap_of_a_removed_board(app, admin, mc):
+    """The profile keeps Board B as B; config.h counts relay boards by position, so the generator renumbers."""
+    prof = copy.deepcopy(DEFAULT)
+    prof["relays"] = [{"id": 2, "drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}]   # Board A removed
+    prof["ch"] = [{"b": 1, "i": 1, "a": 30, "rb": 2, "ro": 5}, {"b": 1, "i": 2, "a": 30, "rb": 0, "ro": 0}]
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        d.hw_current = dict(prof, ver=4)
+        db.session.commit()
+    j = admin.get(f"/firmware/config/from-meter/{mc}").get_json()
+    assert j["renumbered"] is True
+    assert j["channels"][0]["relay_board"] == 1 and j["channels"][0]["relay_out"] == 5 and j["channels"][1]["relay_board"] == 0
+    # and the page keeps the letters: the editor is given the profile with its ids
+    html = admin.get(f"/firmware/io?meter={mc}").get_data(as_text=True)
+    assert '"id": 2' in html or '"id":2' in html
+
+
+def test_status_and_apply_keep_the_ids(app, admin, mc, online):
+    prof = copy.deepcopy(NEW)
+    prof["relays"] = [{"id": 2, "drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}]
+    for c in prof["ch"]:
+        c["rb"] = 2
+    ok = admin.post(f"/firmware/io/{mc}/apply", json={"mode": "reboot", "profile": prof}).get_json()
+    assert ok["ok"] and online[-1]["profile"]["relays"][0]["id"] == 2 and online[-1]["profile"]["ch"][0]["rb"] == 2
+    bad = copy.deepcopy(prof)
+    bad["ch"][0]["rb"] = 1   # Board A does not exist in this profile
+    r = admin.post(f"/firmware/io/{mc}/apply", json={"mode": "reboot", "profile": bad})
+    assert r.status_code == 400 and any("no such relay board" in e for e in r.get_json()["errors"])

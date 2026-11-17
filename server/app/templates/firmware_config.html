@@ -246,6 +246,7 @@
       p.relays.forEach(function (r) { addRelay(r.driver, r.addr, r.n, r.high); });
       p.channels.forEach(function (c) { addChannel(c.board, c.input, c.clamp, c.relay_board, c.relay_out); });
       lastMeter = 'rbamp'; renumber(); PM.toast('Filled from ' + p.name, 'success');
+      if (p.renumbered) PM.toast('config.h counts relay boards A, B, C … by position: a gap left by a removed board is closed', 'info');
     });
   });
   var lastMeter = null;

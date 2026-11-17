@@ -65,7 +65,7 @@ def cmd_pair(args):
 
 def default_profile(n):
     """What config.h compiled in: one rbAmp at 0x50, one XL9535 relay board at 0x20, channel k on input k, relay k."""
-    return {"boards": [0x50], "relays": [{"drv": "xl9535", "addr": 0x20, "n": n, "hi": 1}],
+    return {"boards": [0x50], "relays": [{"id": 1, "drv": "xl9535", "addr": 0x20, "n": n, "hi": 1}],
             "ch": [{"b": 1, "i": k + 1, "a": 30, "rb": 1, "ro": k + 1} for k in range(n)]}
 
 

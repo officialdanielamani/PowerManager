@@ -1,6 +1,6 @@
 # PowerMeterRBAmp — multi-channel AC meter firmware (ESP32-S3)
 
-A separate firmware for the multi-channel AC meter: **ESP32-S3 Super Mini + one or more rbAmp BASIC
+A separate firmware for the multi-channel AC meter: **ESP32-S3 N16R8 + one or more rbAmp BASIC
 modules (SCT-013 clamps, I²C) + DS3231 + tamper limit switch + I²C relay board(s)**, optionally DS18B20
 temperature sensors. Everything else (Wi-Fi setup,
 pairing, the meter's own page, mesh, offline buffer, safe mode) works like the single-channel firmware
@@ -51,7 +51,7 @@ Everything about the hardware is in a few tables at the top:
 | Setting | Meaning |
 |---|---|
 | `RBAMP_BOARDS` | I²C address of every rbAmp module (1 to 8). Board 1 = first entry |
-| `RELAY_BOARDS` | every relay board / pin group: `RELAY_MCP23017` (16 push-pull outputs, recommended for SSRs), `RELAY_XL9535` (up to 16 outputs), `RELAY_PCF8574` (up to 8) or `RELAY_GPIO` (pins in `RELAY_GPIO_PINS`), address, outputs used (from output 0), active high (XL9535: 1; PCF8574 with low-side SSRs: usually 0). The entries are relay board A, B, C … in order |
+| `RELAY_BOARDS` | every relay board / pin group: `RELAY_MCP23017` (16 push-pull outputs, recommended for SSRs), `RELAY_XL9535` (up to 16 outputs), `RELAY_PCF8574` (up to 8) or `RELAY_GPIO` (pins in `RELAY_GPIO_PINS`), address, outputs used (from output 0), active high (XL9535: 1; PCF8574 with low-side SSRs: usually 0). The entries are relay board A, B, C … in order (a profile sent from the server keeps its own letters; the generator renumbers a gap) |
 | `CHANNELS` | one line per channel, in order CH1, CH2 … (up to 16): rbAmp board, its current input (1–7), clamp model, relay board (A = 1, B = 2 …) and output on it (both 0 = no relay) |
 | clamp models | `SCT_5A`, `SCT_10A`, `SCT_20A`, `SCT_30A`, `SCT_50A`, `SCT_60A`, `SCT_100A`, or `SCT_KEEP` (CT-series modules with factory-paired clamps) |
 | AUX relays | outputs no channel uses: manual ON / OFF from the server, not metered (numbered across all relay boards, board A first) |

@@ -5,7 +5,7 @@
 
 // ================================================================ [1] BOARD INFO
 #define FW_VERSION "1.1.0"
-#define HW_NAME "esp32s3-supermini"
+#define HW_NAME "esp32s3-n16r8"
 #define PROTO_VERSION 1
 // One source, two firmwares: 0 = AC meter (PZEM-004T v3, TTL), 1 = DC meter (PZEM-017, RS485 module).
 #define METER_DC 0
@@ -34,13 +34,14 @@
                                     // 0 = random password made on first boot (printed on serial)
 
 // ================================================================ [3] PIN OUT (check your board)
+// ESP32-S3 N16R8 (16 MB flash, octal PSRAM): GPIO 26-32 (flash) and 35-37 (PSRAM) are used internally: do not wire them.
 #define PIN_PZEM_RX 5        // ESP32 RX  <- PZEM TX (DC: RS485 module RO / RXD)
 #define PIN_PZEM_TX 6        // ESP32 TX  -> PZEM RX (DC: RS485 module DI / TXD)
 #define PIN_RS485_DE -1      // DC only: MAX485 DE+RE pin; -1 = module with automatic direction
 #define PIN_I2C_SDA 8        // I2C (optional parts): DS3231, I2C relay boards, SHT sensors
 #define PIN_I2C_SCL 9
 #define I2C_FREQ_HZ 100000
-#define PIN_LED 48           // WS2812 RGB LED (onboard on most Super Mini boards)
+#define PIN_LED 48           // WS2812 RGB LED (onboard on many ESP32-S3 dev boards)
 #define PIN_BOOT_BUTTON 0    // hold 10 s = factory reset
 #define PIN_TAMPER 4         // NC switch to GND; open = panel open (internal pull-up)
 #define TAMPER_OPEN_LEVEL HIGH
@@ -152,7 +153,7 @@
 // Stored in the LittleFS ("spiffs") partition of partitions.csv (16 MB flash, ~3.8 MB for this):
 // choose Tools > Flash Size > 16MB and Tools > Partition Scheme > "Custom".
 #define OUTBOX_SEGMENT_ITEMS 50   // items per segment file (~8 KB)
-#define OUTBOX_SEGMENTS 10        // max segments -> keeps the newest ~500 items (min 30 required)
+#define OUTBOX_SEGMENTS 100       // max segments -> keeps the newest ~5000 items (~800 KB of the 3.8 MB LittleFS)
 #define OUTBOX_RAM_ITEMS 120       // readings wait in RAM until acknowledged; flash only when offline
 #define OUTBOX_RAM_MAX_AGE_MS 30000  // ...or still unsent after this long
 #define OUTBOX_BATCH_MAX 50       // items per "tel" message

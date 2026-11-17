@@ -1,6 +1,6 @@
 # PowerMeter firmware (ESP32-S3)
 
-Firmware for the PowerManager meter: ESP32-S3 Super Mini + power sensor + solid-state relay + WS2812 LED + tamper switch.
+Firmware for the PowerManager meter: ESP32-S3 N16R8 + power sensor + solid-state relay + WS2812 LED + tamper switch.
 
 Two sketches (open the folder's `.ino` in Arduino IDE):
 
@@ -48,7 +48,7 @@ If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** 
 | DC only: MAX485 DE+RE (set `PIN_RS485_DE`; `-1` for auto-direction modules) | – |
 | SSR input (+) (`RELAY_GPIO_PINS`) | 7 |
 | Tamper switch (NC, other side to GND) | 4 |
-| WS2812 data | 48 (onboard LED on most Super Mini boards) |
+| WS2812 data | 48 (onboard LED on many ESP32-S3 dev boards) |
 | I²C SDA / SCL (optional: DS3231, PCF8574 / XL9535 relay boards, SHT sensors) | 8 / 9 |
 | Battery sense (optional, set `BATTERY_ENABLE 1`) | 1, through a divider (see `config.h`) |
 | DS18B20 temperature sensor(s) (optional, set `TEMP_DS18B20 1`) | 10, 4.7 kΩ pull-up to 3.3 V |

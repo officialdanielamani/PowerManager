@@ -5,7 +5,7 @@
 
 // ================================================================ [1] BOARD INFO
 #define FW_VERSION "1.1.0"
-#define HW_NAME "esp32s3-supermini"
+#define HW_NAME "esp32s3-n16r8"
 #define PROTO_VERSION 1
 #define METER_KIND "ac"
 #define SENSOR_NAME "AC Power Sensor"
@@ -28,12 +28,13 @@
                                     // 0 = random password made on first boot (printed on serial)
 
 // ================================================================ [3] PIN OUT (check your board)
+// ESP32-S3 N16R8 (16 MB flash, octal PSRAM): GPIO 26-32 (flash) and 35-37 (PSRAM) are used internally: do not wire them.
 #define PIN_I2C_SDA 8        // shared I2C bus: rbAmp, DS3231, relay board, SHT sensors
 #define PIN_I2C_SCL 9
 #define I2C_FREQ_HZ 50000    // rbAmp recommendation for ESP32 hosts (do not use 400 kHz)
 #define PIN_DRDY 5           // rbAmp DRDY of board 1 (open-drain, internal pull-up; 10 k to 3.3 V for long wires)
                              // -1 = not wired: Normal mode only (the module is read once a second)
-#define PIN_LED 48           // WS2812 RGB LED (onboard on most Super Mini boards)
+#define PIN_LED 48           // WS2812 RGB LED (onboard on many ESP32-S3 dev boards)
 #define PIN_BOOT_BUTTON 0    // hold 10 s = factory reset
 #define PIN_TAMPER 4         // NC switch to GND; open = panel open (internal pull-up)
 #define TAMPER_OPEN_LEVEL HIGH
@@ -173,7 +174,7 @@
 // Stored in the LittleFS ("spiffs") partition of partitions.csv (16 MB flash, ~3.8 MB for this):
 // choose Tools > Flash Size > 16MB and Tools > Partition Scheme > "Custom".
 #define OUTBOX_SEGMENT_ITEMS 50   // items per segment file (~8 KB)
-#define OUTBOX_SEGMENTS 10        // max segments -> keeps the newest ~500 items (min 30 required)
+#define OUTBOX_SEGMENTS 100       // max segments -> keeps the newest ~5000 items (~800 KB of the 3.8 MB LittleFS)
 #define OUTBOX_RAM_ITEMS 200       // readings wait in RAM until acknowledged; flash only when offline
 #define OUTBOX_RAM_BYTES 64000   // ...and at most this much (DRDY: ~90 s of 2-channel windows)
 #define OUTBOX_RAM_MAX_AGE_MS 120000 // ...or still unsent after this long (DRDY send interval up to 90 s)

@@ -21,13 +21,15 @@
 namespace hwp {
 
 struct RelayBoard {
+  uint8_t id;  // 1..8, shown as Board A..H. Stable: removing Board A leaves Board B as Board B. The table is kept in
+               // ascending id order; relay numbers across boards (AUX relays) follow that order.
   uint8_t driver, address, relays, activeHigh;
 };
 struct Channel {
   uint8_t board;  // 1 = first rbAmp of the list
   uint8_t input;  // 1..7
   uint8_t clamp;  // SCT_* model code written to the module (0 = keep)
-  uint8_t rb;     // relay board: 1 = first entry of the relay table, 0 = no relay
+  uint8_t rb;     // relay board: the id of an entry of the relay table (1 = Board A), 0 = no relay
   uint8_t ro;     // output on that board: 1..relays of the board (0 when rb is 0)
 };
 struct Profile {
@@ -53,6 +55,8 @@ struct Hooks {
 
 // ---- rules (the same as the server's services/hwprofile.py)
 int totalRelays(const Profile &p);
+int relayIndex(const Profile &p, uint8_t id);                       // position of the relay board with this id, -1 if none
+uint8_t relayNumber(const Profile &p, uint8_t rb, uint8_t ro);      // (relay board id, output) -> number across all boards, 0 = none
 bool validate(const Profile &p, uint8_t gpioPins, char *err, size_t n);  // false + first error text
 // ---- JSON (format of docs/protocol.md §12.1; clamp models as amps, drivers as names)
 bool fromJson(JsonVariantConst j, Profile &p, char *err, size_t n);      // structure only; call validate() after

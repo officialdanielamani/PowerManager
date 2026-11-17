@@ -38,7 +38,7 @@ static hwp::Profile defaultProfile() {  // config.h: one rbAmp 0x50, XL9535 0x20
   p.nBoards = 1;
   p.addr[0] = 0x50;
   p.nRelayBoards = 1;
-  p.relay[0] = {HWP_DRV_XL9535, 0x20, 2, 1};
+  p.relay[0] = {1, HWP_DRV_XL9535, 0x20, 2, 1};
   p.nCh = 2;
   p.ch[0] = {1, 1, 3, 1, 1};  // board, input, SCT_30A = 3, relay board 1, output 1
   p.ch[1] = {1, 2, 3, 1, 2};
@@ -54,7 +54,7 @@ static JsonDocument newProfileDoc(int ver, const char *mode, int delay = 0) {
   p["boards"].to<JsonArray>().add(0x50);
   p["boards"].add(0x51);
   JsonObject r = p["relays"].to<JsonArray>().add<JsonObject>();
-  r["drv"] = "mcp23017"; r["addr"] = 0x21; r["n"] = 8; r["hi"] = 1;
+  r["id"] = 1; r["drv"] = "mcp23017"; r["addr"] = 0x21; r["n"] = 8; r["hi"] = 1;
   const int amps[] = {10, 10, 30, 30, 30, 100, 100};
   for (int i = 0; i < 7; i++) {
     JsonObject c = p["ch"].add<JsonObject>();
@@ -95,11 +95,31 @@ int main() {
   q = p; q.ch[0].clamp = 9; CHECK(!hwp::validate(q, 0, err, sizeof err));
   q = p; q.ch[0].input = 8; CHECK(!hwp::validate(q, 0, err, sizeof err));
   q = p; q.relay[0].address = 0x30; CHECK(!hwp::validate(q, 0, err, sizeof err));
-  q = p; q.relay[0] = {HWP_DRV_PCF8574, 0x38, 9, 0}; CHECK(!hwp::validate(q, 0, err, sizeof err));
-  q = p; q.relay[0] = {HWP_DRV_GPIO, 0, 3, 1}; CHECK(!hwp::validate(q, 2, err, sizeof err));  // 3 GPIO relays, 2 pins
+  q = p; q.relay[0] = {1, HWP_DRV_PCF8574, 0x38, 9, 0}; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  q = p; q.relay[0] = {1, HWP_DRV_GPIO, 0, 3, 1}; CHECK(!hwp::validate(q, 2, err, sizeof err));  // 3 GPIO relays, 2 pins
   CHECK(hwp::validate(q, 3, err, sizeof err));
-  q = p; q.nRelayBoards = 2; q.relay[1] = {HWP_DRV_MCP23017, 0x20, 4, 1}; CHECK(!hwp::validate(q, 0, err, sizeof err));  // 0x20 twice
+  q = p; q.nRelayBoards = 2; q.relay[1] = {2, HWP_DRV_MCP23017, 0x20, 4, 1}; CHECK(!hwp::validate(q, 0, err, sizeof err));  // 0x20 twice
   q = p; q.relay[0].address = 0x50; CHECK(!hwp::validate(q, 0, err, sizeof err));  // address of an rbAmp (also not valid for the driver)
+  // relay board ids are stable: Board A removed, Board B stays Board B
+  hwp::Profile g = defaultProfile();
+  g.nRelayBoards = 2;
+  g.relay[0] = {2, HWP_DRV_XL9535, 0x20, 2, 1};  // Board B (2 outputs)
+  g.relay[1] = {3, HWP_DRV_MCP23017, 0x21, 8, 1};  // Board C (8 outputs)
+  g.ch[0].rb = 2; g.ch[0].ro = 2;
+  g.ch[1].rb = 3; g.ch[1].ro = 8;
+  CHECK(hwp::validate(g, 0, err, sizeof err));
+  CHECK(hwp::relayIndex(g, 1) == -1 && hwp::relayIndex(g, 2) == 0 && hwp::relayIndex(g, 3) == 1);
+  CHECK(hwp::relayNumber(g, 2, 2) == 2 && hwp::relayNumber(g, 3, 1) == 3 && hwp::relayNumber(g, 3, 8) == 10 && hwp::relayNumber(g, 0, 0) == 0);
+  q = g; q.ch[0].rb = 1; CHECK(!hwp::validate(q, 0, err, sizeof err) && strstr(err, "no such relay board"));  // Board A is gone
+  q = g; q.relay[0].id = 3; CHECK(!hwp::validate(q, 0, err, sizeof err));                                    // ids must ascend
+  q = g; q.relay[1].id = 9; CHECK(!hwp::validate(q, 0, err, sizeof err));                                    // 1..8 only
+  q = g; q.relay[0].id = 0; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  hwp::Profile h2 = defaultProfile();
+  CHECK(!hwp::sameStructure(g, h2));
+  JsonDocument gd;
+  hwp::toJson(g, gd.to<JsonObject>());
+  hwp::Profile g2;
+  CHECK(hwp::fromJson(gd, g2, err, sizeof err) && g2.relay[0].id == 2 && g2.relay[1].id == 3 && g2.ch[1].rb == 3 && hwp::sameStructure(g, g2));
   printf("rules ok\n");
 
   // ---------------- JSON round trip
@@ -124,7 +144,7 @@ int main() {
   JsonObject lp = live["profile"].to<JsonObject>();
   lp["boards"].to<JsonArray>().add(0x50);
   JsonObject lr = lp["relays"].to<JsonArray>().add<JsonObject>();
-  lr["drv"] = "xl9535"; lr["addr"] = 0x20; lr["n"] = 2; lr["hi"] = 1;
+  lr["id"] = 1; lr["drv"] = "xl9535"; lr["addr"] = 0x20; lr["n"] = 2; lr["hi"] = 1;
   JsonObject c0 = lp["ch"].to<JsonArray>().add<JsonObject>(); c0["b"] = 1; c0["i"] = 1; c0["a"] = 100; c0["rb"] = 1; c0["ro"] = 1;
   JsonObject c1 = lp["ch"].add<JsonObject>(); c1["b"] = 1; c1["i"] = 2; c1["a"] = 30; c1["rb"] = 1; c1["ro"] = 2;
   const char *e = nullptr, *res = ""; char det[64]; int inS = -1;

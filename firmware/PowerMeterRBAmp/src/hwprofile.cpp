@@ -57,6 +57,22 @@ int totalRelays(const Profile &p) {
   return t;
 }
 
+int relayIndex(const Profile &p, uint8_t id) {
+  for (uint8_t i = 0; i < p.nRelayBoards; i++)
+    if (p.relay[i].id == id) return i;
+  return -1;
+}
+
+uint8_t relayNumber(const Profile &p, uint8_t rb, uint8_t ro) {
+  if (!rb) return 0;
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < p.nRelayBoards; i++) {
+    if (p.relay[i].id == rb) return n + ro;
+    n += p.relay[i].relays;
+  }
+  return 0;
+}
+
 static bool addrOk(uint8_t drv, uint8_t a) {
   if (drv == HWP_DRV_GPIO) return a == 0;
   if (drv == HWP_DRV_PCF8574) return (a >= 0x20 && a <= 0x27) || (a >= 0x38 && a <= 0x3F);
@@ -74,6 +90,8 @@ bool validate(const Profile &p, uint8_t gpioPins, char *err, size_t n) {
   int total = 0, gpio = 0;
   for (uint8_t i = 0; i < p.nRelayBoards; i++) {
     const RelayBoard &r = p.relay[i];
+    if (r.id < 1 || r.id > HWP_MAX_RELAY_BOARDS || (i && r.id <= p.relay[i - 1].id))
+      return fail(err, n, "relay board %d: id must be 1 to %d, in ascending order", i + 1, HWP_MAX_RELAY_BOARDS), false;
     if (!maxOutputs(r.driver)) return fail(err, n, "relay board %d: unknown driver", i + 1), false;
     if (!addrOk(r.driver, r.address)) return fail(err, n, "relay board %d: invalid I2C address", i + 1), false;
     if (r.relays < 1 || r.relays > maxOutputs(r.driver)) return fail(err, n, "relay board %d: 1 to %d outputs", i + 1, maxOutputs(r.driver)), false;
@@ -95,8 +113,9 @@ bool validate(const Profile &p, uint8_t gpioPins, char *err, size_t n) {
     if (c.board < 1 || c.board > p.nBoards) return fail(err, n, "CH%d: invalid board", i + 1), false;
     if (c.input < 1 || c.input > 7) return fail(err, n, "CH%d: input must be 1 to 7", i + 1), false;
     if (ampsOf(c.clamp) < 0) return fail(err, n, "CH%d: invalid clamp model", i + 1), false;
-    if (c.rb > p.nRelayBoards) return fail(err, n, "CH%d: relay board must be 0 to %d", i + 1, p.nRelayBoards), false;
-    if (c.rb == 0 ? c.ro != 0 : (c.ro < 1 || c.ro > p.relay[c.rb - 1].relays))
+    int ri = c.rb ? relayIndex(p, c.rb) : -1;
+    if (c.rb && ri < 0) return fail(err, n, "CH%d: no such relay board", i + 1), false;
+    if (c.rb == 0 ? c.ro != 0 : (c.ro < 1 || c.ro > p.relay[ri].relays))
       return fail(err, n, "CH%d: invalid relay output", i + 1), false;
     for (uint8_t j = 0; j < i; j++) {
       if (p.ch[j].board == c.board && p.ch[j].input == c.input) return fail(err, n, "CH%d: input used twice", i + 1), false;
@@ -111,7 +130,7 @@ bool sameStructure(const Profile &a, const Profile &b) {
   for (uint8_t i = 0; i < a.nBoards; i++)
     if (a.addr[i] != b.addr[i]) return false;
   for (uint8_t i = 0; i < a.nRelayBoards; i++)
-    if (a.relay[i].driver != b.relay[i].driver || a.relay[i].address != b.relay[i].address ||
+    if (a.relay[i].id != b.relay[i].id || a.relay[i].driver != b.relay[i].driver || a.relay[i].address != b.relay[i].address ||
         a.relay[i].relays != b.relay[i].relays || a.relay[i].activeHigh != b.relay[i].activeHigh)
       return false;
   for (uint8_t i = 0; i < a.nCh; i++)
@@ -143,10 +162,10 @@ bool fromJson(JsonVariantConst j, Profile &p, char *err, size_t n) {
     p.addr[p.nBoards++] = a;
   }
   for (JsonObjectConst r : relays) {
-    int drv = driverOf(r["drv"] | ""), addr, cnt;
-    if (drv < 0 || !intIn(r["addr"], 0, 255, addr) || !intIn(r["n"], 0, 255, cnt))
-      return fail(err, n, "relays: drv, addr and n are required"), false;
-    p.relay[p.nRelayBoards++] = {(uint8_t)drv, (uint8_t)addr, (uint8_t)cnt, (uint8_t)((r["hi"] | 1) ? 1 : 0)};
+    int id, drv = driverOf(r["drv"] | ""), addr, cnt;
+    if (!intIn(r["id"], 0, 255, id) || drv < 0 || !intIn(r["addr"], 0, 255, addr) || !intIn(r["n"], 0, 255, cnt))
+      return fail(err, n, "relays: id, drv, addr and n are required"), false;
+    p.relay[p.nRelayBoards++] = {(uint8_t)id, (uint8_t)drv, (uint8_t)addr, (uint8_t)cnt, (uint8_t)((r["hi"] | 1) ? 1 : 0)};
   }
   for (JsonObjectConst c : chans) {
     int b, i, a, rb, ro;
@@ -166,6 +185,7 @@ void toJson(const Profile &p, JsonObject o) {
   JsonArray r = o["relays"].to<JsonArray>();
   for (uint8_t i = 0; i < p.nRelayBoards; i++) {
     JsonObject x = r.add<JsonObject>();
+    x["id"] = p.relay[i].id;
     x["drv"] = driverName(p.relay[i].driver);
     x["addr"] = p.relay[i].address;
     x["n"] = p.relay[i].relays;

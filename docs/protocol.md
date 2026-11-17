@@ -40,7 +40,7 @@ Manual entry on the device uses the same four fields: **Server address**, **Port
   "code": "K7P29QXM",
   "device_id": "MTR23H4R",
   "fw": "0.1.0",
-  "hw": "esp32s3-supermini",
+  "hw": "esp32s3-n16r8",
   "proto": 1,
   "caps": {
     "kind": "ac",
@@ -392,27 +392,30 @@ sketch keeps its compile-time layout until a later version.
 What the wiring looks like (rbAmp modules, relay boards, which input / clamp / relay each channel uses) can be
 changed from the server without recompiling. The compiled tables of `config.h` (`RBAMP_BOARDS`, `RELAY_BOARDS`,
 `CHANNELS`) become the **default profile**. Pins, enable flags and the maximums (`MC_MAX_CH`, 8 rbAmp boards,
-32 relays, 8 relay-table entries) stay compile-time. A channel's relay is a relay board and an output on it
-("Board A relay 2"), not a number across all boards; the meter derives the relay number across boards
-(board A first) that AUX relays, `state.relay` and the AUX events keep using: they follow the hardware design.
+32 relays, 8 relay-table entries) stay compile-time. A channel's relay is a relay board (by its stable `id`, shown as a letter) and an output on it
+("Board A relay 2"), not a number across all boards; the meter derives the relay number across boards (lowest
+`id` first) that AUX relays, `state.relay` and the AUX events keep using. `config.h` counts its relay boards by
+position (first entry = Board A): the generator renumbers a profile with a gap: they follow the hardware design.
 
 ### 12.1 Profile document
 
 ```json
 {"ver": 7,
  "boards": [80, 81],
- "relays": [{"drv": "mcp23017", "addr": 33, "n": 8, "hi": 1}],
- "ch": [{"b": 1, "i": 1, "a": 10, "rb": 1, "ro": 1},
-        {"b": 1, "i": 2, "a": 10, "rb": 1, "ro": 2},
-        {"b": 2, "i": 1, "a": 30, "rb": 1, "ro": 3}]}
+ "relays": [{"id": 2, "drv": "mcp23017", "addr": 33, "n": 8, "hi": 1}],
+ "ch": [{"b": 1, "i": 1, "a": 10, "rb": 2, "ro": 1},
+        {"b": 1, "i": 2, "a": 10, "rb": 2, "ro": 2},
+        {"b": 2, "i": 1, "a": 30, "rb": 2, "ro": 3}]}
 ```
+
+The example has only **Board B** (`id` 2): Board A was removed and Board B stayed Board B.
 
 | Field | Meaning | Rules (same on server and meter) |
 |---|---|---|
 | `ver` | Profile version, raised by the server on every change | integer ≥ 1 |
 | `boards` | I²C address of each rbAmp module, board 1 first | 1–8 entries, each 0x50–0x57, no duplicates |
-| `relays[]` | One entry per relay board (at most 8), relays are numbered across the entries | `drv`: `mcp23017` / `xl9535` (≤ 16), `pcf8574` (≤ 8), `gpio` (≤ pins listed in `RELAY_GPIO_PINS`); `addr`: 0x20–0x27 (`pcf8574` also 0x38–0x3F, `gpio`: 0); `hi`: 1 = active high; at most 32 relays in total; no two entries on the same address |
-| `ch[]` | One entry per measured channel, CH1 first | 1–`MC_MAX_CH` entries; `b` = board number (1..number of boards), `i` = input 1..7, `a` = clamp model in amps (`0` keep, 5, 10, 20, 30, 50, 60, 100), `rb` = relay board (1 = first entry of `relays` = "Board A", 2 = "Board B" …; 0 = no relay), `ro` = output on that board (1..its `n`; 0 when `rb` is 0); no two channels on the same `b`+`i`, no (`rb`, `ro`) used twice |
+| `relays[]` | One entry per relay board (at most 8). `id` 1–8 = the board's letter (1 = Board A … 8 = Board H); it is **kept**: removing Board A leaves Board B as Board B, a new board takes the lowest free id. The list is in ascending `id` order (the server sorts it); relay numbers across boards (AUX relays) follow that order | `id`: unique, 1–8; `drv`: `mcp23017` / `xl9535` (≤ 16), `pcf8574` (≤ 8), `gpio` (≤ pins listed in `RELAY_GPIO_PINS`); `addr`: 0x20–0x27 (`pcf8574` also 0x38–0x3F, `gpio`: 0); `hi`: 1 = active high; at most 32 relays in total; no two entries on the same address |
+| `ch[]` | One entry per measured channel, CH1 first | 1–`MC_MAX_CH` entries; `b` = board number (1..number of boards), `i` = input 1..7, `a` = clamp model in amps (`0` keep, 5, 10, 20, 30, 50, 60, 100), `rb` = the `id` of a relay board (1 = Board A, 2 = Board B …; 0 = no relay; it must exist in `relays`), `ro` = output on that board (1..its `n`; 0 when `rb` is 0); no two channels on the same `b`+`i`, no (`rb`, `ro`) used twice |
 
 These are the rules of the `static_assert`s in `hwmap.h` / `relaymap.h`, moved to run time. They are written once
 (firmware: one validator function that the PC tests also run; server: `services/validation.py`). Relays that no

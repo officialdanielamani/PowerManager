@@ -4,6 +4,12 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 
 ## Unreleased (1.1.0)
 
+- Relay boards of a hardware profile have a stable `id` (Board A…H): removing Board A leaves Board B as Board B; the
+  generator closes the gap for `config.h`, which counts by position.
+- Boards are N16R8: `OUTBOX_SEGMENTS` 100 (about 5000 buffered items, ~800 KB of the 3.8 MB LittleFS), `HW_NAME`
+  `esp32s3-n16r8`, a note about the PSRAM / flash pins in `config.h`.
+- Test tools in the repository: `firmware/tools/hwprofile_test`, `firmware/tools/syntax_check` (ESP32 sources against
+  stubs), `server/tools/e2e` (browser test against a real server + simulated meter), `make syntax-check`, `make e2e`.
 - **Breaking:** server 1.1.0 needs meter firmware **1.1.0** (`MIN_FW`); older firmware is no longer supported. In the rbAmp
   `CHANNELS` table (`config.h`, hardware profile, generator) a channel's relay is now **relay board + output** (`{board,
   input, clamp, relayBoard, relayOutput}`, e.g. Board A relay 2) instead of one number across all boards. Existing

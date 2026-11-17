@@ -46,25 +46,41 @@ def aux_count(profile):
 
 
 def board_letter(rb):
-    """Relay board 1, 2, 3 ... is shown as Board A, B, C ..."""
+    """Relay board id 1, 2, 3 ... is shown as Board A, B, C ..."""
     return chr(64 + rb)
 
 
+def _by_id(profile):
+    return sorted(profile.get("relays") or [], key=lambda r: r.get("id", 0))
+
+
 def relay_number(profile, rb, ro):
-    """(relay board, output) -> relay number across all boards (the number AUX relays and the meter use); 0 = none."""
+    """(relay board id, output) -> relay number across all boards (board with the lowest id first; the number AUX
+    relays and the meter use); 0 = none."""
     if not rb:
         return 0
-    return sum(r.get("n", 0) for r in (profile.get("relays") or [])[:rb - 1]) + ro
+    n = 0
+    for r in _by_id(profile):
+        if r.get("id") == rb:
+            return n + ro
+        n += r.get("n", 0)
+    return 0
 
 
 def relay_label(profile, number):
     """Relay number across all boards -> "Board B relay 3" (falls back to "relay N")."""
     left = number
-    for k, r in enumerate(profile.get("relays") or [], 1):
+    for r in _by_id(profile):
         if left <= r.get("n", 0):
-            return f"Board {board_letter(k)} relay {left}"
+            return f"Board {board_letter(r.get('id', 0))} relay {left}"
         left -= r.get("n", 0)
     return f"relay {number}"
+
+
+def next_relay_id(profile):
+    """Lowest free relay board id (a new board gets the first free letter), None when all 8 are used."""
+    used = {r.get("id") for r in profile.get("relays") or []}
+    return next((i for i in range(1, MAX_RELAY_BOARDS + 1) if i not in used), None)
 
 
 def aux_numbers(profile):
@@ -99,12 +115,19 @@ def validate(profile, limits=None):
         errors.append(f"Relay boards: at most {MAX_RELAY_BOARDS} entries")
         relays = relays[:MAX_RELAY_BOARDS]
     total, gpio, seen_r = 0, 0, set()
-    sizes = []  # outputs of each relay board (0 for an invalid entry), for the channel check
+    sizes = {}  # relay board id -> outputs (0 for an invalid entry), for the channel check
     for i, r in enumerate(relays, 1):
-        sizes.append(0)
         if not isinstance(r, dict) or r.get("drv") not in DRIVERS:
             errors.append(f"Relay board {i}: driver must be one of {', '.join(DRIVERS)}")
             continue
+        rid = _int(r.get("id"))
+        if rid is None or not 1 <= rid <= MAX_RELAY_BOARDS:
+            errors.append(f"Relay board {i}: id must be 1 to {MAX_RELAY_BOARDS} (Board A to H)")
+            continue
+        if rid in sizes:
+            errors.append(f"Relay board {i}: Board {board_letter(rid)} is used twice")
+            continue
+        sizes[rid] = 0
         drv, addr, n = r["drv"], _int(r.get("addr")), _int(r.get("n"))
         if addr is None or not _addr_ok(drv, addr):
             errors.append(f"Relay board {i}: invalid I2C address for {DRIVER_LABELS[drv]}")
@@ -115,7 +138,7 @@ def validate(profile, limits=None):
         if n is None or not 1 <= n <= DRIVERS[drv]:
             errors.append(f"Relay board {i}: {DRIVER_LABELS[drv]} has 1 to {DRIVERS[drv]} outputs")
             continue
-        sizes[-1] = n
+        sizes[rid] = n
         if r.get("hi") not in (0, 1, True, False):
             errors.append(f"Relay board {i}: active level must be high or low")
         total += n
@@ -140,12 +163,12 @@ def validate(profile, limits=None):
             errors.append(f"CH{i}: input must be 1 to 7")
         if a not in CLAMPS:
             errors.append(f"CH{i}: clamp model must be one of {', '.join(str(x) for x in CLAMPS if x)} A or keep")
-        if rb is None or ro is None or not 0 <= rb <= len(sizes):
-            errors.append(f"CH{i}: relay board must be 0 (none) to {len(sizes)}")
+        if rb is None or ro is None or (rb != 0 and rb not in sizes):
+            errors.append(f"CH{i}: no such relay board" if rb else f"CH{i}: invalid relay")
         elif rb == 0 and ro != 0:
             errors.append(f"CH{i}: choose a relay board for output {ro}, or leave both empty")
-        elif rb and not 1 <= ro <= sizes[rb - 1]:
-            errors.append(f"CH{i}: Board {board_letter(rb)} has outputs 1 to {sizes[rb - 1]}")
+        elif rb and not 1 <= ro <= sizes[rb]:
+            errors.append(f"CH{i}: Board {board_letter(rb)} has outputs 1 to {sizes[rb]}")
         if b is not None and inp is not None:
             if (b, inp) in seen_in:
                 errors.append(f"CH{i}: board {b} input {inp} is used twice")
@@ -161,8 +184,8 @@ def normalize(profile):
     """Canonical form (ints, only known keys) of a valid profile."""
     return {
         "boards": [int(a) for a in profile["boards"]],
-        "relays": [{"drv": r["drv"], "addr": int(r["addr"]), "n": int(r["n"]), "hi": 1 if r.get("hi") else 0}
-                   for r in profile["relays"]],
+        "relays": sorted(({"id": int(r["id"]), "drv": r["drv"], "addr": int(r["addr"]), "n": int(r["n"]),
+                           "hi": 1 if r.get("hi") else 0} for r in profile["relays"]), key=lambda r: r["id"]),
         "ch": [{"b": int(c["b"]), "i": int(c["i"]), "a": int(c.get("a") or 0), "rb": int(c.get("rb") or 0),
                 "ro": int(c.get("ro") or 0)} for c in profile["ch"]],
     }

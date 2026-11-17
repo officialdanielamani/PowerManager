@@ -1,4 +1,4 @@
-// PowerManager multi-channel AC meter: ESP32-S3 Super Mini + rbAmp BASIC (SCT-013, I2C) + DS3231
+// PowerManager multi-channel AC meter: ESP32-S3 N16R8 + rbAmp BASIC (SCT-013, I2C) + DS3231
 // + tamper switch + I2C relay board (PCF8574 / XL9535) + WS2812. See docs/multichannel.md.
 // Arduino IDE 2.x, board package "esp32" by Espressif 3.x. See firmware/README.md.
 //

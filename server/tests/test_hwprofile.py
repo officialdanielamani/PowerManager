@@ -12,10 +12,10 @@ from .test_pairing import _code
 
 CAPS = {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": "UI2", "channels": 2, "relays": 2, "aux": 0,
         "voltage": True, "drdy": True, "amp_rating": 34.8, "ratings": [30, 30], "hw_cfg": 1}
-DEFAULT = {"boards": [0x50], "relays": [{"drv": "xl9535", "addr": 0x20, "n": 2, "hi": 1}],
+DEFAULT = {"boards": [0x50], "relays": [{"id": 1, "drv": "xl9535", "addr": 0x20, "n": 2, "hi": 1}],
            "ch": [{"b": 1, "i": 1, "a": 30, "rb": 1, "ro": 1}, {"b": 1, "i": 2, "a": 30, "rb": 1, "ro": 2}]}
 # the example of the design: 2 rbAmp boards, MCP23017 at 0x21 with 8 outputs, 7 channels
-NEW = {"boards": [0x50, 0x51], "relays": [{"drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}],
+NEW = {"boards": [0x50, 0x51], "relays": [{"id": 1, "drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}],
        "ch": [{"b": 1, "i": 1, "a": 10, "rb": 1, "ro": 1}, {"b": 1, "i": 2, "a": 10, "rb": 1, "ro": 2},
               {"b": 1, "i": 3, "a": 30, "rb": 1, "ro": 3}, {"b": 2, "i": 1, "a": 30, "rb": 1, "ro": 4},
               {"b": 2, "i": 2, "a": 30, "rb": 1, "ro": 5}, {"b": 2, "i": 3, "a": 100, "rb": 1, "ro": 6},
@@ -70,26 +70,26 @@ def test_validate_rules():
     assert any("relay 3 is used twice" in e for e in bad(lambda p: p["ch"][3].update(rb=1, ro=3)))
     assert any("input 1 is used twice" in e for e in bad(lambda p: p["ch"][4].update(b=2, i=1)))
     assert any("outputs 1 to 8" in e for e in bad(lambda p: p["ch"][0].__setitem__("ro", 9)))
-    assert any("relay board must be" in e for e in bad(lambda p: p["ch"][0].__setitem__("rb", 2)))
+    assert any("no such relay board" in e for e in bad(lambda p: p["ch"][0].__setitem__("rb", 2)))
     assert any("choose a relay board" in e for e in bad(lambda p: p["ch"][0].__setitem__("rb", 0)))
     assert not bad(lambda p: p["ch"][0].update(rb=0, ro=0))  # a channel without relay is fine
     assert any("clamp model" in e for e in bad(lambda p: p["ch"][0].__setitem__("a", 15)))
     assert any("board must be" in e for e in bad(lambda p: p["ch"][0].__setitem__("b", 3)))
     assert any("input must be" in e for e in bad(lambda p: p["ch"][0].__setitem__("i", 8)))
-    assert any("1 to 8 outputs" in e for e in bad(lambda p: p["relays"].append({"drv": "pcf8574", "addr": 0x38, "n": 9, "hi": 0})))
+    assert any("1 to 8 outputs" in e for e in bad(lambda p: p["relays"].append({"id": 2, "drv": "pcf8574", "addr": 0x38, "n": 9, "hi": 0})))
     assert any("address" in e for e in bad(lambda p: p["relays"][0].__setitem__("addr", 0x30)))
     assert any("At most 32" in e for e in bad(lambda p: p["relays"].extend(
-        [{"drv": "xl9535", "addr": 0x22, "n": 16, "hi": 1}, {"drv": "xl9535", "addr": 0x23, "n": 16, "hi": 1}])))
+        [{"id": 2, "drv": "xl9535", "addr": 0x22, "n": 16, "hi": 1}, {"id": 3, "drv": "xl9535", "addr": 0x23, "n": 16, "hi": 1}])))
     assert any("Channels" in e for e in bad(lambda p: p.__setitem__("ch", [])))
     assert any("at most 8 entries" in e for e in bad(lambda p: p["relays"].extend(
-        [{"drv": "pcf8574", "addr": 0x38 + k, "n": 1, "hi": 0} for k in range(8)])))
-    assert hwprofile.validate({"boards": [0x50], "relays": [{"drv": "gpio", "addr": 0, "n": 3, "hi": 1}],
+        [{"id": 2 + k, "drv": "pcf8574", "addr": 0x38 + k, "n": 1, "hi": 0} for k in range(7)] + [{"id": 1, "drv": "pcf8574", "addr": 0x3F, "n": 1, "hi": 0}])))
+    assert hwprofile.validate({"boards": [0x50], "relays": [{"id": 1, "drv": "gpio", "addr": 0, "n": 3, "hi": 1}],
                                "ch": [{"b": 1, "i": 1, "a": 0, "rb": 1, "ro": 1}]}, {"gpio": 2})  # more GPIO relays than pins
 
 
 def test_relay_boards_and_labels():
     two = copy.deepcopy(NEW)   # Board A = 2 outputs (XL9535), Board B = 8 (MCP23017): channels pick (board, output)
-    two["relays"] = [{"drv": "xl9535", "addr": 0x20, "n": 2, "hi": 1}, {"drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}]
+    two["relays"] = [{"id": 1, "drv": "xl9535", "addr": 0x20, "n": 2, "hi": 1}, {"id": 2, "drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}]
     two["ch"] = [{"b": 1, "i": 1, "a": 10, "rb": 1, "ro": 2}, {"b": 2, "i": 1, "a": 30, "rb": 2, "ro": 8},
                  {"b": 2, "i": 2, "a": 30, "rb": 0, "ro": 0}]
     assert hwprofile.validate(two) == []
@@ -98,10 +98,37 @@ def test_relay_boards_and_labels():
     assert hwprofile.relay_label(two, 10) == "Board B relay 8" and hwprofile.relay_label({}, 4) == "relay 4"
     assert hwprofile.aux_count(two) == 8 and hwprofile.aux_numbers(two) == [1, 3, 4, 5, 6, 7, 8, 9]
     assert hwprofile.board_letter(1) == "A" and hwprofile.board_letter(2) == "B"
-    # deleting Board A and moving B up must not leave channels pointing at a board that is gone
+
+
+def test_relay_board_letters_are_stable():
+    """Board A removed: Board B stays Board B (the profile keeps the ids, no renumbering)."""
+    two = copy.deepcopy(DEFAULT)
+    two["relays"] = [{"id": 1, "drv": "xl9535", "addr": 0x20, "n": 2, "hi": 1}, {"id": 2, "drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}]
+    two["ch"] = [{"b": 1, "i": 1, "a": 10, "rb": 2, "ro": 3}, {"b": 1, "i": 2, "a": 10, "rb": 2, "ro": 8}]
+    assert hwprofile.validate(two) == []
     gone = copy.deepcopy(two)
-    gone["relays"].pop(0)
-    assert any("relay board must be" in e or "outputs 1 to" in e for e in hwprofile.validate(gone))
+    gone["relays"].pop(0)                     # Board A removed, channels still point at Board B
+    assert hwprofile.validate(gone) == []
+    assert hwprofile.relay_number(gone, 2, 3) == 3 and hwprofile.relay_number(two, 2, 3) == 5   # numbers across boards follow
+    assert hwprofile.relay_label(gone, 3) == "Board B relay 3" and hwprofile.relay_label(gone, 8) == "Board B relay 8"
+    assert hwprofile.aux_count(gone) == 6 and hwprofile.aux_numbers(gone) == [1, 2, 4, 5, 6, 7]
+    assert hwprofile.next_relay_id(gone) == 1 and hwprofile.next_relay_id(two) == 3
+    full = {"relays": [{"id": i} for i in range(1, 9)]}
+    assert hwprofile.next_relay_id(full) is None
+    # a channel on the removed Board A is refused, ids are unique and 1..8, normalisation sorts by id
+    bad = copy.deepcopy(gone)
+    bad["ch"][0].update(rb=1, ro=1)
+    assert any("no such relay board" in e for e in hwprofile.validate(bad))
+    dup = copy.deepcopy(two)
+    dup["relays"][1]["id"] = 1
+    assert any("used twice" in e for e in hwprofile.validate(dup))
+    for badid in (0, 9, "x", None):
+        e = copy.deepcopy(two)
+        e["relays"][1]["id"] = badid
+        assert any("id must be" in x for x in hwprofile.validate(e)), badid
+    unsorted = copy.deepcopy(two)
+    unsorted["relays"].reverse()
+    assert [r["id"] for r in hwprofile.normalize(unsorted)["relays"]] == [1, 2]
 
 
 def test_aux_count_and_mode():

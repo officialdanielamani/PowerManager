@@ -37,7 +37,8 @@ pair it with the code or QR. The server is normally published through a Cloudfla
 
 ```bash
 make venv            # server/.venv with the server + test requirements
-make test            # server tests + firmware PC tests
+make test            # server tests + firmware PC tests (incl. ESP32 syntax check against stubs)
+make e2e             # browser test of the hardware pages (needs Node + Playwright)
 make run             # development server on http://localhost:5000
 make firmware-setup  # once: ESP32 core + libraries for arduino-cli
 make firmware        # compile both sketches and the build variants
