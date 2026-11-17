@@ -2,6 +2,13 @@
 
 Server and firmware are versioned separately; from 1.0.0 the server needs firmware 1.0.0 or newer.
 
+## Unreleased (1.1.0)
+
+- Boards are now ESP32-S3 **N16R8** (16 MB flash, octal PSRAM): custom `partitions.csv` in both sketches (64 KB NVS,
+  two 6 MB app slots for OTA, 3.8 MB LittleFS). Build scripts, CI and README use `FlashSize=16M,PSRAM=opi,PartitionScheme=custom`.
+  **One USB flash is needed** to change the partition table of an existing meter (readings in the offline buffer are lost).
+- Planned: server-managed hardware profile (rbAmp addresses, relay boards, clamp models), see `docs/protocol.md` §12.
+
 ## 1.0.0 (server and firmware)
 
 Baseline for hand-over.

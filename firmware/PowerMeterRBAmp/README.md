@@ -9,8 +9,8 @@ in `../PowerMeterPZEM`. Design and protocol: [`../../docs/multichannel.md`](../.
 ## 1. Arduino IDE
 
 Same as `../PowerMeterPZEM` (board package **esp32 by Espressif Systems 3.3.5**, ArduinoJson, WebSockets
-by Markus Sattler; **ESP32S3 Dev Module**, USB CDC On Boot Enabled, Flash 4 MB, Partition Scheme
-*Minimal SPIFFS*). Open `PowerMeterRBAmp/PowerMeterRBAmp.ino`.
+by Markus Sattler; **ESP32S3 Dev Module**, USB CDC On Boot Enabled, Flash 16 MB, PSRAM OPI, Partition Scheme
+*Custom*, uses the `partitions.csv` next to the sketch). Open `PowerMeterRBAmp/PowerMeterRBAmp.ino`.
 
 ## 2. Wiring (default pins, see `config.h`)
 

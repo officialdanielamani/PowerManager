@@ -31,8 +31,9 @@ Example configurations: [`examples/`](examples/). The server needs firmware 1.0.
 |---------|-------|
 | Board | ESP32S3 Dev Module, from the **esp32** (Espressif) list |
 | USB CDC On Boot | Enabled (serial log over the USB-C port) |
-| Flash Size | 4MB |
-| Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** |
+| Flash Size | 16MB (128Mb) |
+| PSRAM | OPI PSRAM (N16R8 module) |
+| Partition Scheme | **Custom**: uses `partitions.csv` in the sketch folder (6 MB app + 6 MB OTA slot, 64 KB NVS, 3.8 MB LittleFS) |
 
 Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h` (or make it with the server's **Firmware → Generate config.h**), then Upload.
 
@@ -83,8 +84,8 @@ What each switch costs (multi-channel firmware 0.8.0, ESP32-S3, measured):
 | Tamper switch (`TAMPER_ENABLE`) | < 1 KB |
 
 Default build ≈ 1.39 MB, everything optional off ≈ 1.37 MB. Most of the firmware is Wi-Fi, TLS, the web server
-and JSON, which every meter needs, so the switches save little: the *Minimal SPIFFS* partition scheme (1.9 MB
-app) is still required (the default scheme's 1.2 MB app space is too small either way).
+and JSON, which every meter needs, so the switches save little: the app fits easily in the 6 MB slots of the
+custom partition table.
 
 **Temperature (DS18B20):** up to `TEMP_MAX_SENSORS` (4) on one wire, numbered T1, T2 … by serial number (stable
 over a restart). Read every `TEMP_READ_MS` (10 s), sent with the readings, shown on the server (Info page, dashboard,

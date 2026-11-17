@@ -27,6 +27,10 @@ for sketch, name in ((A, "pzem_config.h"), (B, "rbamp_config.h")):
     if GEN.exists() and not filecmp.cmp(sketch.parent / "config.h", GEN / name, shallow=False):
         print(f"DIFFERS: {sketch.parent.name}/config.h vs server/app/firmware_cfg/{name}  (copy it over)")
         bad.append(name)
+# The custom partition table (16 MB flash) is the same for both sketches.
+if not filecmp.cmp(A.parent / "partitions.csv", B.parent / "partitions.csv", shallow=False):
+    print("DIFFERS: partitions.csv  (PowerMeterPZEM vs PowerMeterRBAmp)")
+    bad.append("partitions.csv")
 print("shared files identical" if not bad else f"{len(bad)} shared file(s) differ")
 print("differ on purpose (check by hand): " + ", ".join(DIFFERENT))
 sys.exit(1 if bad else 0)

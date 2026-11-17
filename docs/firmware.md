@@ -6,7 +6,7 @@ Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. One source bu
 
 | Part | Notes |
 |------|-------|
-| ESP32-S3 Super Mini | 4 MB flash. Powered from a **DC UPS**, so it stays up during an AC outage. |
+| ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM) | Powered from a **DC UPS**, so it stays up during an AC outage. GPIO 35–37 are used by the octal PSRAM and must not be wired. |
 | PZEM-004T (v3/v4 protocol, Modbus-RTU over TTL) | Its measurement side is powered from **AC**: when AC is lost it stops answering → this is how "No Voltage" is detected. Energy register keeps its value without power. Power the TTL side from **3.3 V** (or use a divider on its TX) — ESP32 pins are not 5 V tolerant. |
 | Solid-state relay | Rated well above the load, with a heatsink. **Not a protection device** — a breaker is still required. SSRs can fail shorted. |
 | Tamper switch | Normally-closed to GND. Open circuit = panel open (a cut wire also shows as open). |
@@ -172,10 +172,9 @@ Only two libraries from the Arduino Library Manager:
 
 Everything else is built into the ESP32 core: WiFi, WebServer, DNSServer, ESPmDNS, HTTPClient, NetworkClientSecure, Preferences (NVS), LittleFS, `rgbLedWrite()` for the WS2812, FreeRTOS. The PZEM Modbus protocol and the optional DS3231 (raw I2C via `Wire`) are implemented in the sketch — no extra libraries.
 
-**Arduino IDE board settings:** Board *ESP32S3 Dev Module* · USB CDC On Boot: *Enabled* · Flash Size: *4MB* · Partition Scheme: **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** (the 128 KB "SPIFFS" partition holds the LittleFS offline buffer; the app uses ~66% of its slot).
+**Arduino IDE board settings:** Board *ESP32S3 Dev Module* · USB CDC On Boot: *Enabled* · Flash Size: *16MB* · PSRAM: *OPI PSRAM* · Partition Scheme: **Custom** (the `partitions.csv` in the sketch folder, see below). The 3.8 MB `spiffs` partition holds the LittleFS offline buffer.
 
-**Planned (1.1.0): ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM) with a custom partition table**
-(`partitions.csv` in each sketch folder; Arduino IDE: Flash Size 16MB, PSRAM *OPI PSRAM*, Partition Scheme *Custom*):
+**ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM), custom partition table** (`partitions.csv` in each sketch folder, identical in both, checked by `check_shared.py`):
 
 | Partition | Offset | Size | Use |
 |---|---|---|---|

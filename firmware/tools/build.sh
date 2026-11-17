@@ -1,6 +1,6 @@
 #!/bin/bash
-# Compile a sketch with the reference board settings (ESP32S3 Dev Module, USB CDC on boot, 4 MB flash,
-# Minimal SPIFFS partition scheme). Needs arduino-cli + firmware/tools/setup_arduino.sh once.
+# Compile a sketch with the reference board settings (ESP32S3 Dev Module for the N16R8: USB CDC on boot,
+# 16 MB flash, octal PSRAM, custom partition table = partitions.csv in the sketch folder). Needs arduino-cli + firmware/tools/setup_arduino.sh once.
 #   firmware/tools/build.sh PowerMeterRBAmp            build firmware/PowerMeterRBAmp
 #   firmware/tools/build.sh PowerMeterPZEM dc          PZEM sketch as the DC meter (METER_DC 1)
 #   firmware/tools/build.sh PowerMeterRBAmp example    with examples/config_rbamp_2xUI5_MCP23017.h
@@ -24,6 +24,6 @@ if [ "$VARIANT" != default ]; then      # variants are built from a copy, the sk
   esac
 fi
 OUT=build/$SKETCH-$VARIANT
-$CLI compile -b esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=4M,PartitionScheme=min_spiffs \
+$CLI compile -b esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=custom \
   --build-path "$OUT" "$SRC"
 echo "built: firmware/$OUT"
