@@ -10,8 +10,11 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 - Server: hardware profile of rbAmp meters (rbAmp addresses, relay boards, channel table with clamp models) with
   live clamp change, delayed reboot, rollback, I2C scan and rbAmp address commands (`docs/protocol.md` §12,
   `services/hwprofile.py`); AUX event source "Wait for reboot"; a channel count change caused by a profile no longer
-  archives the meter. Up to 16 channels. `sim_meter_mc.py` simulates it (`--bus`). The pages and the firmware
-  follow in later steps.
+  archives the meter. Up to 16 channels. `sim_meter_mc.py` simulates it (`--bus`). The pages follow in a later step.
+- rbAmp firmware 1.1.0: run-time hardware profile (`src/hwprofile.*`, `hwmap.h`, `relaymap.h`): stored in NVS, delayed
+  restart (AUX event "Wait for reboot"), confirm check, rollback and crash-loop protection, live clamp change, commands
+  `i2c_scan`, `rbamp_addr`, `hw_profile`, `hw_cancel`; sessions end with reason `hw_change` before the restart.
+  PC test: `firmware/tools/hwprofile_test`. The PZEM sketch only gets the new AUX event source (version 1.1.0).
 
 ## 1.0.0 (server and firmware)
 

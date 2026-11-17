@@ -13,11 +13,11 @@ namespace auxrelay {
 enum Mode : uint8_t { M_MANUAL = 0, M_SCHEDULE = 1, M_EVENT = 2 };
 enum Src : uint8_t {
   S_TEMP = 0, S_HUM = 1, S_AMP = 2, S_WATT = 3, S_KWH = 4, S_SESSION = 5,
-  S_TAMPER = 6, S_TRIP = 7, S_VOLT = 8, S_WIFI = 9, S_SERVER = 10, S_UPS = 11, S_BAT = 12, S_COUNT = 13
+  S_TAMPER = 6, S_TRIP = 7, S_VOLT = 8, S_WIFI = 9, S_SERVER = 10, S_UPS = 11, S_BAT = 12, S_REBOOT = 13, S_COUNT = 14
 };
 static const char *MODE_NAME[] = {"manual", "schedule", "event"};
-static const char *SRC_NAME[] = {"temp", "hum", "amp", "watt", "kwh", "session", "tamper", "trip", "volt", "wifi", "server", "ups", "bat"};
-static const float HYST[] = {1.0f, 2.0f, 0.1f, 10.0f, 0.01f, 0, 0, 0, 0, 0, 0, 0, 2.0f};  // a condition clears this far back
+static const char *SRC_NAME[] = {"temp", "hum", "amp", "watt", "kwh", "session", "tamper", "trip", "volt", "wifi", "server", "ups", "bat", "reboot"};
+static const float HYST[] = {1.0f, 2.0f, 0.1f, 10.0f, 0.01f, 0, 0, 0, 0, 0, 0, 0, 2.0f, 0};  // a condition clears this far back
 static const uint32_t MIN_SWITCH_MS = 5000;                      // event mode: at most one change per 5 s
 static const uint8_t TOTAL = 255;                                 // amp / watt: all channels together
 static const uint8_t ANY = 254;                                   // any channel (amp, watt, kWh, session, trip)
@@ -287,6 +287,7 @@ static bool evalEvent(const Cfg &c, Run &rn, const Inputs &in, bool &st) {
     case S_WIFI: cond = in.noWifi == (bool)r.running; break;
     case S_SERVER: cond = in.noServer == (bool)r.running; break;
     case S_UPS: cond = in.ups == (bool)r.running; break;
+    case S_REBOOT: cond = in.reboot == (bool)r.running; break;
     case S_BAT:
       if (isnan(in.batPct)) return false;  // no battery measurement: keep the last state
       cond = compare(r, rn.latched, in.batPct);

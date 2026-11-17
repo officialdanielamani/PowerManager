@@ -21,9 +21,10 @@ For whoever takes the project over. Read this first, then `architecture.md` and 
 | Server UI | Checked by hand / with a headless browser during development; no automated browser tests in the repo |
 | Firmware build | Both sketches and the variants in `firmware/tools/build.sh` compile on Arduino-ESP32 3.3.5 |
 | AUX automation | PC test against the real `auxrelay.cpp` (`firmware/tools/auxrelay_test`) |
+| Hardware profile (rbAmp) | Server: tests + simulator (`sim_meter_mc.py`). Firmware: PC test of the real `hwprofile.cpp` (rules, JSON, live / restart / confirm / rollback / crash loop, `firmware/tools/hwprofile_test`); the rest of the firmware change was only syntax-checked on a PC, **the ESP32 build has to be run by CI / arduino-cli** |
 | MQTT link | PC test: the firmware's `mqttlink.cpp` + a real broker + the server bridge (`firmware/tools/mqttlink_test`) |
 | Basic metering, relays, sessions on real meters | Used on real hardware by the project owner during development (earlier firmware versions) |
-| **Not yet tried on real hardware** | MQTT link (also through Cloudflare / TLS), backup Wi-Fi switching, UPS input, battery % event, AUX schedules by date and the newer event sources, changing Wi-Fi from the server, firmware 1.0.0 as a whole after the legacy clean-up |
+| **Not yet tried on real hardware** | hardware profile from the server (I2C scan, rbAmp address, live clamp change, restart + confirm + rollback), 16 MB partition table (NVS contents after the change), MQTT link (also through Cloudflare / TLS), backup Wi-Fi switching, UPS input, battery % event, AUX schedules by date and the newer event sources, changing Wi-Fi from the server, firmware 1.0.0 as a whole after the legacy clean-up |
 | Mesh | Has its own manual test plan in `mesh.md` |
 
 Treat the "not yet tried" row as the first test list on a bench meter before a field roll-out.
@@ -66,7 +67,8 @@ Firmware is not released as binaries: each meter is compiled with its own `confi
 
 1. **Shared firmware files.** Most files in `PowerMeterPZEM/src` and `PowerMeterRBAmp/src` must be identical
    (`firmware/tools/check_shared.py` lists them). Edit one, copy to the other, run the check. Files that differ on
-   purpose: `app_state`, `control`, `storage`, `net.cpp`, `web.cpp`, `webui.h`, `led.cpp`, `hwmap.h`.
+   purpose: `app_state`, `control`, `storage`, `net.cpp`, `web.cpp`, `webui.h`, `led.cpp`, `hwmap.h`, `relaymap.h`,
+   `relays.cpp` (the rbAmp ones use the run-time hardware profile). `hwprofile.h/.cpp` and `partitions.csv`: see below.
 2. **config.h and the generator.** `server/app/firmware_cfg/{pzem,rbamp}_config.h` are copies of the two
    `config.h` files; the generator (`app/services/cfggen.py`) replaces `#define` values in them. After changing a
    `config.h`: copy it there (the check script and `tests/test_cfggen.py` fail otherwise), and if you added an

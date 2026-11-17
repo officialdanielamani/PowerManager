@@ -19,6 +19,8 @@
 #include "mqttlink.h"
 #include "outbox.h"
 #include "rbamp.h"
+#include "hwprofile.h"
+#include "i2cbus.h"
 #include "relays.h"
 #include "storage.h"
 #include "system.h"
@@ -426,6 +428,8 @@ static void fillCaps(JsonObject caps) {
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
+  caps["hw_cfg"] = 1;               // hardware profile can be sent by the server (docs/protocol.md §12)
+  caps["hw_limits"].to<JsonObject>()["gpio"] = hw::RELAY_GPIO_COUNT;
   if (temp::hasHumidity()) caps["hum"] = true;
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
@@ -622,6 +626,7 @@ static void sendHello() {
   JsonObject caps = doc["caps"].to<JsonObject>();
   fillCaps(caps);
   control::stateJson(doc["state"].to<JsonObject>());
+  hwp::stateJson(doc["hwp"].to<JsonObject>());  // hardware profile in use (docs/protocol.md §12)
   sendJson(doc);
   lastStateVer = control::stateVersion();
 }
@@ -713,6 +718,38 @@ static void cmdAck(uint32_t ref, bool ok, const char *err) {
   sendJson(doc);
 }
 
+// Answer to a hardware profile command: `fill` adds the "res" object.
+static void cmdAckRes(uint32_t ref, bool ok, const char *err, const char *detail, void (*fill)(JsonObject, void *), void *ctx) {
+  JsonDocument doc;
+  doc["t"] = "cmd_ack";
+  doc["ref"] = ref;
+  doc["ok"] = ok;
+  if (err) doc["err"] = err;
+  if (detail && detail[0]) doc["detail"] = detail;
+  if (fill) fill(doc["res"].to<JsonObject>(), ctx);
+  sendJson(doc);
+}
+
+struct HwRes {
+  const char *state;
+  int inS;
+  uint8_t *found;
+  uint8_t n;
+};
+static void fillHwProfileRes(JsonObject o, void *p) {
+  HwRes *r = (HwRes *)p;
+  o["state"] = r->state;
+  if (r->inS) o["in_s"] = r->inS;
+}
+static void fillScanRes(JsonObject o, void *p) {
+  HwRes *r = (HwRes *)p;
+  JsonArray all = o["found"].to<JsonArray>(), rb = o["rbamp"].to<JsonArray>();
+  for (uint8_t i = 0; i < r->n; i++) {
+    all.add(r->found[i]);
+    if (r->found[i] >= 0x50 && r->found[i] <= 0x57 && rbamp::isRbamp(r->found[i])) rb.add(r->found[i]);
+  }
+}
+
 static void goOnline() {
   sendRound = true;  // backlog from the offline time goes out now
   {
@@ -798,6 +835,41 @@ static void handleCommand(JsonObject m) {
       wifiFromServer = true;
       tryWifi(ssid, pass);
       return;
+    }
+  } else if (!strcmp(c, "hw_profile")) {
+    char detail[64];
+    HwRes r = {"", 0, nullptr, 0};
+    ok = hwp::onProfile(m, err, detail, sizeof(detail), r.state, r.inS);
+    cmdAckRes(ref, ok, err, ok ? nullptr : detail, ok ? fillHwProfileRes : nullptr, &r);
+    return;
+  } else if (!strcmp(c, "hw_cancel")) {
+    ok = hwp::onCancel();
+    if (!ok) err = "nothing_pending";
+  } else if (!strcmp(c, "i2c_scan")) {
+    uint8_t found[40];
+    HwRes r = {"", 0, found, 0};
+    r.n = rbamp::scan(found, sizeof(found));
+    cmdAckRes(ref, true, nullptr, nullptr, fillScanRes, &r);
+    return;
+  } else if (!strcmp(c, "rbamp_addr")) {
+    int from = m["from"] | -1, to = m["to"] | -1;
+    if (from < 0x50 || from > 0x57 || to < 0x50 || to > 0x57 || from == to) {
+      ok = false;
+      err = "bad_address";
+    } else if (control::anySessionRunning()) {
+      ok = false;
+      err = "busy";  // the module restarts: not while a session runs
+    } else if (!rbamp::isRbamp(from)) {
+      ok = false;
+      err = "no_reply";
+    } else if (i2cbus::probe(to)) {
+      ok = false;
+      err = "addr_in_use";
+    } else {
+      Serial.printf("[net] rbAmp address 0x%02X -> 0x%02X (server)\n", from, to);
+      String msg;
+      ok = rbamp::changeAddress(from, to, msg) && rbamp::isRbamp(to);
+      if (!ok) err = "no_reply";
     }
   } else if (!strcmp(c, "remove")) {
     cmdAck(ref, true, nullptr);

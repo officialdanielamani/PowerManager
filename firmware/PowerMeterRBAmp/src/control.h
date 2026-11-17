@@ -19,6 +19,8 @@ void bumpState();
 void relayTest(bool on);    // serial "relay test": the rules stop writing the relays while it runs           // the state changed (also used by auxrelay)
 void applyConfig(const MeterConfig &c);
 void setDisabled(bool disabled);  // server "disable" / "enable"
+bool anySessionRunning();         // a session is running (rbAmp address change is refused meanwhile)
+void prepareRestart();            // planned restart (hardware profile): sessions end, kWh + state saved, relays off
 void reportNow();           // record a reading now and send everything now ("Get Data Now")
 bool takeSendRequest();     // net: true once when it is time to send the buffered items
 

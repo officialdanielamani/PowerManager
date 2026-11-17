@@ -1,0 +1,212 @@
+// Host test of src/hwprofile.cpp: rules, JSON, live clamp change, delayed restart, confirm, rollback, crash loop.
+#include <ArduinoJson.h>
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "Arduino.h"
+#include "Preferences.h"
+#include "hwprofile.h"
+
+uint32_t g_ms = 0;
+SerialT Serial;
+std::map<std::string, std::string> g_nvs;
+
+static int failures = 0;
+#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); failures++; } } while (0)
+
+// ---- fake hardware
+static std::set<int> bus;                 // addresses that answer
+static std::vector<std::string> events;   // "name ver inS reason addr"
+static int restarts = 0, clampApplies = 0;
+static bool probe(uint8_t a, bool) { return bus.count(a) > 0; }
+static void event(const char *n, uint32_t ver, int inS, const char *reason, int addr) {
+  char b[96];
+  snprintf(b, sizeof b, "%s v%u in%d %s %d", n, (unsigned)ver, inS, reason ? reason : "-", addr);
+  events.push_back(b);
+}
+static void restart() { restarts++; }
+static void applyClamps() { clampApplies++; }
+static uint32_t ms() { return g_ms; }
+static hwp::Hooks hooks = {probe, event, restart, applyClamps, ms};
+
+static hwp::Profile defaultProfile() {  // config.h: one rbAmp 0x50, XL9535 0x20 with 2 relays, 2 channels
+  hwp::Profile p;
+  p.nBoards = 1;
+  p.addr[0] = 0x50;
+  p.nRelayBoards = 1;
+  p.relay[0] = {HWP_DRV_XL9535, 0x20, 2, 1};
+  p.nCh = 2;
+  p.ch[0] = {1, 1, 3, 1};  // SCT_30A = 3
+  p.ch[1] = {1, 2, 3, 2};
+  return p;
+}
+
+static JsonDocument newProfileDoc(int ver, const char *mode, int delay = 0) {
+  JsonDocument d;
+  d["ver"] = ver;
+  d["mode"] = mode;
+  if (delay) d["delay_s"] = delay;
+  JsonObject p = d["profile"].to<JsonObject>();
+  p["boards"].to<JsonArray>().add(0x50);
+  p["boards"].add(0x51);
+  JsonObject r = p["relays"].to<JsonArray>().add<JsonObject>();
+  r["drv"] = "mcp23017"; r["addr"] = 0x21; r["n"] = 8; r["hi"] = 1;
+  const int amps[] = {10, 10, 30, 30, 30, 100, 100};
+  for (int i = 0; i < 7; i++) {
+    JsonObject c = p["ch"].add<JsonObject>();
+    c["b"] = i < 3 ? 1 : 2; c["i"] = i < 3 ? i + 1 : i - 2; c["a"] = amps[i]; c["r"] = i + 1;
+  }
+  return d;
+}
+
+static void boot() {  // a restart: everything in RAM is gone, NVS stays
+  hwp::begin(defaultProfile(), 2, hooks);
+  g_ms += 100;
+}
+
+static bool call(JsonDocument &d, const char *&err, char *detail, const char *&res, int &inS) {
+  return hwp::onProfile(d.as<JsonObjectConst>(), err, detail, 64, res, inS);
+}
+
+static bool has(const std::string &needle) {
+  for (auto &e : events)
+    if (e.find(needle) != std::string::npos) return true;
+  return false;
+}
+
+int main() {
+  char err[64];
+  // ---------------- rules
+  hwp::Profile p = defaultProfile();
+  CHECK(hwp::validate(p, 0, err, sizeof err));
+  hwp::Profile q = p;
+  q.addr[0] = 0x60; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  q = p; q.nBoards = 2; q.addr[1] = 0x50; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  q = p; q.ch[1].relay = 1; CHECK(!hwp::validate(q, 0, err, sizeof err));       // relay used twice
+  q = p; q.ch[1].input = 1; CHECK(!hwp::validate(q, 0, err, sizeof err));       // input used twice
+  q = p; q.ch[0].relay = 3; CHECK(!hwp::validate(q, 0, err, sizeof err));       // only 2 relays
+  q = p; q.ch[0].clamp = 9; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  q = p; q.ch[0].input = 8; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  q = p; q.relay[0].address = 0x30; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  q = p; q.relay[0] = {HWP_DRV_PCF8574, 0x38, 9, 0}; CHECK(!hwp::validate(q, 0, err, sizeof err));
+  q = p; q.relay[0] = {HWP_DRV_GPIO, 0, 3, 1}; CHECK(!hwp::validate(q, 2, err, sizeof err));  // 3 GPIO relays, 2 pins
+  CHECK(hwp::validate(q, 3, err, sizeof err));
+  q = p; q.nRelayBoards = 2; q.relay[1] = {HWP_DRV_MCP23017, 0x20, 4, 1}; CHECK(!hwp::validate(q, 0, err, sizeof err));  // 0x20 twice
+  q = p; q.relay[0].address = 0x50; CHECK(!hwp::validate(q, 0, err, sizeof err));  // address of an rbAmp (also not valid for the driver)
+  printf("rules ok\n");
+
+  // ---------------- JSON round trip
+  JsonDocument d = newProfileDoc(5, "reboot", 30);
+  hwp::Profile np;
+  CHECK(hwp::fromJson(d["profile"], np, err, sizeof err) && hwp::validate(np, 0, err, sizeof err));
+  CHECK(np.nBoards == 2 && np.nRelayBoards == 1 && np.nCh == 7 && np.ch[5].clamp == 5 && np.ch[2].clamp == 3);
+  JsonDocument back;
+  hwp::toJson(np, back.to<JsonObject>());
+  CHECK(back["ch"][5]["a"] == 100 && back["relays"][0]["drv"] == "mcp23017" && back["boards"][1] == 0x51);
+  JsonDocument bad;
+  bad["boards"].to<JsonArray>().add(0x50);
+  CHECK(!hwp::fromJson(bad, np, err, sizeof err));  // relays / ch missing
+  printf("json ok\n");
+
+  // ---------------- default, live clamp change
+  g_nvs.clear(); bus = {0x50, 0x20};
+  boot();
+  CHECK(hwp::state() == hwp::ST_DEFAULT && hwp::active().ver == 0 && hwp::active().nCh == 2);
+  JsonDocument live;
+  live["ver"] = 1; live["mode"] = "live";
+  JsonObject lp = live["profile"].to<JsonObject>();
+  lp["boards"].to<JsonArray>().add(0x50);
+  JsonObject lr = lp["relays"].to<JsonArray>().add<JsonObject>();
+  lr["drv"] = "xl9535"; lr["addr"] = 0x20; lr["n"] = 2; lr["hi"] = 1;
+  JsonObject c0 = lp["ch"].to<JsonArray>().add<JsonObject>(); c0["b"] = 1; c0["i"] = 1; c0["a"] = 100; c0["r"] = 1;
+  JsonObject c1 = lp["ch"].add<JsonObject>(); c1["b"] = 1; c1["i"] = 2; c1["a"] = 30; c1["r"] = 2;
+  const char *e = nullptr, *res = ""; char det[64]; int inS = -1;
+  CHECK(call(live, e, det, res, inS) && !strcmp(res, "live") && clampApplies == 1);
+  CHECK(hwp::active().ch[0].clamp == 5 && hwp::active().ver == 1 && hwp::state() == hwp::ST_ACTIVE);
+  boot();  // survives a restart
+  CHECK(hwp::state() == hwp::ST_ACTIVE && hwp::active().ch[0].clamp == 5 && hwp::active().ver == 1);
+  // live with a structural difference is refused
+  JsonDocument wrong = newProfileDoc(2, "live");
+  CHECK(!call(wrong, e, det, res, inS) && !strcmp(e, "mode"));
+  printf("live ok\n");
+
+  // ---------------- reboot flow with confirm
+  events.clear(); restarts = 0;
+  bus = {0x50, 0x51, 0x20, 0x21};
+  JsonDocument rb = newProfileDoc(2, "reboot", 5);  // delay clamped to 10 s
+  CHECK(call(rb, e, det, res, inS) && !strcmp(res, "pending") && inS == 10);
+  CHECK(hwp::state() == hwp::ST_PENDING && hwp::rebootPending() && has("hw_reboot_pending v2 in10"));
+  JsonDocument rb2 = newProfileDoc(3, "reboot", 20);  // a newer one replaces the pending one
+  CHECK(call(rb2, e, det, res, inS) && inS == 20 && hwp::state() == hwp::ST_PENDING);
+  g_ms += 19000; hwp::tick(); CHECK(restarts == 0);
+  g_ms += 2000; hwp::tick(); CHECK(restarts == 1);
+  boot();  // restarted
+  CHECK(hwp::state() == hwp::ST_TRIAL && hwp::active().ver == 3 && hwp::active().nCh == 7 && !hwp::rebootPending());
+  events.clear();
+  g_ms += 1500; hwp::tick();  // all parts answer: confirmed
+  CHECK(hwp::state() == hwp::ST_ACTIVE && has("hw_active v3"));
+  boot();
+  CHECK(hwp::state() == hwp::ST_ACTIVE && hwp::active().ver == 3 && hwp::active().nCh == 7);
+  printf("reboot + confirm ok\n");
+
+  // ---------------- rollback: a part does not answer
+  events.clear(); restarts = 0;
+  bus = {0x50, 0x20};  // 0x51 and 0x21 missing for the next profile
+  JsonDocument rb3 = newProfileDoc(4, "reboot", 10);
+  rb3["profile"]["boards"][1] = 0x52;  // a board that does not exist
+  CHECK(call(rb3, e, det, res, inS));
+  g_ms += 11000; hwp::tick(); CHECK(restarts == 1);
+  boot();
+  CHECK(hwp::state() == hwp::ST_TRIAL && hwp::active().ver == 4);
+  g_ms += 5000; hwp::tick(); CHECK(restarts == 1 && hwp::state() == hwp::ST_TRIAL);  // still waiting
+  CHECK(!call(rb3, e, det, res, inS) && !strcmp(e, "busy"));                          // no new profile while in trial
+  g_ms += 60000; hwp::tick(); CHECK(restarts == 2);                                    // time is up: rollback + restart
+  boot();
+  CHECK(hwp::state() == hwp::ST_ACTIVE && hwp::active().ver == 3);  // the confirmed profile v3 again
+  events.clear();
+  hwp::tick();
+  CHECK(has("hw_rollback v4 in0 no_reply 82"));  // 0x52
+  events.clear(); hwp::tick(); CHECK(events.empty());  // reported once
+  printf("rollback ok\n");
+
+  // ---------------- crash loop: never confirmed, the meter keeps resetting
+  events.clear();
+  bus = {0x50, 0x51, 0x20, 0x21};
+  JsonDocument rb4 = newProfileDoc(5, "reboot", 10);
+  CHECK(call(rb4, e, det, res, inS));
+  g_ms += 11000; hwp::tick();
+  boot(); CHECK(hwp::state() == hwp::ST_TRIAL);       // start 1
+  boot(); CHECK(hwp::state() == hwp::ST_TRIAL);       // start 2 (crashed before the confirmation)
+  boot(); CHECK(hwp::state() == hwp::ST_ACTIVE && hwp::active().ver == 3);  // start 3: rolled back
+  hwp::tick(); CHECK(has("hw_rollback v5 in0 reset"));
+  printf("crash loop ok\n");
+
+  // ---------------- cancel, invalid profile
+  events.clear(); restarts = 0;
+  JsonDocument rb5 = newProfileDoc(6, "reboot", 30);
+  CHECK(call(rb5, e, det, res, inS));
+  CHECK(hwp::onCancel() && hwp::state() == hwp::ST_ACTIVE && !hwp::rebootPending());
+  g_ms += 40000; hwp::tick(); CHECK(restarts == 0);
+  boot(); CHECK(hwp::state() == hwp::ST_ACTIVE && hwp::active().ver == 3);  // nothing was stored for the restart
+  CHECK(!hwp::onCancel());
+  JsonDocument inv = newProfileDoc(7, "reboot");
+  inv["profile"]["boards"][1] = 0x50;
+  CHECK(!call(inv, e, det, res, inS) && !strcmp(e, "invalid") && strstr(det, "twice"));
+  printf("cancel + invalid ok\n");
+
+  // ---------------- hello.hwp
+  JsonDocument h;
+  hwp::stateJson(h.to<JsonObject>());
+  CHECK(h["state"] == "active" && h["ver"] == 3 && h["profile"]["ch"].size() == 7);
+
+  if (failures) {
+    printf("%d check(s) FAILED\n", failures);
+    return 1;
+  }
+  printf("all hardware profile checks passed\n");
+  return 0;
+}

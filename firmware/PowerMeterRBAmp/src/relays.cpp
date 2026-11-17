@@ -12,7 +12,7 @@ static bool lastOk = false;
 static const char *driverName(uint8_t d) {
   return d == RELAY_MCP23017 ? "MCP23017" : d == RELAY_XL9535 ? "XL9535" : d == RELAY_PCF8574 ? "PCF8574" : "GPIO";
 }
-static bool boardOk[hw::RELAY_BOARD_COUNT] = {false};
+static bool boardOk[HWP_MAX_RELAY_BOARDS] = {false};
 
 // Output pattern of one board from its slice of the relay mask (16 bits: XL9535 port 0 + port 1).
 static uint16_t pattern(const hw::RelayBoard &b, uint16_t on) {

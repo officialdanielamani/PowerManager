@@ -16,7 +16,8 @@ enum StopReason : uint8_t {
   STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3, STOP_SENSOR = 4,
   STOP_MANUAL = 5,  // End / End all
   STOP_MODE = 6,    // the configuration mode changed (Shared <-> Independent)
-  STOP_TEMP = 7     // over-temperature protection
+  STOP_TEMP = 7,    // over-temperature protection
+  STOP_HW = 8       // restart for a new hardware profile (hwprofile.h)
 };
 // Sensor problem: no reply on I2C, or a reply that is not valid (module error / no valid result).
 enum SensorErr : uint8_t { SENS_OK = 0, SENS_NO_REPLY = 1, SENS_BAD = 2 };

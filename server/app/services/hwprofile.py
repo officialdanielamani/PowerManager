@@ -18,7 +18,7 @@ DRIVERS = {"mcp23017": 16, "xl9535": 16, "pcf8574": 8, "gpio": 16}   # driver ->
 DRIVER_LABELS = {"mcp23017": "MCP23017", "xl9535": "XL9535 / TCA9535", "pcf8574": "PCF8574 / PCF8574A",
                  "gpio": "ESP32 pins"}
 RBAMP_ADDR = range(0x50, 0x58)
-MAX_BOARDS, MAX_CHANNELS, MAX_RELAYS = 8, 16, 32
+MAX_BOARDS, MAX_CHANNELS, MAX_RELAYS, MAX_RELAY_BOARDS = 8, 16, 32, 8
 DELAY_DEFAULT, DELAY_MIN, DELAY_MAX = 60, 10, 600
 STATES = ("", "queued", "pending", "trial", "active", "rolled_back", "rejected")
 
@@ -67,6 +67,9 @@ def validate(profile, limits=None):
     if not isinstance(relays, list):
         errors.append("Relay boards: a list is required")
         relays = []
+    elif len(relays) > MAX_RELAY_BOARDS:
+        errors.append(f"Relay boards: at most {MAX_RELAY_BOARDS} entries")
+        relays = relays[:MAX_RELAY_BOARDS]
     total, gpio, seen_r = 0, 0, set()
     for i, r in enumerate(relays, 1):
         if not isinstance(r, dict) or r.get("drv") not in DRIVERS:

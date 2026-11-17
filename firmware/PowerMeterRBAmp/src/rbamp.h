@@ -39,6 +39,10 @@ uint8_t lastError();
 bool periodStart();
 bool periodFinish(float avgW[MC_MAX_CH], bool &valid);
 
+bool isRbamp(uint8_t addr);                        // an rbAmp answers at this address
+uint8_t scan(uint8_t *found, uint8_t max);         // I2C addresses 0x08..0x77 that answer (returns how many)
+void applyClamps();                                // hardware profile: clamp models changed live (tables already reloaded)
+
 // One-time I2C address change of a module (two-phase commit + reset). Connect only that module.
 bool changeAddress(uint8_t from, uint8_t to, String &msg);
 

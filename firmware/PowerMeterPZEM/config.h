@@ -4,7 +4,7 @@
 #pragma once
 
 // ================================================================ [1] BOARD INFO
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 // One source, two firmwares: 0 = AC meter (PZEM-004T v3, TTL), 1 = DC meter (PZEM-017, RS485 module).

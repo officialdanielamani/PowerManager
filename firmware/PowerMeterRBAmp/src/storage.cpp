@@ -50,7 +50,8 @@ static void checkFirmwareType() {
   if (prev.length()) {
     static const char *KEYS[] = {"cfg", "s_sid", "s_start", "s_e0", "s_stat", "s_over", "s_end", "s_stop", "s_tare",
                                  "want", "tripped", "wantm", "tripm", "energy", "nch", "sidc", "started",
-                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6", "auxm"};
+                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6", "auxm",
+                                 "hw_act", "hw_try", "hw_boots", "hw_note"};  // hw_*: hardware profile (hwprofile.cpp)
     for (const char *k : KEYS) pm.remove(k);
     Serial.printf("[store] firmware type changed (%s -> %s): old sessions / kWh / relay state cleared\n",
                   prev.c_str(), FW_TYPE);

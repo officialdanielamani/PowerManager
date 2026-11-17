@@ -6,6 +6,7 @@
 #include "../config.h"
 #include "outbox.h"
 #include "rbamp.h"
+#include "hwprofile.h"
 #include "relays.h"
 #include "storage.h"
 #include "system.h"
@@ -201,6 +202,7 @@ static const char *stopReasonName(uint8_t why) {
     case STOP_MANUAL: return "stopped";
     case STOP_MODE: return "mode";
     case STOP_TEMP: return "temp";
+    case STOP_HW: return "hw_change";
     default: return "disabled";
   }
 }
@@ -239,6 +241,23 @@ void endSessions(int8_t ch) {
   StateLock l;
   if (indep() && ch >= 0 && ch < g.nch) stopSlot(ch, STOP_MANUAL);
   else stopAll(STOP_MANUAL);
+}
+
+bool anySessionRunning() {
+  StateLock l;
+  for (uint8_t i = 0; i < sessSlots(); i++)
+    if (g.sess[i].sid && g.sess[i].status != SESS_ENDED && g.sess[i].status != SESS_EXPIRED) return true;
+  return false;
+}
+
+void prepareRestart() {
+  {
+    StateLock l;
+    stopAll(STOP_HW);  // every running session ends (event session_end, reason hw_change)
+    saveEnergy();
+    saveFlags();
+  }
+  relays::write(0);
 }
 
 void setDisabled(bool disabled) {
@@ -1030,6 +1049,7 @@ static void auxTick() {
     in.disabled = g.disabled;
     in.tamper = g.tamper;
     in.ups = g.ups;
+    in.reboot = hwp::rebootPending();
     in.voltOut = g.voltOut;
     in.noWifi = g.net <= NET_WIFI_CONNECTING;
     in.noServer = g.paired && g.offlineSinceMs != 0;

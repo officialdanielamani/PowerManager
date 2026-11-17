@@ -385,13 +385,13 @@ meter's Configuration page and the Firmware page show that it must be updated. W
 
 ## 12. Hardware profile (`hello.caps.hw_cfg`) — design, firmware / server 1.1.0
 
-Status: **server side and simulator implemented** (`services/hwprofile.py`, `tools/sim_meter_mc.py`); **firmware not yet.** Only the rbAmp sketch (`PowerMeterRBAmp`) takes part; the PZEM
+Status: **implemented** on the server (`services/hwprofile.py`, `tools/sim_meter_mc.py`) and in the rbAmp firmware (`src/hwprofile.cpp`; PC-tested, not yet tried on real hardware). Only the rbAmp sketch (`PowerMeterRBAmp`) takes part; the PZEM
 sketch keeps its compile-time layout until a later version.
 
 What the wiring looks like (rbAmp modules, relay boards, which input / clamp / relay each channel uses) can be
 changed from the server without recompiling. The compiled tables of `config.h` (`RBAMP_BOARDS`, `RELAY_BOARDS`,
 `CHANNELS`) become the **default profile**. Pins, enable flags and the maximums (`MC_MAX_CH`, 8 rbAmp boards,
-32 relays) stay compile-time: they follow the hardware design.
+32 relays, 8 relay-table entries) stay compile-time: they follow the hardware design.
 
 ### 12.1 Profile document
 
@@ -408,7 +408,7 @@ changed from the server without recompiling. The compiled tables of `config.h` (
 |---|---|---|
 | `ver` | Profile version, raised by the server on every change | integer ≥ 1 |
 | `boards` | I²C address of each rbAmp module, board 1 first | 1–8 entries, each 0x50–0x57, no duplicates |
-| `relays[]` | One entry per relay board, relays are numbered across the entries | `drv`: `mcp23017` / `xl9535` (≤ 16), `pcf8574` (≤ 8), `gpio` (≤ pins listed in `RELAY_GPIO_PINS`); `addr`: 0x20–0x27 (`pcf8574` also 0x38–0x3F, `gpio`: 0); `hi`: 1 = active high; at most 32 relays in total; no two entries on the same address |
+| `relays[]` | One entry per relay board (at most 8), relays are numbered across the entries | `drv`: `mcp23017` / `xl9535` (≤ 16), `pcf8574` (≤ 8), `gpio` (≤ pins listed in `RELAY_GPIO_PINS`); `addr`: 0x20–0x27 (`pcf8574` also 0x38–0x3F, `gpio`: 0); `hi`: 1 = active high; at most 32 relays in total; no two entries on the same address |
 | `ch[]` | One entry per measured channel, CH1 first | 1–`MC_MAX_CH` entries; `b` = board number (1..number of boards), `i` = input 1..7, `a` = clamp model in amps (`0` keep, 5, 10, 20, 30, 50, 60, 100), `r` = relay number (0 = none, max = total relays); no two channels on the same `b`+`i`, no relay used twice |
 
 These are the rules of the `static_assert`s in `hwmap.h` / `relaymap.h`, moved to run time. They are written once
@@ -453,15 +453,18 @@ offline meter are queued like other commands, except that a newer `hw_profile` r
 - Success: event `hw_active {ver}`, `hwp.state = "active"`, the previous profile is kept as the rollback copy.
 - Failure: the previous profile is restored and the meter restarts once more. Event `hw_rollback {ver, reason,
   addr?}` (`reason`: `no_reply` with the missing address, `invalid`, `reset`). A reset or crash before the
-  confirmation counts as well: after **two** unconfirmed boots the profile is rolled back, so there is no boot loop.
+  confirmation counts as well: after the trial profile has started **twice** without being confirmed, the third start rolls it back (`reason: "reset"`), so there is no boot loop.
 - If the previous profile itself is the compiled default, rollback = back to the default.
 - The server marks the profile **Rolled back** and sends a *Meter status* notification with the reason. The wanted
   profile is not re-sent automatically; the user has to change it and save again.
 
 ### 12.6 Storage and defaults
 
-- NVS keys: `hw_act` (active), `hw_try` (trial), `hw_prev` (rollback copy), `hw_boots` (unconfirmed boots).
-  A profile is small (below 300 bytes as stored).
+- NVS keys (namespace `pm`): `hw_act` (the confirmed server profile; it also *is* the rollback copy, because it is only
+  replaced at confirmation), `hw_try` (trial / pending profile), `hw_boots` (unconfirmed starts with the trial profile),
+  `hw_note` (a rollback to report after the restart). Profiles are stored as JSON (below 1 KB).
+- A live clamp change is stored straight into `hw_act` and applied to the modules at once; `caps.ratings` /
+  `amp_rating` on the server are refreshed with the next `hello`.
 - Factory reset and a `FW_TYPE` change clear all of them (back to the default profile). The server keeps its
   profile and re-sends it when `hello.hwp.state` is `default` and the server's profile is newer than `ver` 0.
 - `hello` reports `hwp` (with the profile in use, so the server can pre-fill its page); `info` lists it too.

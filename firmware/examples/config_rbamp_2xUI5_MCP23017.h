@@ -9,7 +9,7 @@
 #pragma once
 
 // ================================================================ [1] BOARD INFO
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 #define HW_NAME "esp32s3-supermini"
 #define PROTO_VERSION 1
 #define METER_KIND "ac"
@@ -147,6 +147,8 @@
 #define ENERGY_SAVE_MS 300000     // save the kWh counters to NVS this often (and on session changes)
 #define TRIP_CONFIRM_READS 2      // over-current must be seen this many reads in a row
 #define RELAY_MIN_OFF_MS 2000     // after switching OFF, stay OFF at least this long (OFF is always immediate)
+#define HW_CONFIRM_MS 60000UL     // new hardware profile from the server: every listed part must answer within this
+                                  // time after the restart, else the meter returns to the previous profile
 #define RELAY_CHATTER_SWITCHES 6  // more relay changes than this within 60 s = warning on serial + event
 #define TAMPER_DEBOUNCE_MS 1000   // tamper input must be stable this long to count
 #define UPS_DEBOUNCE_MS 2000      // UPS input must be stable this long to count

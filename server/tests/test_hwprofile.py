@@ -77,6 +77,8 @@ def test_validate_rules():
     assert any("At most 32" in e for e in bad(lambda p: p["relays"].extend(
         [{"drv": "xl9535", "addr": 0x22, "n": 16, "hi": 1}, {"drv": "xl9535", "addr": 0x23, "n": 16, "hi": 1}])))
     assert any("Channels" in e for e in bad(lambda p: p.__setitem__("ch", [])))
+    assert any("at most 8 entries" in e for e in bad(lambda p: p["relays"].extend(
+        [{"drv": "pcf8574", "addr": 0x38 + k, "n": 1, "hi": 0} for k in range(8)])))
     assert hwprofile.validate({"boards": [0x50], "relays": [{"drv": "gpio", "addr": 0, "n": 3, "hi": 1}],
                                "ch": [{"b": 1, "i": 1, "a": 0, "r": 1}]}, {"gpio": 2})  # more GPIO relays than pins
 

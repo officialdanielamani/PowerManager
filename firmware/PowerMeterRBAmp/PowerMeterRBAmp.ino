@@ -15,6 +15,7 @@
 #include "src/app_state.h"
 #include "src/auxrelay.h"
 #include "src/control.h"
+#include "src/hwprofile.h"
 #include "src/i2cbus.h"
 #include "src/led.h"
 #include "src/net.h"
@@ -25,6 +26,42 @@
 #include "src/system.h"
 #include "src/timekeep.h"
 #include "src/web.h"
+
+// ---- hardware profile (src/hwprofile.h): glue to the rest of the firmware
+static bool hwProbe(uint8_t addr, bool rbampOnly) { return rbampOnly ? rbamp::isRbamp(addr) : i2cbus::probe(addr); }
+
+struct HwEvent {
+  uint32_t ver;
+  int inS;
+  const char *reason;
+  int addr;
+};
+static void hwEventFill(JsonObject o, void *p) {
+  HwEvent *e = (HwEvent *)p;
+  o["ver"] = e->ver;
+  if (e->inS) o["in_s"] = e->inS;
+  if (e->reason) o["reason"] = e->reason;
+  if (e->addr >= 0) o["addr"] = e->addr;
+}
+static void hwEvent(const char *name, uint32_t ver, int inS, const char *reason, int addr) {
+  HwEvent e = {ver, inS, reason, addr};
+  control::emitEvent(name, hwEventFill, &e);
+}
+static void hwRestart() {
+  Serial.println("[hwp] restarting now");
+  control::prepareRestart();  // sessions end (events are written to flash at once), kWh and state saved, relays off
+  sys::reboot(500);
+}
+static void hwApplyClamps() {  // live clamp change: tables reloaded, models written to the modules
+  hw::reload();
+  rbamp::applyClamps();
+  control::bumpState();
+}
+static void hwInit() {  // before anything uses the hardware tables
+  hwp::Hooks h = {hwProbe, hwEvent, hwRestart, hwApplyClamps, nullptr};
+  hwp::begin(hw::defaultProfile(), hw::RELAY_GPIO_COUNT, h);
+  hw::reload();
+}
 
 static void loadState() {
   StateLock l;
@@ -125,7 +162,15 @@ static void serialCommand(const String &cmd) {
     if (ok) Serial.println("[rbamp] now set RBAMP_BOARDS in config.h to match (or connect the next module)");
     return;
   }
-  Serial.println("Commands: info | i2c scan | relay test | rbamp addr <old> <new>");
+  if (cmd.equalsIgnoreCase("hw")) {
+    JsonDocument doc;
+    hwp::stateJson(doc.to<JsonObject>());
+    String out;
+    serializeJson(doc, out);
+    Serial.printf("[hwp] %s\n", out.c_str());
+    return;
+  }
+  Serial.println("Commands: info | hw | i2c scan | relay test | rbamp addr <old> <new>");
 }
 
 void setup() {
@@ -146,6 +191,7 @@ void setup() {
   state_init();
   step("storage (NVS)");
   store::begin();
+  hwInit();
   loadState();
   step("offline buffer (LittleFS)");
   outbox::begin();
@@ -186,6 +232,7 @@ void loop() {
     pressedMs = 0;
   }
   sys::crumb(sys::CR_MAIN, "loop");
+  hwp::tick();  // hardware profile: restart countdown, confirm check, rollback
   sys::tick();
   sys::checkHeartbeats();
   sys::checkStacks();
