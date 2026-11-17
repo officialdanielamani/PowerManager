@@ -60,7 +60,7 @@ make docker          # build the server image
 
 | Workflow | When | What |
 |---|---|---|
-| `.github/workflows/ci.yml` | every pull request, pushes to `main` / `master`, manual | server tests (Python 3.11 and 3.13), firmware PC tests, firmware compile matrix (7 builds), Docker image builds and answers `/healthz` |
+| `.github/workflows/ci.yml` | every pull request, pushes to `main` / `master`, manual | server tests (Python 3.11 and 3.13), firmware PC tests (incl. the ESP32 syntax check), browser test of the hardware pages (`server/tools/e2e`), firmware compile matrix (7 builds), Docker image builds and answers `/healthz` |
 | `.github/workflows/release.yml` | tag `v*`, manual | tests, then the server image to `ghcr.io/<owner>/powermanager` (`<version>`, `<major>.<minor>`, `latest`) |
 
 The workflows were written with the project but have **not run on GitHub yet** (the scripts they call were run
