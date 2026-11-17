@@ -353,7 +353,7 @@ Config `aux[i]`:
 
 - `sched`: up to 14 entries `{"on", "start", "end"}` (minutes of the local day) with either `"days"` (bit 0 = Monday
   … bit 6 = Sunday) or `"date": [year, month, day]` (year 0 = every year). First match wins.
-- `event.src`: `temp`, `hum`, `amp`, `watt`, `kwh`, `session`, and new `tamper`, `trip`, `volt`, `wifi`, `server`.
+- `event.src`: `temp`, `hum`, `amp`, `watt`, `kwh`, `session`, and new `tamper`, `trip`, `volt`, `wifi`, `server`, and (from 1.1.0, §12) `reboot` = "Wait for Reboot": active during the countdown of a hardware profile change.
   The new ones are on / off conditions: `"active": true|false` (`wifi` / `server` are active while the link is
   missing). `event.idx`: channel / sensor, `255` = all channels together (amp, watt), `254` = any channel (amp,
   watt, kwh, session, trip).
@@ -382,3 +382,112 @@ Config `aux[i]`:
 The server works with meter firmware **1.0.0 or newer** (both sketches). Older firmware is not supported: the
 meter's Configuration page and the Firmware page show that it must be updated. What a meter can do is taken from
 `hello.caps` (parts switched on in its `config.h`), not from its version number.
+
+## 12. Hardware profile (`hello.caps.hw_cfg`) — design, firmware / server 1.1.0
+
+Status: **specification, not implemented yet.** Only the rbAmp sketch (`PowerMeterRBAmp`) takes part; the PZEM
+sketch keeps its compile-time layout until a later version.
+
+What the wiring looks like (rbAmp modules, relay boards, which input / clamp / relay each channel uses) can be
+changed from the server without recompiling. The compiled tables of `config.h` (`RBAMP_BOARDS`, `RELAY_BOARDS`,
+`CHANNELS`) become the **default profile**. Pins, enable flags and the maximums (`MC_MAX_CH`, 8 rbAmp boards,
+32 relays) stay compile-time: they follow the hardware design.
+
+### 12.1 Profile document
+
+```json
+{"ver": 7,
+ "boards": [80, 81],
+ "relays": [{"drv": "mcp23017", "addr": 33, "n": 8, "hi": 1}],
+ "ch": [{"b": 1, "i": 1, "a": 10, "r": 1},
+        {"b": 1, "i": 2, "a": 10, "r": 2},
+        {"b": 2, "i": 1, "a": 30, "r": 3}]}
+```
+
+| Field | Meaning | Rules (same on server and meter) |
+|---|---|---|
+| `ver` | Profile version, raised by the server on every change | integer ≥ 1 |
+| `boards` | I²C address of each rbAmp module, board 1 first | 1–8 entries, each 0x50–0x57, no duplicates |
+| `relays[]` | One entry per relay board, relays are numbered across the entries | `drv`: `mcp23017` / `xl9535` (≤ 16), `pcf8574` (≤ 8), `gpio` (≤ pins listed in `RELAY_GPIO_PINS`); `addr`: 0x20–0x27 (`pcf8574` also 0x38–0x3F, `gpio`: 0); `hi`: 1 = active high; at most 32 relays in total; no two entries on the same address |
+| `ch[]` | One entry per measured channel, CH1 first | 1–`MC_MAX_CH` entries; `b` = board number (1..number of boards), `i` = input 1..7, `a` = clamp model in amps (`0` keep, 5, 10, 20, 30, 50, 60, 100), `r` = relay number (0 = none, max = total relays); no two channels on the same `b`+`i`, no relay used twice |
+
+These are the rules of the `static_assert`s in `hwmap.h` / `relaymap.h`, moved to run time. They are written once
+(firmware: one validator function that the PC tests also run; server: `services/validation.py`). Relays that no
+channel uses are AUX relays as before.
+
+### 12.2 Capability and state
+
+- `hello.caps.hw_cfg` = profile format version (`1`). The server offers **Update Device I/O** only when it is present.
+- `hello.hwp` = `{"ver": 7, "state": "active"}`. `state` ∈ `default` (compiled tables, nothing sent yet), `active`
+  (a server profile in use), `trial` (booted with a new profile, not confirmed yet), `pending` (stored, reboot
+  countdown running).
+
+### 12.3 Commands (server → meter)
+
+| `c` | Params | Behaviour |
+|---|---|---|
+| `hw_profile` | `ver`, `profile`, `mode`, `delay_s` | `mode: "live"` = only clamp models differ from the active profile: written to the modules at once, no reboot. `mode: "reboot"` = anything else: store as the **trial** profile and restart after `delay_s` (default 60, 10–600). The meter checks the mode against its own active profile and rejects a wrong one with `err: "mode"`. It validates the profile again (`err: "invalid"`, `detail`). Replaced by a newer `hw_profile` while a countdown runs |
+| `hw_cancel` | – | Cancel a running countdown; the stored trial profile is dropped |
+| `i2c_scan` | – | Probe addresses 0x08–0x77 and answer with `res: {"found": [32, 80, ...], "rbamp": [80]}` in `cmd_ack`. Addresses that identify as rbAmp (`HW_VARIANT` register) are listed in `rbamp`. The control loop waits for the bus meanwhile (the existing I²C lock) |
+| `rbamp_addr` | `from`, `to` | Change one module's address (two-phase commit as `rbamp addr` on serial). Preconditions checked by the meter: `from` answers and identifies as rbAmp, `to` (0x50–0x57) does not answer, no session is running (`err: "busy"`). Afterwards the meter re-probes `to` and answers `res: {"ok": true}` or `err: "no_reply"` |
+
+All are answered with `cmd_ack`; `hw_profile` adds `res: {"state": "live"|"pending", "in_s": 60}`. Commands for an
+offline meter are queued like other commands, except that a newer `hw_profile` replaces an older queued one and
+`i2c_scan` / `rbamp_addr` are dropped (they need someone watching).
+
+### 12.4 Reboot sequence (`mode: "reboot"`)
+
+1. `cmd_ack` (`state: pending`, `in_s`), event `hw_reboot_pending {ver, in_s}`. While the countdown runs, state
+   `hwp.state = "pending"` and the AUX event source **`reboot`** ("Wait for Reboot", `active` true) is on, so a
+   relay can be linked to it as a warning. The countdown survives nothing: a power cut before zero drops it and
+   the old profile stays active.
+2. At zero: every running session ends with reason `hw_change`, kWh counters and state are saved, relays go OFF,
+   the meter restarts. Relays are OFF after every start anyway, so the warning relay ends with the countdown.
+3. The meter boots with the trial profile and runs the **confirm check** (below).
+
+### 12.5 Confirm check and rollback
+
+- A trial profile becomes `active` only when **every** listed rbAmp (`boards`) and relay board (`relays`, I²C
+  drivers) answers within `HW_CONFIRM_MS` (60 s, config.h option) of the start. The server link is **not**
+  needed, so a Wi-Fi problem never causes a rollback.
+- Success: event `hw_active {ver}`, `hwp.state = "active"`, the previous profile is kept as the rollback copy.
+- Failure: the previous profile is restored and the meter restarts once more. Event `hw_rollback {ver, reason,
+  addr?}` (`reason`: `no_reply` with the missing address, `invalid`, `reset`). A reset or crash before the
+  confirmation counts as well: after **two** unconfirmed boots the profile is rolled back, so there is no boot loop.
+- If the previous profile itself is the compiled default, rollback = back to the default.
+- The server marks the profile **Rolled back** and sends a *Meter status* notification with the reason. The wanted
+  profile is not re-sent automatically; the user has to change it and save again.
+
+### 12.6 Storage and defaults
+
+- NVS keys: `hw_act` (active), `hw_try` (trial), `hw_prev` (rollback copy), `hw_boots` (unconfirmed boots).
+  A profile is small (below 300 bytes as stored).
+- Factory reset and a `FW_TYPE` change clear all of them (back to the default profile). The server keeps its
+  profile and re-sends it when `hello.hwp.state` is `default` and the server's profile is newer than `ver` 0.
+- `hello` / `info` report `hwp`; `info` also lists the profile in use.
+
+### 12.7 Effects on data
+
+- kWh counters, limits and history belong to the **channel number**, not to the physical input: moving a clamp
+  to another input keeps its counter.
+- Channels above the new count are removed on the meter; the server **archives** them (history stays, they are
+  hidden from the live view and from AUX / viewer links).
+- Relays removed by a new profile that an AUX schedule / event still uses: the server refuses to save
+  (validation names the AUX entry), the meter drops such entries if it receives them anyway.
+- Config (`cfg`) for channels that did not exist before arrives after the first start with the new profile; until
+  then they use the defaults.
+
+### 12.8 Server side
+
+- One profile per meter, stored as JSON on the device record, with `hw_ver` (wanted) and `hw_ack` (state last
+  reported: `default` / `active` / `trial` / `pending` / `rolled_back`, reason). Column added in
+  `migrations.py`.
+- Pages (admin, and a manager for their own meters): Firmware → **Update Device I/O** → select an online meter that
+  has `caps.hw_cfg`. Sections: rbAmp boards, relay boards, channel table (clamp dropdown), with **[Scan Address]**,
+  **[Update Clamp Model]** (live mode only) and **[Save & Apply]** (reboot mode, with the countdown and **Cancel**).
+  The rbAmp address change is a wizard ("connect only this module"), the expander addresses are chosen in a
+  dropdown and checked against the scan (found / not found).
+- **Generate config.h** can start from a meter's stored profile ("Start from the current profile of …"), so a
+  later re-flash keeps the changes. It writes `RBAMP_BOARDS`, `RELAY_BOARDS`, `CHANNELS` as before.
+- Meter configuration, history and notifications are unchanged; the new events (`hw_reboot_pending`,
+  `hw_active`, `hw_rollback`) appear in the meter's event list and as *Meter status* notifications.

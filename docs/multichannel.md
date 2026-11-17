@@ -135,6 +135,15 @@ rbAmp with N channels) keeps the same meter on the server. Both sides handle thi
 
 Example: PZEM AC → rbAmp 5 ch → PZEM DC → rbAmp 2 ch → PZEM AC leaves one live meter and four archives.
 
+## Changing the wiring from the server (planned, 1.1.0)
+
+The rbAmp addresses, the relay boards and the channel table (input, clamp model, relay) can be edited on the
+server (Firmware → Update Device I/O) and sent to the meter; a clamp model change applies at once, everything
+else after a reboot with automatic rollback. Specification: [protocol.md §12](protocol.md). Pins and enable flags
+stay in `config.h`. Hardwired expander addresses (MCP23017, XL9535, PCF8574) are only chosen on the page and
+checked with **Scan Address**; an rbAmp module's own address is written to the module by the wizard, with only
+that module connected.
+
 ## AUX relays
 
 Relay outputs that no channel uses (both firmwares; PZEM: every relay except `CHANNEL_RELAY`) are **AUX

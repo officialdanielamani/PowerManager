@@ -174,6 +174,23 @@ Everything else is built into the ESP32 core: WiFi, WebServer, DNSServer, ESPmDN
 
 **Arduino IDE board settings:** Board *ESP32S3 Dev Module* · USB CDC On Boot: *Enabled* · Flash Size: *4MB* · Partition Scheme: **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** (the 128 KB "SPIFFS" partition holds the LittleFS offline buffer; the app uses ~66% of its slot).
 
+**Planned (1.1.0): ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM) with a custom partition table**
+(`partitions.csv` in each sketch folder; Arduino IDE: Flash Size 16MB, PSRAM *OPI PSRAM*, Partition Scheme *Custom*):
+
+| Partition | Offset | Size | Use |
+|---|---|---|---|
+| nvs | 0x9000 | 0x10000 (64 KB) | settings, kWh counters, pairing, hardware profiles (active / trial / previous) |
+| otadata | 0x19000 | 0x2000 | OTA slot selection |
+| app0 (ota_0) | 0x20000 | 0x600000 (6 MB) | firmware |
+| app1 (ota_1) | 0x620000 | 0x600000 (6 MB) | OTA slot, same size |
+| spiffs (LittleFS) | 0xC20000 | 0x3D0000 (about 3.8 MB) | offline buffer (outbox) |
+| coredump | 0xFF0000 | 0x10000 | crash dumps |
+
+The table ends exactly at 16 MB. The app uses about 1.3 MB of its 6 MB slot, so there is room for growth and OTA.
+Switching an existing meter to this table needs one USB flash; the LittleFS partition moves and is formatted
+(buffered readings are lost, nothing else). Whether the NVS contents survive the larger partition is to be checked
+on a bench meter before a field roll-out; plan to re-pair if they do not. `OUTBOX_SEGMENTS` can then be raised.
+
 Reference core: Arduino-ESP32 **3.3.5** (used on the hardware). Also compiles on 3.3.12 and 2.0.17. Libraries: ArduinoJson 7.4.2, WebSockets 2.7.3. The only API that differs between the cores is the RGB LED call (`rgbLedWrite` on 3.x, `neopixelWrite` on 2.0.x), handled in `led.cpp`, plus the ESP-NOW receive-callback signature (handled in `mesh.cpp`).
 
 ## 11. Sketch layout
