@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+{% block title %}Update Device I/O · PowerManager{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="{{ url_for('main.firmware') }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> Firmware</a>
+  <h1 class="h4 mb-0">Update Device I/O</h1>
+</div>
+
+<div class="card mb-3" style="max-width:1000px">
+  <div class="card-body">
+    <p class="small text-body-secondary mb-3">Change the rbAmp modules, the relay boards and which input, clamp and relay each channel uses,
+      <strong>without recompiling</strong>. A clamp model change applies at once; everything else restarts the meter after a delay and rolls back
+      by itself if a part does not answer. Pins and enable flags stay in <code>config.h</code>.</p>
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-8">
+        <label class="form-label fw-semibold" for="meterSel">Select meter</label>
+        <select class="form-select" id="meterSel" name="meter" onchange="this.form.submit()">
+          <option value="">Choose a multi-channel meter…</option>
+          {% for m in meters %}<option value="{{ m.id }}" {{ 'selected' if meter and meter.id == m.id }}>{{ m.name }} ({{ m.device_id }}){% if not (m.caps or {}).get('hw_cfg') %} – firmware too old{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+    </form>
+    {% if not meters %}<div class="text-body-secondary small mt-2">There is no multi-channel (rbAmp) meter you manage yet.</div>{% endif %}
+  </div>
+</div>
+
+{% if meter and not view.hw_cfg %}
+<div class="alert alert-warning" style="max-width:1000px"><i class="bi bi-exclamation-triangle me-1"></i>
+  This meter runs firmware {{ meter.fw or '?' }} that does not support hardware profiles. Flash firmware 1.1.0 or newer
+  (<a href="{{ url_for('main.firmware_config_page') }}">Generate config.h</a>), then come back.</div>
+{% elif meter %}
+<div id="io" style="max-width:1000px">
+  <div class="card mb-3">
+    <div class="card-body d-flex flex-wrap align-items-center gap-2">
+      <span class="fw-semibold">{{ meter.name }}</span>
+      <span class="badge" id="onlineBadge"></span>
+      <span class="badge" id="stateBadge"></span>
+      <span class="small text-body-secondary" id="stateText"></span>
+      <button type="button" class="btn btn-sm btn-outline-danger ms-auto d-none" id="cancelBtn"><i class="bi bi-x-circle me-1"></i>Cancel restart</button>
+    </div>
+  </div>
+
+  <div class="card mb-3"><div class="card-header fw-semibold">rbAmp boards <span class="small fw-normal text-body-secondary">(I2C address of each module)</span></div>
+    <div class="card-body">
+      <div id="boards" class="d-flex flex-wrap gap-2"></div>
+      <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="addBoard"><i class="bi bi-plus-lg"></i> Board</button>
+    </div></div>
+
+  <div class="card mb-3"><div class="card-header fw-semibold">Relay boards</div>
+    <div class="card-body">
+      <div class="table-responsive"><table class="table table-sm align-middle mb-1">
+        <thead><tr class="small"><th>Relays</th><th>Type</th><th>I2C address</th><th>Outputs used</th><th>Active high</th><th>On the bus</th><th></th></tr></thead>
+        <tbody id="relays"></tbody></table></div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="addRelay"><i class="bi bi-plus-lg"></i> Relay board</button>
+      <span class="small text-body-secondary ms-1">Hardwired addresses (MCP23017, XL9535, PCF8574) are chosen here and checked with <strong>Scan Address</strong>.</span>
+    </div></div>
+
+  <div class="card mb-3"><div class="card-header fw-semibold">Channels</div>
+    <div class="card-body">
+      <div class="table-responsive"><table class="table table-sm align-middle mb-1">
+        <thead><tr class="small"><th>Channel</th><th>Board</th><th>Input</th><th>Clamp</th><th>Relay</th><th></th></tr></thead>
+        <tbody id="channels"></tbody></table></div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="addCh"><i class="bi bi-plus-lg"></i> Channel</button>
+      <span class="small text-body-secondary ms-1" id="auxNote"></span>
+    </div></div>
+
+  <div id="errors"></div>
+  <div class="card mb-3"><div class="card-body d-flex flex-wrap align-items-center gap-2">
+    <button type="button" class="btn btn-outline-primary" id="scanBtn"><i class="bi bi-search me-1"></i>Scan Address</button>
+    <button type="button" class="btn btn-outline-primary" id="clampBtn" title="Only the clamp models changed: applied at once"><i class="bi bi-sliders me-1"></i>Update Clamp Model</button>
+    <button type="button" class="btn btn-primary" id="saveBtn"><i class="bi bi-arrow-repeat me-1"></i>Save &amp; Apply</button>
+    <span class="small text-body-secondary">restart after</span>
+    <input class="form-control form-control-sm" style="width:70px" id="delay" value="60" title="10 to 600 seconds"><span class="small text-body-secondary">s</span>
+    <span class="small text-body-secondary w-100" id="hint"></span>
+  </div></div>
+
+  <div class="card mb-3 d-none" id="scanCard"><div class="card-header fw-semibold">I2C scan</div>
+    <div class="card-body"><div id="scanOut" class="small"></div>
+      <hr class="my-3">
+      <div class="fw-semibold small mb-1">Give an rbAmp module a new address</div>
+      <p class="small text-body-secondary mb-2">New modules all answer at 0x50. <strong>Connect only the module you want to change</strong>, then pick its
+        current and its new address. A session must not be running.</p>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select class="form-select form-select-sm" style="width:110px" id="addrFrom"></select>
+        <i class="bi bi-arrow-right"></i>
+        <select class="form-select form-select-sm" style="width:110px" id="addrTo"></select>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="addrBtn"><i class="bi bi-hdd-network me-1"></i>Set address</button>
+        <span class="small text-body-secondary" id="addrBusy"></span>
+      </div>
+    </div></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if meter and view.hw_cfg %}
+<script>
+(function () {
+  var PK = {{ meter.id }}, BASE = "{{ url_for('hardware.page') }}/" + PK;
+  var CLAMPS = {{ hw.CLAMPS|tojson }}, CLAMP_LABELS = {{ hw.CLAMP_LABELS|tojson }}, DRIVERS = {{ hw.DRIVER_LABELS|tojson }};
+  var MAXOUT = {{ hw.DRIVERS|tojson }};
+  var $ = function (id) { return document.getElementById(id); };
+  var st = {{ view|tojson }};
+  var online = {{ 'true' if online else 'false' }};
+  var found = null;      // addresses that answered the last scan (null = no scan yet)
+  var P = JSON.parse(JSON.stringify(st.current && st.current.ch ? st.current : (st.wanted && st.wanted.ch ? st.wanted : {boards: [80], relays: [], ch: []})));
+  var BASELINE = st.current && st.current.ch ? JSON.parse(JSON.stringify(st.current)) : null;  // what the meter uses now
+  delete P.ver; if (BASELINE) delete BASELINE.ver;
+
+  function hex(a) { return '0x' + ('0' + (a >>> 0).toString(16).toUpperCase()).slice(-2); }
+  function opt(v, label, sel) { return '<option value="' + v + '"' + (sel ? ' selected' : '') + '>' + PM.esc(label) + '</option>'; }
+  function addrList(drv) {
+    var out = [];
+    if (drv === 'gpio') return [0];
+    for (var a = 0x20; a <= 0x27; a++) out.push(a);
+    if (drv === 'pcf8574') for (a = 0x38; a <= 0x3F; a++) out.push(a);
+    return out;
+  }
+  function total() { return P.relays.reduce(function (s, r) { return s + (parseInt(r.n, 10) || 0); }, 0); }
+  function badge(a) {
+    if (found === null || a === 0) return '';
+    return found.indexOf(a) >= 0 ? '<span class="badge text-bg-success">found</span>' : '<span class="badge text-bg-danger">not found</span>';
+  }
+
+  function renderBoards() {
+    $('boards').innerHTML = P.boards.map(function (a, i) {
+      var o = ''; for (var x = 0x50; x <= 0x57; x++) o += opt(x, hex(x), x === a);
+      return '<div class="input-group input-group-sm" style="width:190px"><span class="input-group-text">B' + (i + 1) + '</span>' +
+        '<select class="form-select" data-board="' + i + '">' + o + '</select>' +
+        '<button class="btn btn-outline-danger" data-delboard="' + i + '" type="button" title="Remove"><i class="bi bi-x-lg"></i></button></div>' +
+        '<span class="align-self-center me-2">' + badge(a) + '</span>';
+    }).join('');
+  }
+  function renderRelays() {
+    var n = 0;
+    $('relays').innerHTML = P.relays.map(function (r, i) {
+      var dopt = Object.keys(DRIVERS).map(function (k) { return opt(k, DRIVERS[k], k === r.drv); }).join('');
+      var aopt = addrList(r.drv).map(function (a) { return opt(a, r.drv === 'gpio' ? 'GPIO' : hex(a), a === r.addr); }).join('');
+      var c = parseInt(r.n, 10) || 0;
+      var range = c ? (c === 1 ? 'Relay ' + (n + 1) : 'Relays ' + (n + 1) + '–' + (n + c)) : '';
+      n += c;
+      return '<tr><td class="small text-nowrap">' + range + '</td>' +
+        '<td><select class="form-select form-select-sm" style="width:190px" data-rdrv="' + i + '">' + dopt + '</select></td>' +
+        '<td><select class="form-select form-select-sm" style="width:100px" data-raddr="' + i + '"' + (r.drv === 'gpio' ? ' disabled' : '') + '>' + aopt + '</select></td>' +
+        '<td><input class="form-control form-control-sm" style="width:80px" data-rn="' + i + '" value="' + r.n + '"></td>' +
+        '<td><input class="form-check-input" type="checkbox" data-rhi="' + i + '"' + (r.hi ? ' checked' : '') + '></td>' +
+        '<td>' + (r.drv === 'gpio' ? '' : badge(r.addr)) + '</td>' +
+        '<td><button class="btn btn-sm btn-outline-danger" data-delrelay="' + i + '" type="button"><i class="bi bi-x-lg"></i></button></td></tr>';
+    }).join('');
+  }
+  function renderChannels() {
+    var t = total();
+    $('channels').innerHTML = P.ch.map(function (c, i) {
+      var bopt = P.boards.map(function (a, k) { return opt(k + 1, (k + 1) + ' (' + hex(a) + ')', c.b === k + 1); }).join('');
+      var iopt = ''; for (var x = 1; x <= 7; x++) iopt += opt(x, x, c.i === x);
+      var copt = CLAMPS.map(function (a) { return opt(a, CLAMP_LABELS[a], c.a === a); }).join('');
+      var ropt = opt(0, 'none', c.r === 0); for (var r = 1; r <= t; r++) ropt += opt(r, 'relay ' + r, c.r === r);
+      return '<tr><td class="small">CH' + (i + 1) + '</td>' +
+        '<td><select class="form-select form-select-sm" style="width:130px" data-cb="' + i + '">' + bopt + '</select></td>' +
+        '<td><select class="form-select form-select-sm" style="width:70px" data-ci="' + i + '">' + iopt + '</select></td>' +
+        '<td><select class="form-select form-select-sm" style="width:210px" data-ca="' + i + '">' + copt + '</select></td>' +
+        '<td><select class="form-select form-select-sm" style="width:110px" data-cr="' + i + '">' + ropt + '</select></td>' +
+        '<td><button class="btn btn-sm btn-outline-danger" data-delch="' + i + '" type="button"><i class="bi bi-x-lg"></i></button></td></tr>';
+    }).join('');
+    var used = {}; P.ch.forEach(function (c) { if (c.r) used[c.r] = 1; });
+    var aux = []; for (var r2 = 1; r2 <= t; r2++) if (!used[r2]) aux.push(r2);
+    $('auxNote').textContent = aux.length ? 'AUX relays (no channel): ' + aux.join(', ') : 'Relays that no channel uses become AUX relays.';
+  }
+  function renderAll() { renderBoards(); renderRelays(); renderChannels(); updateButtons(); }
+
+  function structure(p) { return JSON.stringify([p.boards, p.relays.map(function (r) { return [r.drv, r.addr, r.n, r.hi ? 1 : 0]; }), p.ch.map(function (c) { return [c.b, c.i, c.r]; })]); }
+  function clamps(p) { return JSON.stringify(p.ch.map(function (c) { return c.a; })); }
+  function updateButtons() {
+    var changedStruct = !BASELINE || structure(P) !== structure(BASELINE);
+    var changedClamp = BASELINE && !changedStruct && clamps(P) !== clamps(BASELINE);
+    var busy = st.state === 'pending' || st.state === 'trial' || st.state === 'queued';
+    $('clampBtn').disabled = !changedClamp || busy;
+    $('saveBtn').disabled = !changedStruct || busy;
+    $('scanBtn').disabled = !online;
+    $('hint').textContent = busy ? 'A change is in progress: wait for the result before sending another.'
+      : changedStruct ? 'Structure changed: Save & Apply restarts the meter after the delay (relays go OFF, running sessions end).'
+      : changedClamp ? 'Only clamp models changed: Update Clamp Model applies them at once.' : '';
+  }
+
+  function num(v) { return parseInt(v, 10); }
+  $('io').addEventListener('change', function (e) {
+    var t = e.target, d = t.dataset;
+    if (d.board != null) P.boards[+d.board] = num(t.value);
+    else if (d.rdrv != null) {
+      var r = P.relays[+d.rdrv]; r.drv = t.value; r.addr = r.drv === 'gpio' ? 0 : (addrList(r.drv).indexOf(r.addr) >= 0 ? r.addr : 0x20);
+      r.n = Math.min(num(r.n) || 1, MAXOUT[r.drv]);
+    } else if (d.raddr != null) P.relays[+d.raddr].addr = num(t.value);
+    else if (d.rn != null) P.relays[+d.rn].n = num(t.value) || 0;
+    else if (d.rhi != null) P.relays[+d.rhi].hi = t.checked ? 1 : 0;
+    else if (d.cb != null) P.ch[+d.cb].b = num(t.value);
+    else if (d.ci != null) P.ch[+d.ci].i = num(t.value);
+    else if (d.ca != null) P.ch[+d.ca].a = num(t.value);
+    else if (d.cr != null) P.ch[+d.cr].r = num(t.value);
+    else return;
+    renderAll();
+  });
+  $('io').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return; var d = b.dataset;
+    if (d.delboard != null) { P.boards.splice(+d.delboard, 1); P.ch.forEach(function (c) { if (c.b > P.boards.length) c.b = P.boards.length || 1; }); }
+    else if (d.delrelay != null) { P.relays.splice(+d.delrelay, 1); var t = total(); P.ch.forEach(function (c) { if (c.r > t) c.r = 0; }); }
+    else if (d.delch != null) P.ch.splice(+d.delch, 1);
+    else return;
+    renderAll();
+  });
+  $('addBoard').addEventListener('click', function () {
+    for (var a = 0x50; a <= 0x57; a++) if (P.boards.indexOf(a) < 0) { P.boards.push(a); break; }
+    renderAll();
+  });
+  $('addRelay').addEventListener('click', function () {
+    var taken = P.relays.map(function (r) { return r.addr; }), a = 0x20;
+    while (taken.indexOf(a) >= 0 && a < 0x27) a++;
+    P.relays.push({drv: 'xl9535', addr: a, n: 8, hi: 1}); renderAll();
+  });
+  $('addCh').addEventListener('click', function () {
+    var last = P.ch[P.ch.length - 1] || {b: 1, i: 0, a: 30, r: 0};
+    P.ch.push({b: last.b, i: Math.min(last.i + 1, 7), a: last.a, r: last.r && last.r < total() ? last.r + 1 : 0}); renderAll();
+  });
+
+  // ---------------- status
+  function fmt(s) { return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+  var dueAt = null;
+  function showState() {
+    online = !!st.online;
+    $('onlineBadge').className = 'badge ' + (st.online ? 'text-bg-success' : 'text-bg-secondary');
+    $('onlineBadge').textContent = st.online ? 'Online' : 'Offline';
+    var S = {'': ['secondary', 'Compiled default', 'No profile has been sent from the server; the meter uses the tables of its config.h.'],
+      queued: ['info', 'Waiting', st.online ? 'Sending to the meter…' : 'The meter is offline; the profile is sent when it reconnects.'],
+      pending: ['warning', 'Restart pending', ''], trial: ['warning', 'Checking', 'The meter restarted with the new profile and is checking that every part answers.'],
+      active: ['success', 'Active', 'Profile v' + st.active_ver + ' is in use.'],
+      rolled_back: ['danger', 'Rolled back', 'The new profile did not work (' + PM.esc(st.reason || '') + '). The meter uses its previous profile.'],
+      rejected: ['danger', 'Rejected', 'The meter refused the profile: ' + PM.esc(st.reason || '')]}[st.state] || ['secondary', st.state, ''];
+    $('stateBadge').className = 'badge text-bg-' + S[0];
+    $('stateBadge').textContent = S[1];
+    $('stateText').innerHTML = S[2];
+    dueAt = st.state === 'pending' && st.due_in != null ? Date.now() + st.due_in * 1000 : null;
+    $('cancelBtn').classList.toggle('d-none', !(st.state === 'pending' || st.state === 'queued'));
+    tickCount();
+    if (st.current && st.current.ch && (st.state === 'active' || st.state === 'rolled_back')) {
+      var cur = JSON.parse(JSON.stringify(st.current)); delete cur.ver; BASELINE = cur;
+    }
+    updateButtons();
+  }
+  function tickCount() {
+    if (dueAt == null) return;
+    $('stateText').textContent = 'Restarting in ' + fmt(Math.max(0, Math.round((dueAt - Date.now()) / 1000))) +
+      '. Running sessions end and the relays go OFF. A relay linked to "Wait for reboot" (AUX events) is on meanwhile.';
+  }
+  setInterval(tickCount, 1000);
+  var lastState = st.state;
+  PM.poll(BASE + '/status', 2500, function (s) {
+    if (s.state !== lastState && s.state === 'active' && s.current && s.current.ch) {   // confirmed: show what the meter reports
+      P = JSON.parse(JSON.stringify(s.current)); delete P.ver; renderAll();
+      PM.toast('Hardware profile v' + s.active_ver + ' is active', 'success');
+    } else if (s.state !== lastState && s.state === 'rolled_back') {
+      PM.toast('Rolled back: ' + (s.reason || ''), 'danger');
+    }
+    lastState = s.state; st = s; showState();
+  });
+
+  // ---------------- send
+  function showErrors(list) {
+    var box = $('errors'); box.innerHTML = '';
+    (list || []).forEach(function (m) { var d = document.createElement('div'); d.className = 'alert alert-danger py-2 mb-2'; d.textContent = m; box.appendChild(d); });
+    if (list && list.length) box.scrollIntoView({behavior: 'smooth', block: 'center'});
+  }
+  function apply(mode) {
+    var body = {profile: P, mode: mode, delay_s: parseInt($('delay').value, 10) || 60};
+    if (mode === 'reboot' && !confirm('Restart the meter in ' + body.delay_s + ' s? Running sessions end and the relays go OFF. If a part does not answer, the meter returns to its previous profile.')) return;
+    PM.post(BASE + '/apply', body).then(function (r) {
+      showErrors(r.errors || (r.ok ? [] : [r.error || 'Failed']));
+      if (r.ok && r.mode === 'reboot') { st.state = 'queued'; showState(); }
+      if (r.ok) { PM.toast(r.mode === 'live' ? 'Clamp models sent' : (r.queued ? 'Saved: sent when the meter is online' : 'Sent: the meter restarts after the delay'), 'success'); }
+    });
+  }
+  $('saveBtn').addEventListener('click', function () { apply('reboot'); });
+  $('clampBtn').addEventListener('click', function () { apply('live'); });
+  $('cancelBtn').addEventListener('click', function () {
+    PM.post(BASE + '/cancel', {}).then(function (r) { PM.toast(r.ok ? 'Restart cancelled' : (r.errors || ['Failed']).join(' '), r.ok ? 'success' : 'danger'); });
+  });
+
+  // ---------------- scan + address wizard
+  function waitCmd(id, done, tries) {
+    tries = tries || 0;
+    fetch(BASE + '/cmd/' + id, {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (c) {
+      if (c.done) return done(c);
+      if (tries > 40) return done({done: false, success: false, err: 'no answer'});
+      setTimeout(function () { waitCmd(id, done, tries + 1); }, 500);
+    });
+  }
+  var LABEL = function (a) {
+    if (a >= 0x50 && a <= 0x57) return 'rbAmp power module';
+    if (a >= 0x20 && a <= 0x27) return 'I/O expander (MCP23017 / XL9535 / PCF8574)';
+    if (a >= 0x38 && a <= 0x3F) return 'PCF8574A relay board';
+    if (a === 0x68) return 'DS3231 clock'; if (a === 0x40 || a === 0x44 || a === 0x45 || a === 0x46) return 'SHT temperature / humidity sensor';
+    return 'unknown';
+  };
+  function scan() {
+    $('scanBtn').disabled = true;
+    PM.post(BASE + '/scan', {}).then(function (r) {
+      if (!r.ok) { PM.toast(r.error || 'Scan failed', 'danger'); return; }
+      waitCmd(r.cmd, function (c) {
+        if (!c.success) { PM.toast('Scan failed: ' + (c.err || 'no answer'), 'danger'); return; }
+        found = (c.res.found || []).slice();
+        var rb = c.res.rbamp || [];
+        $('scanCard').classList.remove('d-none');
+        $('scanOut').innerHTML = found.length ? '<table class="table table-sm mb-0" style="max-width:520px"><tbody>' + found.map(function (a) {
+          return '<tr><td><code>' + hex(a) + '</code></td><td>' + LABEL(a) + (rb.indexOf(a) >= 0 ? ' <span class="badge text-bg-primary">rbAmp confirmed</span>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : 'Nothing answers (check SDA / SCL / power).';
+        var from = '', to = '';
+        (rb.length ? rb : []).forEach(function (a) { from += opt(a, hex(a), a === rb[0]); });
+        for (var a = 0x50; a <= 0x57; a++) if (found.indexOf(a) < 0) to += opt(a, hex(a), false);
+        $('addrFrom').innerHTML = from || '<option value="">no rbAmp found</option>';
+        $('addrTo').innerHTML = to || '<option value="">no free address</option>';
+        renderAll();
+      });
+    }).finally(function () { $('scanBtn').disabled = !online; });
+  }
+  $('scanBtn').addEventListener('click', scan);
+  $('addrBtn').addEventListener('click', function () {
+    var from = parseInt($('addrFrom').value, 10), to = parseInt($('addrTo').value, 10);
+    if (isNaN(from) || isNaN(to)) { PM.toast('Scan first, then choose both addresses', 'warning'); return; }
+    if (!confirm('Change the rbAmp module at ' + hex(from) + ' to ' + hex(to) + '?\n\nOnly this module may be connected. It restarts (about 3 seconds).')) return;
+    $('addrBtn').disabled = true; $('addrBusy').textContent = 'Working…';
+    PM.post(BASE + '/addr', {from: from, to: to}).then(function (r) {
+      if (!r.ok) { PM.toast(r.error || 'Failed', 'danger'); $('addrBusy').textContent = ''; $('addrBtn').disabled = false; return; }
+      waitCmd(r.cmd, function (c) {
+        var why = {busy: 'a session is running', no_reply: 'no rbAmp answered / no answer at the new address', addr_in_use: 'the new address is already used',
+                   bad_address: 'invalid address'}[c.err] || c.err || '';
+        PM.toast(c.success ? 'Done: the module now answers at ' + hex(to) : 'Failed: ' + why, c.success ? 'success' : 'danger');
+        $('addrBusy').textContent = ''; $('addrBtn').disabled = false;
+        if (c.success) { if (P.boards.indexOf(from) >= 0 && P.boards.indexOf(to) < 0) { P.boards[P.boards.indexOf(from)] = to; } scan(); }
+      }, 0);
+    });
+  });
+
+  renderAll(); showState();
+})();
+</script>
+{% endif %}
+{% endblock %}

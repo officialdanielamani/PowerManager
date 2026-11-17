@@ -255,3 +255,17 @@ def generate(o):
         notes.append('New rbAmp modules all answer at 0x50: give each extra module its address once with '
                      '"rbamp addr 0x50 0x51" in the Serial Monitor (only that module connected).')
     return t, [], notes
+
+
+def from_profile(profile):
+    """A hardware profile (docs/protocol.md §12) in the shape of the generator form: the meter's current wiring."""
+    drv = {"mcp23017": "RELAY_MCP23017", "xl9535": "RELAY_XL9535", "pcf8574": "RELAY_PCF8574", "gpio": "RELAY_GPIO"}
+    clamp = {0: "SCT_KEEP", 5: "SCT_5A", 10: "SCT_10A", 20: "SCT_20A", 30: "SCT_30A", 50: "SCT_50A", 60: "SCT_60A",
+             100: "SCT_100A"}
+    return {
+        "boards": [f"0x{a:02X}" for a in profile.get("boards") or []],
+        "relays": [{"driver": drv.get(r.get("drv"), "RELAY_XL9535"), "addr": f"0x{int(r.get('addr') or 0):02X}" if r.get("addr") else "",
+                    "n": r.get("n"), "high": bool(r.get("hi"))} for r in profile.get("relays") or []],
+        "channels": [{"board": c.get("b"), "input": c.get("i"), "clamp": clamp.get(c.get("a"), "SCT_30A"), "relay": c.get("r")}
+                     for c in profile.get("ch") or []],
+    }

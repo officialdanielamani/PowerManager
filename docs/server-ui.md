@@ -272,3 +272,31 @@ meters: **Tare**), **AUX relays** (when the meter has them), **Data**, **Users**
 bar at the bottom saves every tab at once; Connection has its own *Send to meter* buttons. The page remembers the
 last tab, and a field the browser refuses opens its tab. A meter on firmware older than 1.0.0 shows a warning
 that it must be updated.
+
+
+## Firmware → Update Device I/O (hardware profile of an rbAmp meter)
+
+Admin, and a manager for their own meters (a viewer gets 403). Reached from the Firmware page, next to **Generate
+config.h**. Needs a multi-channel meter with firmware 1.1.0 or newer (`caps.hw_cfg`); older meters show a hint.
+Protocol, rollback and rules: [protocol.md §12](protocol.md).
+
+1. **Select meter**: the multi-channel meters the user manages.
+2. **Status line**: Online / Offline and the profile state: *Compiled default* (nothing sent yet), *Waiting* (queued, e.g. offline),
+   *Restart pending* with a countdown and **Cancel restart**, *Checking* (restarted, confirming), *Active* (v N), *Rolled back*
+   (with the reason, e.g. `no_reply 0x51`), *Rejected* (the meter refused it). The page polls every 2.5 s.
+3. **rbAmp boards**: one address (0x50–0x57) per module, board 1 first. **Relay boards**: type (MCP23017, XL9535 / TCA9535,
+   PCF8574 / PCF8574A, ESP32 pins), address, outputs used, active high; the relay numbers of each row are shown.
+   **Channels**: board, input 1–7, clamp (5 … 100 A or *Keep*), relay (none or a relay number); relays no channel uses become
+   AUX relays (listed under the table).
+4. **Scan Address**: the meter lists every I2C address that answers; rbAmp modules are confirmed, other addresses are labelled by
+   range. The rows above then show *found / not found* badges. Needs the meter online.
+5. **Update Clamp Model**: enabled when only clamp models differ from what the meter uses; applied at once, no restart.
+   **Save & Apply**: enabled when anything else changed; restarts the meter after the delay (default 60 s, 10–600). Running
+   sessions end (reason `hw_change`), relays go OFF. If a part does not answer, the meter rolls back by itself.
+   A change in progress blocks both buttons. Errors (the rules of the protocol) are listed above the buttons; an AUX relay
+   that the new profile removes must be cleared first.
+6. **Give an rbAmp module a new address** (after a scan): connect only that module, pick its current and a free address, **Set
+   address**. Refused while a session runs or if the new address is used.
+
+**Generate config.h** has *Start from the hardware of a meter*: fills the rbAmp boards, relay boards and channels with what the
+meter uses now, so a re-flash keeps changes made here.

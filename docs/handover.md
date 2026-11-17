@@ -17,11 +17,11 @@ For whoever takes the project over. Read this first, then `architecture.md` and 
 
 | Area | State |
 |---|---|
-| Server logic | Automated tests (`server/tests`, 138 tests) + simulated meters (`server/tools/sim_meter*.py`) |
+| Server logic | Automated tests (`server/tests`, 148 tests) + simulated meters (`server/tools/sim_meter*.py`) |
 | Server UI | Checked by hand / with a headless browser during development; no automated browser tests in the repo |
 | Firmware build | Both sketches and the variants in `firmware/tools/build.sh` compile on Arduino-ESP32 3.3.5 |
 | AUX automation | PC test against the real `auxrelay.cpp` (`firmware/tools/auxrelay_test`) |
-| Hardware profile (rbAmp) | Server: tests + simulator (`sim_meter_mc.py`). Firmware: PC test of the real `hwprofile.cpp` (rules, JSON, live / restart / confirm / rollback / crash loop, `firmware/tools/hwprofile_test`); the rest of the firmware change was only syntax-checked on a PC, **the ESP32 build has to be run by CI / arduino-cli** |
+| Hardware profile (rbAmp) | Server: tests (incl. the pages and their access rules), a headless-browser run of the page against the simulator + simulator (`sim_meter_mc.py`). Firmware: PC test of the real `hwprofile.cpp` (rules, JSON, live / restart / confirm / rollback / crash loop, `firmware/tools/hwprofile_test`); the rest of the firmware change was only syntax-checked on a PC, **the ESP32 build has to be run by CI / arduino-cli** |
 | MQTT link | PC test: the firmware's `mqttlink.cpp` + a real broker + the server bridge (`firmware/tools/mqttlink_test`) |
 | Basic metering, relays, sessions on real meters | Used on real hardware by the project owner during development (earlier firmware versions) |
 | **Not yet tried on real hardware** | hardware profile from the server (I2C scan, rbAmp address, live clamp change, restart + confirm + rollback), 16 MB partition table (NVS contents after the change), MQTT link (also through Cloudflare / TLS), backup Wi-Fi switching, UPS input, battery % event, AUX schedules by date and the newer event sources, changing Wi-Fi from the server, firmware 1.0.0 as a whole after the legacy clean-up |

@@ -166,7 +166,7 @@ def next_ver(device):
 
 def submit(device, profile, user=None, mode=None, delay_s=DELAY_DEFAULT):
     """Validate a wanted profile and send it. mode: None = decide, "live" = clamp models only (refused when more
-    changed). Returns (command, errors)."""
+    changed), "reboot" = always restart. Returns (command, errors)."""
     if not (device.caps or {}).get("hw_cfg"):
         return None, ["This meter's firmware does not support hardware profiles"]
     errors = validate(profile, (device.caps or {}).get("hw_limits"))
@@ -177,7 +177,7 @@ def submit(device, profile, user=None, mode=None, delay_s=DELAY_DEFAULT):
     if errors:
         return None, errors
     cur = (device.hw_current or {})
-    decided = change_mode(cur, prof)
+    decided = "reboot" if mode == "reboot" else change_mode(cur, prof)
     if mode == "live" and decided != "live":
         return None, ["More than the clamp models changed: use Save & Apply (reboot)"]
     if cur and {k: cur.get(k) for k in ("boards", "relays", "ch")} == prof and device.hw_state in ("active", ""):
@@ -332,3 +332,16 @@ def on_event(device, ev):
         notify.notify(device, "meter_status",
                       f"Hardware profile v{ver if ver is not None else '?'} rolled back: {reason}. "
                       "The meter uses its previous profile")
+
+
+def view(device):
+    """State for the Update Device I/O page."""
+    caps = device.caps or {}
+    due = None
+    if device.hw_state == "pending" and device.hw_due_at:
+        due = max(0, device.hw_due_at - now())
+    return {
+        "hw_cfg": bool(caps.get("hw_cfg")), "fw": device.fw, "state": device.hw_state or "",
+        "reason": device.hw_reason, "ver": device.hw_ver, "active_ver": device.hw_active_ver, "due_in": due,
+        "current": device.hw_current or {}, "wanted": device.hw_profile or {},
+    }

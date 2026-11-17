@@ -42,10 +42,11 @@ def create_app(overrides=None):
     login_manager.login_message_category = "warning"
 
     from . import models
-    from .routes import auth, device_api, main, meters, settings_routes
+    from .routes import auth, device_api, hardware, main, meters, settings_routes
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(main.bp)
+    app.register_blueprint(hardware.bp)
     app.register_blueprint(meters.bp)
     app.register_blueprint(settings_routes.bp)
     app.register_blueprint(device_api.bp)

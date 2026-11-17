@@ -19,6 +19,15 @@
         </div>
       </div>
 
+      {% if known_meters %}
+      <div class="row g-2 mt-1 g-rbamp"><div class="col-md-10">
+        <label class="form-label small mb-1" for="gFrom">Start from the hardware of a meter</label>
+        <select class="form-select form-select-sm" id="gFrom"><option value="">— the form below —</option>
+          {% for m in known_meters %}<option value="{{ m.id }}">{{ m.name }} ({{ m.device_id }})</option>{% endfor %}</select>
+        <div class="form-text">Fills the rbAmp boards, relay boards and channels with what the meter uses now (including changes sent from
+          <em>Update Device I/O</em>), so a re-flash keeps them. Pins and options stay as below.</div></div></div>
+      {% endif %}
+
       {# ---------------- power sensor #}
       <h2 class="h6 mt-4 border-bottom pb-1">Power sensor</h2>
       <div class="g-rbamp">
@@ -193,6 +202,18 @@
   });
   $('gAddRelay').addEventListener('click', function () { addRelay('RELAY_MCP23017', '0x2' + Math.min(document.querySelectorAll('#gRelays tr').length, 7), 8, true); renumber(); });
   $('gAddSht').addEventListener('click', function () { addSht('SHT_3X', '0x44'); });
+  if ($('gFrom')) $('gFrom').addEventListener('change', function () {
+    var pk = this.value; if (!pk) return;
+    fetch("{{ url_for('main.firmware_config_page') }}/from-meter/" + pk, {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (p) {
+      if (!p.ok) { PM.toast(p.error || 'Not available', 'warning'); return; }
+      $('gMeter').value = 'rbamp';
+      $('gBoards').innerHTML = ''; $('gChannels').innerHTML = ''; $('gRelays').innerHTML = '';
+      p.boards.forEach(addBoard);
+      p.relays.forEach(function (r) { addRelay(r.driver, r.addr, r.n, r.high); });
+      p.channels.forEach(function (c) { addChannel(c.board, c.input, c.clamp, c.relay); });
+      lastMeter = 'rbamp'; renumber(); PM.toast('Filled from ' + p.name, 'success');
+    });
+  });
   var lastMeter = null;
   $('gMeter').addEventListener('change', function () {  // sensible relays for the chosen meter
     var m = $('gMeter').value, pz = m !== 'rbamp';

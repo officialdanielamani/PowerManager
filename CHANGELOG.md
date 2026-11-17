@@ -10,7 +10,10 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 - Server: hardware profile of rbAmp meters (rbAmp addresses, relay boards, channel table with clamp models) with
   live clamp change, delayed reboot, rollback, I2C scan and rbAmp address commands (`docs/protocol.md` §12,
   `services/hwprofile.py`); AUX event source "Wait for reboot"; a channel count change caused by a profile no longer
-  archives the meter. Up to 16 channels. `sim_meter_mc.py` simulates it (`--bus`). The pages follow in a later step.
+  archives the meter. Up to 16 channels. `sim_meter_mc.py` simulates it (`--bus`).
+- Firmware → **Update Device I/O** page (select meter, rbAmp boards, relay boards, channel table with clamp dropdown, Scan
+  Address, Update Clamp Model, Save & Apply with countdown / Cancel / rollback status, rbAmp address wizard) and
+  **Generate config.h → Start from the hardware of a meter**. See `docs/server-ui.md`.
 - rbAmp firmware 1.1.0: run-time hardware profile (`src/hwprofile.*`, `hwmap.h`, `relaymap.h`): stored in NVS, delayed
   restart (AUX event "Wait for reboot"), confirm check, rollback and crash-loop protection, live clamp change, commands
   `i2c_scan`, `rbamp_addr`, `hw_profile`, `hw_cancel`; sessions end with reason `hw_change` before the restart.

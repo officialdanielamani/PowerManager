@@ -275,7 +275,11 @@ def firmware_config_page():
         abort(403)
     from ..services import cfggen
     meter = request.args.get("meter")
-    return render_template("firmware_config.html", gen=cfggen, meter=meter if meter in cfggen.METERS else "rbamp")
+    # meters whose hardware profile is known: the form can start from it
+    known = [d for d in access.managed_devices(current_user).all()
+             if d.is_mc and ((d.hw_current or {}).get("ch") or (d.hw_profile or {}).get("ch"))]
+    return render_template("firmware_config.html", gen=cfggen, meter=meter if meter in cfggen.METERS else "rbamp",
+                           known_meters=known)
 
 
 @bp.post("/firmware/config")
