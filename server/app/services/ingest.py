@@ -5,7 +5,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..extensions import db
 from ..models import Channel, Device, Event, Incident, Measurement, RollupDirty, Session, Temperature, now
-from . import commands, devconfig, incidents, notify, settings
+from . import commands, devconfig, hwprofile, incidents, notify, settings
 
 log = logging.getLogger(__name__)
 
@@ -164,7 +164,11 @@ def h_hello(conn, device, msg):
         device.proto = 1
     if isinstance(msg.get("caps"), dict):
         new_sig = devconfig.hw_signature(msg["caps"])
-        if device.hw_sig and new_sig and new_sig != device.hw_sig:
+        # A new channel count that comes from a hardware profile sent by the server is not other hardware.
+        same_kind = bool(device.hw_sig and new_sig and "-mc" in device.hw_sig and "-mc" in new_sig
+                         and device.hw_sig.split("-")[0] == new_sig.split("-")[0] and msg["caps"].get("hw_cfg"))
+        profile_change = hwprofile.profile_change_expected(device, msg.get("hwp"), same_kind)
+        if device.hw_sig and new_sig and new_sig != device.hw_sig and not profile_change:
             # Other hardware / firmware type on this ESP32: archive the old history, start clean.
             from . import lifecycle
             lifecycle.hardware_changed(device, msg["caps"], new_sig)
@@ -185,6 +189,7 @@ def h_hello(conn, device, msg):
     if isinstance(state, dict):
         _apply_state(device, state)
         _reconcile_incidents(device, state)
+    hwprofile.on_hello(device, msg.get("hwp"))
     try:
         dev_ver = int(msg.get("cfg_ver", 0))
     except (TypeError, ValueError):
@@ -465,7 +470,14 @@ def h_info(conn, device, msg):
 
 
 def h_cmd_ack(conn, device, msg):
-    commands.ack(device, msg.get("ref"), msg.get("ok"), msg.get("err"))
+    res = msg.get("res") if isinstance(msg.get("res"), dict) else None
+    if res is not None and msg.get("detail"):
+        res = dict(res, detail=str(msg["detail"])[:80])
+    elif res is None and msg.get("detail"):
+        res = {"detail": str(msg["detail"])[:80]}
+    cmd = commands.ack(device, msg.get("ref"), msg.get("ok"), msg.get("err"), res)
+    if cmd is not None and cmd.c in ("hw_profile", "hw_cancel"):
+        hwprofile.on_ack(device, cmd, msg.get("ok"), msg.get("err"), res)
 
 
 HANDLERS = {
@@ -600,6 +612,8 @@ def process_event(device, ev):
     elif e == "trip_reset":
         incidents.close_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
+    elif e in ("hw_reboot_pending", "hw_active", "hw_rollback"):
+        hwprofile.on_event(device, ev)
     elif e == "relay_error":
         notify.notify(device, "sensor_error", "Relay board not answering on I2C: the relays cannot be switched")
     elif e == "relay_ok":

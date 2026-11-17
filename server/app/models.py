@@ -140,6 +140,16 @@ class Device(db.Model):
     # Connection choices made on the server: {"mqtt": "server" | "off" | "custom", host, port, tls, path,
     # user, pass, prefix} (custom broker). The meter gets them with the set_mqtt command.
     net = db.Column(db.JSON, nullable=False, default=dict)
+    # Hardware profile (docs/protocol.md §12): rbAmp addresses, relay boards, channel table. hw_profile = wanted
+    # (hw_ver = its version), hw_current = what the meter reported it is using, hw_state = queued | pending |
+    # trial | active | rolled_back | rejected | "" (nothing sent yet), hw_due_at = reboot countdown end.
+    hw_profile = db.Column(db.JSON, nullable=False, default=dict)
+    hw_current = db.Column(db.JSON, nullable=False, default=dict)
+    hw_ver = db.Column(db.Integer, nullable=False, default=0)
+    hw_active_ver = db.Column(db.Integer, nullable=False, default=0)
+    hw_state = db.Column(db.String(16), nullable=False, default="")
+    hw_reason = db.Column(db.String(100))
+    hw_due_at = db.Column(db.Integer)
     # Last answer to "Get meter info".
     last_info = db.Column(db.JSON, nullable=False, default=dict)
     last_info_at = db.Column(db.Integer)
@@ -343,4 +353,5 @@ class Command(db.Model):
     acked_at = db.Column(db.Integer)
     ok = db.Column(db.Boolean)
     err = db.Column(db.String(40))
+    res = db.Column(db.JSON)  # result data of the acknowledgement (i2c_scan, hw_profile ...)
     cancelled = db.Column(db.Boolean, nullable=False, default=False)

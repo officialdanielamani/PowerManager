@@ -70,7 +70,7 @@ SESSION_MODES = ("none", "duration", "daily")
 
 def channel_count(device):
     try:
-        return max(1, min(8, int((device.caps or {}).get("channels", 1))))
+        return max(1, min(16, int((device.caps or {}).get("channels", 1))))
     except (TypeError, ValueError):
         return 1
 

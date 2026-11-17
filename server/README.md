@@ -86,7 +86,8 @@ While it runs, type `trip`, `tamper_open`, `tamper_close`, `ac_lost`, `ac_restor
 Use `--state other.json` to simulate several meters at once.
 
 Multi-channel meter: `python tools/sim_meter_mc.py --state mc1.json pair --server http://localhost:5000 --code ABCD-EFGH --channels 2`,
-then `python tools/sim_meter_mc.py --state mc1.json run --load 600,1200`. Both simulators use the WebSocket link.
+then `python tools/sim_meter_mc.py --state mc1.json run --load 600,1200`. Both simulators use the WebSocket link. `sim_meter_mc.py` also answers the hardware profile commands (I2C scan,
+rbAmp address, profile change with reboot and rollback); `--bus 0x50,0x20` sets which I2C addresses "answer".
 
 ## Layout
 

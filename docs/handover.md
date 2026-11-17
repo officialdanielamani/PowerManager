@@ -17,7 +17,7 @@ For whoever takes the project over. Read this first, then `architecture.md` and 
 
 | Area | State |
 |---|---|
-| Server logic | Automated tests (`server/tests`, 124 tests) + simulated meters (`server/tools/sim_meter*.py`) |
+| Server logic | Automated tests (`server/tests`, 138 tests) + simulated meters (`server/tools/sim_meter*.py`) |
 | Server UI | Checked by hand / with a headless browser during development; no automated browser tests in the repo |
 | Firmware build | Both sketches and the variants in `firmware/tools/build.sh` compile on Arduino-ESP32 3.3.5 |
 | AUX automation | PC test against the real `auxrelay.cpp` (`firmware/tools/auxrelay_test`) |

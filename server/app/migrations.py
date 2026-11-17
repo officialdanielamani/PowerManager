@@ -96,6 +96,13 @@ def run():
     # v0.10: MQTT link (per-meter connection choices)
     _add_column("device", "net JSON NOT NULL DEFAULT '{}'")
 
+    # 1.1: hardware profile sent from the server, command results
+    for ddl in ("hw_profile JSON NOT NULL DEFAULT '{}'", "hw_current JSON NOT NULL DEFAULT '{}'",
+                "hw_ver INTEGER NOT NULL DEFAULT 0", "hw_active_ver INTEGER NOT NULL DEFAULT 0",
+                "hw_state VARCHAR(16) NOT NULL DEFAULT ''", "hw_reason VARCHAR(100)", "hw_due_at INTEGER"):
+        _add_column("device", ddl)
+    _add_column("command", "res JSON")
+
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:
         # Old rules were per meter; give them to the admin, then rebuild with the new key.

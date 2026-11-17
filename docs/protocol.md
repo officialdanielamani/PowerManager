@@ -385,7 +385,7 @@ meter's Configuration page and the Firmware page show that it must be updated. W
 
 ## 12. Hardware profile (`hello.caps.hw_cfg`) — design, firmware / server 1.1.0
 
-Status: **specification, not implemented yet.** Only the rbAmp sketch (`PowerMeterRBAmp`) takes part; the PZEM
+Status: **server side and simulator implemented** (`services/hwprofile.py`, `tools/sim_meter_mc.py`); **firmware not yet.** Only the rbAmp sketch (`PowerMeterRBAmp`) takes part; the PZEM
 sketch keeps its compile-time layout until a later version.
 
 What the wiring looks like (rbAmp modules, relay boards, which input / clamp / relay each channel uses) can be
@@ -418,7 +418,7 @@ channel uses are AUX relays as before.
 ### 12.2 Capability and state
 
 - `hello.caps.hw_cfg` = profile format version (`1`). The server offers **Update Device I/O** only when it is present.
-- `hello.hwp` = `{"ver": 7, "state": "active"}`. `state` ∈ `default` (compiled tables, nothing sent yet), `active`
+- `hello.hwp` = `{"ver": 7, "state": "active", "profile": {…}}` (the profile in use, format 12.1, without `ver`). `state` ∈ `default` (compiled tables, nothing sent yet), `active`
   (a server profile in use), `trial` (booted with a new profile, not confirmed yet), `pending` (stored, reboot
   countdown running).
 
@@ -431,7 +431,7 @@ channel uses are AUX relays as before.
 | `i2c_scan` | – | Probe addresses 0x08–0x77 and answer with `res: {"found": [32, 80, ...], "rbamp": [80]}` in `cmd_ack`. Addresses that identify as rbAmp (`HW_VARIANT` register) are listed in `rbamp`. The control loop waits for the bus meanwhile (the existing I²C lock) |
 | `rbamp_addr` | `from`, `to` | Change one module's address (two-phase commit as `rbamp addr` on serial). Preconditions checked by the meter: `from` answers and identifies as rbAmp, `to` (0x50–0x57) does not answer, no session is running (`err: "busy"`). Afterwards the meter re-probes `to` and answers `res: {"ok": true}` or `err: "no_reply"` |
 
-All are answered with `cmd_ack`; `hw_profile` adds `res: {"state": "live"|"pending", "in_s": 60}`. Commands for an
+All are answered with `cmd_ack` (extra fields `res` = result object, `detail` = short text for an error); `hw_profile` adds `res: {"state": "live"|"pending", "in_s": 60}`. Commands for an
 offline meter are queued like other commands, except that a newer `hw_profile` replaces an older queued one and
 `i2c_scan` / `rbamp_addr` are dropped (they need someone watching).
 
@@ -464,7 +464,9 @@ offline meter are queued like other commands, except that a newer `hw_profile` r
   A profile is small (below 300 bytes as stored).
 - Factory reset and a `FW_TYPE` change clear all of them (back to the default profile). The server keeps its
   profile and re-sends it when `hello.hwp.state` is `default` and the server's profile is newer than `ver` 0.
-- `hello` / `info` report `hwp`; `info` also lists the profile in use.
+- `hello` reports `hwp` (with the profile in use, so the server can pre-fill its page); `info` lists it too.
+- `hello.caps.hw_limits` (optional) = limits of this build the server cannot know, e.g. `{"gpio": 2}` (relay pins in `RELAY_GPIO_PINS`).
+- A new channel count that arrives in `hello` together with `hwp.state` `trial` / `active` / `pending` (or `default` right after a rollback) is **not** treated as other hardware: the meter is not archived (see multichannel.md, "Changing the hardware on a meter").
 
 ### 12.7 Effects on data
 

@@ -4,7 +4,8 @@ from ..models import Command, now
 from . import hub
 
 KNOWN = {"relay", "aux", "renew", "end", "send_now", "reset_trip", "get_state", "remove", "disable", "enable", "get_info",
-         "set_mqtt", "set_wifi"}
+         "set_mqtt", "set_wifi", "hw_profile", "hw_cancel", "i2c_scan", "rbamp_addr"}
+NEEDS_WATCHER = {"i2c_scan", "rbamp_addr"}  # only useful while someone waits for the answer: never queued
 SECRET = {"set_mqtt", "set_wifi"}  # carry a password: wiped from the stored command once it is acknowledged
 QUEUE_MAX_AGE_S = 7 * 86400
 
@@ -67,8 +68,12 @@ def issue(device, c, params=None, user=None):
         if reason:
             return None, reason
     online = hub.is_online(device.id)
-    if c == "send_now" and not online:
+    if (c == "send_now" or c in NEEDS_WATCHER) and not online:
         return None, "offline"
+    if c in ("hw_profile", "hw_cancel"):  # only the newest hardware profile matters
+        for old in Command.query.filter_by(device_fk=device.id, sent_at=None, cancelled=False).filter(
+                Command.c.in_(("hw_profile", "hw_cancel"))).all():
+            old.cancelled = True
     if c == "relay":
         # Only the latest relay command matters.
         for old in Command.query.filter_by(device_fk=device.id, c="relay", sent_at=None, cancelled=False).all():
@@ -102,14 +107,14 @@ def flush_pending(device, conn):
                        Command.created_at >= now() - QUEUE_MAX_AGE_S)
                .order_by(Command.id).all())
     for cmd in pending:
-        if cmd.c == "send_now":
+        if cmd.c == "send_now" or cmd.c in NEEDS_WATCHER:
             cmd.cancelled = True
             continue
         conn.send(_message(cmd))
         cmd.sent_at = now()
 
 
-def ack(device, ref, ok, err=None):
+def ack(device, ref, ok, err=None, res=None):
     cmd = db.session.get(Command, ref) if isinstance(ref, int) else None
     if cmd is None or cmd.device_fk != device.id:
         return None
@@ -118,4 +123,6 @@ def ack(device, ref, ok, err=None):
     if cmd.c in SECRET:
         cmd.params = _scrub(cmd.params)
     cmd.err = (err or None) and str(err)[:40]
+    if isinstance(res, dict):
+        cmd.res = res
     return cmd
