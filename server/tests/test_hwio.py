@@ -139,7 +139,7 @@ def test_generator_starts_from_the_meter(app, admin, mc):
     j = admin.get(f"/firmware/config/from-meter/{mc}").get_json()
     assert j["boards"] == ["0x50", "0x51"]
     assert j["relays"] == [{"driver": "RELAY_MCP23017", "addr": "0x21", "n": 8, "high": True}]
-    assert j["channels"][0] == {"board": 1, "input": 1, "clamp": "SCT_10A", "relay": 1}
+    assert j["channels"][0] == {"board": 1, "input": 1, "clamp": "SCT_10A", "relay_board": 1, "relay_out": 1}
     assert j["channels"][5]["clamp"] == "SCT_100A" and len(j["channels"]) == 7
     html = admin.get("/firmware/config").get_data(as_text=True)
     assert 'id="gFrom"' in html and "Start from the hardware of a meter" in html
@@ -159,3 +159,39 @@ def test_no_profile_known_yet(app, admin):
     r = admin.get(f"/firmware/config/from-meter/{pk}")
     assert r.status_code == 404 and not r.get_json()["ok"]
     assert 'id="gFrom"' not in admin.get("/firmware/config").get_data(as_text=True)
+
+
+def test_generator_relay_boards_a_and_b(app, admin):
+    """Channels pick a relay board (A, B ...) and an output on it; config.h gets the 5-column CHANNELS table."""
+    from app.services import cfggen
+    form = {"meter": "rbamp", "pin_sda": 8, "pin_scl": 9, "pin_led": 48, "pin_drdy": 5, "drdy": True, "tamper": True, "pin_tamper": 4,
+            "net_ws": True, "net_mqtt": True, "mesh": True, "ap_pass_id": True, "boards": ["0x50", "0x51"],
+            "relays": [{"driver": "RELAY_XL9535", "addr": "0x20", "n": 2, "high": True},
+                       {"driver": "RELAY_MCP23017", "addr": "0x21", "n": 8, "high": True}],
+            "channels": [{"board": 1, "input": 1, "clamp": "SCT_100A", "relay_board": 1, "relay_out": 2},
+                         {"board": 2, "input": 1, "clamp": "SCT_30A", "relay_board": 2, "relay_out": 8},
+                         {"board": 2, "input": 2, "clamp": "SCT_30A", "relay_board": 0, "relay_out": 0}]}
+    text, errors, notes = cfggen.generate(form)
+    assert not errors
+    assert "{  1,     1,     SCT_100A, 1,           2 },   /* CH1 */" in text
+    assert "{  2,     1,     SCT_30A,  2,           8 },   /* CH2 */" in text and "{  2,     2,     SCT_30A,  0,           0 }" in text
+    assert any("relay 2 = CH1" in n and "relay 10 = CH2" in n for n in notes)
+    for bad, msg in (({"relay_board": 3, "relay_out": 1}, "relay board"), ({"relay_board": 1, "relay_out": 3}, "relay output"),
+                     ({"relay_board": 1, "relay_out": 0}, "choose the output"), ({"relay_board": 1, "relay_out": 2}, "already used")):
+        f = copy.deepcopy(form)
+        f["channels"][2].update(bad)
+        assert any(msg in e for e in cfggen.generate(f)[1]), (bad, msg)
+    # the generated file still has the shape the firmware's CHANNELS table expects
+    import re
+    assert re.search(r"#define CHANNELS \{ \\\n  /\* board  input  clamp     relay board  output \*/ \\\n", text)
+
+
+def test_old_firmware_is_outdated(app):
+    from app.services import devconfig
+    assert devconfig.MIN_FW == (1, 1, 0)
+
+    class D:
+        fw = "1.0.0"
+    assert devconfig.fw_outdated(D)
+    D.fw = "1.1.0"
+    assert not devconfig.fw_outdated(D)

@@ -379,7 +379,8 @@ Config `aux[i]`:
 
 ## 11. Supported firmware
 
-The server works with meter firmware **1.0.0 or newer** (both sketches). Older firmware is not supported: the
+The server works with meter firmware **1.1.0 or newer** (both sketches; the hardware profile of §12 uses relay board +
+output for a channel's relay, which older firmware does not know). Older firmware is not supported: the
 meter's Configuration page and the Firmware page show that it must be updated. What a meter can do is taken from
 `hello.caps` (parts switched on in its `config.h`), not from its version number.
 
@@ -391,7 +392,9 @@ sketch keeps its compile-time layout until a later version.
 What the wiring looks like (rbAmp modules, relay boards, which input / clamp / relay each channel uses) can be
 changed from the server without recompiling. The compiled tables of `config.h` (`RBAMP_BOARDS`, `RELAY_BOARDS`,
 `CHANNELS`) become the **default profile**. Pins, enable flags and the maximums (`MC_MAX_CH`, 8 rbAmp boards,
-32 relays, 8 relay-table entries) stay compile-time: they follow the hardware design.
+32 relays, 8 relay-table entries) stay compile-time. A channel's relay is a relay board and an output on it
+("Board A relay 2"), not a number across all boards; the meter derives the relay number across boards
+(board A first) that AUX relays, `state.relay` and the AUX events keep using: they follow the hardware design.
 
 ### 12.1 Profile document
 
@@ -399,9 +402,9 @@ changed from the server without recompiling. The compiled tables of `config.h` (
 {"ver": 7,
  "boards": [80, 81],
  "relays": [{"drv": "mcp23017", "addr": 33, "n": 8, "hi": 1}],
- "ch": [{"b": 1, "i": 1, "a": 10, "r": 1},
-        {"b": 1, "i": 2, "a": 10, "r": 2},
-        {"b": 2, "i": 1, "a": 30, "r": 3}]}
+ "ch": [{"b": 1, "i": 1, "a": 10, "rb": 1, "ro": 1},
+        {"b": 1, "i": 2, "a": 10, "rb": 1, "ro": 2},
+        {"b": 2, "i": 1, "a": 30, "rb": 1, "ro": 3}]}
 ```
 
 | Field | Meaning | Rules (same on server and meter) |
@@ -409,7 +412,7 @@ changed from the server without recompiling. The compiled tables of `config.h` (
 | `ver` | Profile version, raised by the server on every change | integer ≥ 1 |
 | `boards` | I²C address of each rbAmp module, board 1 first | 1–8 entries, each 0x50–0x57, no duplicates |
 | `relays[]` | One entry per relay board (at most 8), relays are numbered across the entries | `drv`: `mcp23017` / `xl9535` (≤ 16), `pcf8574` (≤ 8), `gpio` (≤ pins listed in `RELAY_GPIO_PINS`); `addr`: 0x20–0x27 (`pcf8574` also 0x38–0x3F, `gpio`: 0); `hi`: 1 = active high; at most 32 relays in total; no two entries on the same address |
-| `ch[]` | One entry per measured channel, CH1 first | 1–`MC_MAX_CH` entries; `b` = board number (1..number of boards), `i` = input 1..7, `a` = clamp model in amps (`0` keep, 5, 10, 20, 30, 50, 60, 100), `r` = relay number (0 = none, max = total relays); no two channels on the same `b`+`i`, no relay used twice |
+| `ch[]` | One entry per measured channel, CH1 first | 1–`MC_MAX_CH` entries; `b` = board number (1..number of boards), `i` = input 1..7, `a` = clamp model in amps (`0` keep, 5, 10, 20, 30, 50, 60, 100), `rb` = relay board (1 = first entry of `relays` = "Board A", 2 = "Board B" …; 0 = no relay), `ro` = output on that board (1..its `n`; 0 when `rb` is 0); no two channels on the same `b`+`i`, no (`rb`, `ro`) used twice |
 
 These are the rules of the `static_assert`s in `hwmap.h` / `relaymap.h`, moved to run time. They are written once
 (firmware: one validator function that the PC tests also run; server: `services/validation.py`). Relays that no

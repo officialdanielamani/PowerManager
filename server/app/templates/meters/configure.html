@@ -322,7 +322,7 @@
       {% set ev = a.get('event') or {} %}
       <div class="border rounded p-2 mb-2 pm-aux" data-aux="{{ j }}">
         <div class="d-flex flex-wrap gap-2 align-items-center">
-          <span class="fw-semibold" style="min-width:110px">AUX{{ j + 1 }}{% if aux_relays.get(j) %} <span class="fw-normal small text-body-secondary">· relay {{ aux_relays.get(j) }}</span>{% endif %}</span>
+          <span class="fw-semibold" style="min-width:110px">AUX{{ j + 1 }}{% if aux_relays.get(j) %} <span class="fw-normal small text-body-secondary">· {{ aux_relays.get(j) }}</span>{% endif %}</span>
           <input class="form-control form-control-sm" style="max-width:200px" name="aux_name_{{ j }}" maxlength="20" placeholder="Name, e.g. Desk Lamp" value="{{ val('aux_name_' ~ j, a.get('name', '')) }}">
           <select class="form-select form-select-sm pm-aux-mode" style="max-width:220px" name="aux_mode_{{ j }}">
             {% for k, label in aux_modes.items() %}<option value="{{ k }}" {{ 'selected' if mode == k }}>{{ label }}</option>{% endfor %}

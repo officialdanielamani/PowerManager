@@ -100,7 +100,7 @@ def generate(o):
     t = _set(t, "PIN_LED", pin("pin_led", "PIN_LED", "LED pin"))
 
     # ---- relay outputs
-    rows, gpio_needed, total = [], 0, 0
+    rows, sizes, gpio_needed, total = [], [], 0, 0
     for k, r in enumerate(o.get("relays") or []):
         drv = r.get("driver")
         if drv not in DRIVERS:
@@ -116,6 +116,7 @@ def generate(o):
             addr = _int(r.get("addr", ""), lo, hi, f"{label}: I2C address", errors, lo)
             claim(addr, f"{label} ({DRIVERS[drv][0].split(' (')[0]})")
         rows.append("{%s, %s, %d, %d}" % (drv, f"0x{addr:02X}" if addr else "0", n, high))
+        sizes.append(n)
         total += n
     if total > 32:
         errors.append("At most 32 relays in total")
@@ -141,28 +142,32 @@ def generate(o):
             claim(a, f"rbAmp board {k + 1}")
         t = _set(t, "RBAMP_BOARDS", "{ " + ", ".join(f"0x{a:02X}" for a in addrs) + " }")
         t = _set(t, "PIN_DRDY", pin("pin_drdy", "PIN_DRDY", "rbAmp DRDY pin", -1) if _on(o, "drdy", True) else -1)
-        chans, seen = [], set()
+        chans, seen, seen_rl = [], set(), set()
         for k, c in enumerate(o.get("channels") or []):
             label = f"CH{k + 1}"
             b = _int(c.get("board", ""), 1, max(len(addrs), 1), f"{label}: board", errors, 1)
             inp = _int(c.get("input", ""), 1, 7, f"{label}: input", errors, 1)
             clamp = c.get("clamp") if c.get("clamp") in CLAMPS else "SCT_30A"
-            relay = _int(c.get("relay", "0") or "0", 0, max(total, 0), f"{label}: relay", errors, 0)
+            rb = _int(c.get("relay_board", "0") or "0", 0, len(sizes), f"{label}: relay board", errors, 0)
+            ro = _int(c.get("relay_out", "0") or "0", 0, sizes[rb - 1] if rb else 0, f"{label}: relay output", errors, 0)
+            if rb and not ro:
+                errors.append(f"{label}: choose the output on relay board {chr(64 + rb)}")
             if (b, inp) in seen:
                 errors.append(f"{label}: board {b} input {inp} is already used by another channel")
             seen.add((b, inp))
-            if relay:
-                if relay in used:
-                    errors.append(f"{label}: relay {relay} is already used by {used[relay]}")
-                used[relay] = label
-            chans.append((b, inp, clamp, relay))
+            if rb and ro:
+                if (rb, ro) in seen_rl:
+                    errors.append(f"{label}: relay board {chr(64 + rb)} output {ro} is already used by another channel")
+                seen_rl.add((rb, ro))
+                used[sum(sizes[:rb - 1]) + ro] = f"{label} (board {chr(64 + rb)} output {ro})"
+            chans.append((b, inp, clamp, rb if ro else 0, ro))
         if not chans:
             errors.append("Add at least one channel")
         if len(chans) > 16:
             errors.append("At most 16 channels")
-        body = "#define CHANNELS { \\\n  /* board  input  clamp     relay */ \\\n"
-        for k, (b, inp, clamp, relay) in enumerate(chans):
-            body += "  {  %d,     %d,     %-9s %d },   /* CH%d */ \\\n" % (b, inp, clamp + ",", relay, k + 1)
+        body = "#define CHANNELS { \\\n  /* board  input  clamp     relay board  output */ \\\n"
+        for k, (b, inp, clamp, rb, ro) in enumerate(chans):
+            body += "  {  %d,     %d,     %-9s %d,           %d },   /* CH%d */ \\\n" % (b, inp, clamp + ",", rb, ro, k + 1)
         body += "}"
         pat = re.compile(r"^#define CHANNELS \{ \\\n(?:.*\\\n)*\}", re.M)
         if not pat.search(t):
@@ -266,6 +271,7 @@ def from_profile(profile):
         "boards": [f"0x{a:02X}" for a in profile.get("boards") or []],
         "relays": [{"driver": drv.get(r.get("drv"), "RELAY_XL9535"), "addr": f"0x{int(r.get('addr') or 0):02X}" if r.get("addr") else "",
                     "n": r.get("n"), "high": bool(r.get("hi"))} for r in profile.get("relays") or []],
-        "channels": [{"board": c.get("b"), "input": c.get("i"), "clamp": clamp.get(c.get("a"), "SCT_30A"), "relay": c.get("r")}
+        "channels": [{"board": c.get("b"), "input": c.get("i"), "clamp": clamp.get(c.get("a"), "SCT_30A"),
+                      "relay_board": c.get("rb"), "relay_out": c.get("ro")}
                      for c in profile.get("ch") or []],
     }

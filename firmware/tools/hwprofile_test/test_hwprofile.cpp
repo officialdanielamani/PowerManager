@@ -40,8 +40,8 @@ static hwp::Profile defaultProfile() {  // config.h: one rbAmp 0x50, XL9535 0x20
   p.nRelayBoards = 1;
   p.relay[0] = {HWP_DRV_XL9535, 0x20, 2, 1};
   p.nCh = 2;
-  p.ch[0] = {1, 1, 3, 1};  // SCT_30A = 3
-  p.ch[1] = {1, 2, 3, 2};
+  p.ch[0] = {1, 1, 3, 1, 1};  // board, input, SCT_30A = 3, relay board 1, output 1
+  p.ch[1] = {1, 2, 3, 1, 2};
   return p;
 }
 
@@ -58,7 +58,7 @@ static JsonDocument newProfileDoc(int ver, const char *mode, int delay = 0) {
   const int amps[] = {10, 10, 30, 30, 30, 100, 100};
   for (int i = 0; i < 7; i++) {
     JsonObject c = p["ch"].add<JsonObject>();
-    c["b"] = i < 3 ? 1 : 2; c["i"] = i < 3 ? i + 1 : i - 2; c["a"] = amps[i]; c["r"] = i + 1;
+    c["b"] = i < 3 ? 1 : 2; c["i"] = i < 3 ? i + 1 : i - 2; c["a"] = amps[i]; c["rb"] = 1; c["ro"] = i + 1;
   }
   return d;
 }
@@ -86,9 +86,12 @@ int main() {
   hwp::Profile q = p;
   q.addr[0] = 0x60; CHECK(!hwp::validate(q, 0, err, sizeof err));
   q = p; q.nBoards = 2; q.addr[1] = 0x50; CHECK(!hwp::validate(q, 0, err, sizeof err));
-  q = p; q.ch[1].relay = 1; CHECK(!hwp::validate(q, 0, err, sizeof err));       // relay used twice
+  q = p; q.ch[1].ro = 1; CHECK(!hwp::validate(q, 0, err, sizeof err));          // relay used twice
   q = p; q.ch[1].input = 1; CHECK(!hwp::validate(q, 0, err, sizeof err));       // input used twice
-  q = p; q.ch[0].relay = 3; CHECK(!hwp::validate(q, 0, err, sizeof err));       // only 2 relays
+  q = p; q.ch[0].ro = 3; CHECK(!hwp::validate(q, 0, err, sizeof err));          // the board has 2 outputs
+  q = p; q.ch[0].rb = 2; CHECK(!hwp::validate(q, 0, err, sizeof err));          // no second relay board
+  q = p; q.ch[0].rb = 0; CHECK(!hwp::validate(q, 0, err, sizeof err));          // no board but an output
+  q = p; q.ch[0].rb = 0; q.ch[0].ro = 0; CHECK(hwp::validate(q, 0, err, sizeof err));  // a channel without relay
   q = p; q.ch[0].clamp = 9; CHECK(!hwp::validate(q, 0, err, sizeof err));
   q = p; q.ch[0].input = 8; CHECK(!hwp::validate(q, 0, err, sizeof err));
   q = p; q.relay[0].address = 0x30; CHECK(!hwp::validate(q, 0, err, sizeof err));
@@ -122,8 +125,8 @@ int main() {
   lp["boards"].to<JsonArray>().add(0x50);
   JsonObject lr = lp["relays"].to<JsonArray>().add<JsonObject>();
   lr["drv"] = "xl9535"; lr["addr"] = 0x20; lr["n"] = 2; lr["hi"] = 1;
-  JsonObject c0 = lp["ch"].to<JsonArray>().add<JsonObject>(); c0["b"] = 1; c0["i"] = 1; c0["a"] = 100; c0["r"] = 1;
-  JsonObject c1 = lp["ch"].add<JsonObject>(); c1["b"] = 1; c1["i"] = 2; c1["a"] = 30; c1["r"] = 2;
+  JsonObject c0 = lp["ch"].to<JsonArray>().add<JsonObject>(); c0["b"] = 1; c0["i"] = 1; c0["a"] = 100; c0["rb"] = 1; c0["ro"] = 1;
+  JsonObject c1 = lp["ch"].add<JsonObject>(); c1["b"] = 1; c1["i"] = 2; c1["a"] = 30; c1["rb"] = 1; c1["ro"] = 2;
   const char *e = nullptr, *res = ""; char det[64]; int inS = -1;
   CHECK(call(live, e, det, res, inS) && !strcmp(res, "live") && clampApplies == 1);
   CHECK(hwp::active().ch[0].clamp == 5 && hwp::active().ver == 1 && hwp::state() == hwp::ST_ACTIVE);

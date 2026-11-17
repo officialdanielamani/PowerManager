@@ -41,8 +41,36 @@ def relay_total(profile):
 
 def aux_count(profile):
     """Relays that no channel uses: AUX relays (same rule as the firmware)."""
-    used = {c.get("r") for c in profile.get("ch") or [] if c.get("r")}
-    return sum(1 for r in range(1, relay_total(profile) + 1) if r not in used)
+    used = {(c.get("rb"), c.get("ro")) for c in profile.get("ch") or [] if c.get("rb")}
+    return relay_total(profile) - len(used)
+
+
+def board_letter(rb):
+    """Relay board 1, 2, 3 ... is shown as Board A, B, C ..."""
+    return chr(64 + rb)
+
+
+def relay_number(profile, rb, ro):
+    """(relay board, output) -> relay number across all boards (the number AUX relays and the meter use); 0 = none."""
+    if not rb:
+        return 0
+    return sum(r.get("n", 0) for r in (profile.get("relays") or [])[:rb - 1]) + ro
+
+
+def relay_label(profile, number):
+    """Relay number across all boards -> "Board B relay 3" (falls back to "relay N")."""
+    left = number
+    for k, r in enumerate(profile.get("relays") or [], 1):
+        if left <= r.get("n", 0):
+            return f"Board {board_letter(k)} relay {left}"
+        left -= r.get("n", 0)
+    return f"relay {number}"
+
+
+def aux_numbers(profile):
+    """Relay numbers (across all boards) of the AUX relays, in order."""
+    used = {relay_number(profile, c.get("rb"), c.get("ro")) for c in profile.get("ch") or [] if c.get("rb")}
+    return [r for r in range(1, relay_total(profile) + 1) if r not in used]
 
 
 def validate(profile, limits=None):
@@ -71,7 +99,9 @@ def validate(profile, limits=None):
         errors.append(f"Relay boards: at most {MAX_RELAY_BOARDS} entries")
         relays = relays[:MAX_RELAY_BOARDS]
     total, gpio, seen_r = 0, 0, set()
+    sizes = []  # outputs of each relay board (0 for an invalid entry), for the channel check
     for i, r in enumerate(relays, 1):
+        sizes.append(0)
         if not isinstance(r, dict) or r.get("drv") not in DRIVERS:
             errors.append(f"Relay board {i}: driver must be one of {', '.join(DRIVERS)}")
             continue
@@ -85,6 +115,7 @@ def validate(profile, limits=None):
         if n is None or not 1 <= n <= DRIVERS[drv]:
             errors.append(f"Relay board {i}: {DRIVER_LABELS[drv]} has 1 to {DRIVERS[drv]} outputs")
             continue
+        sizes[-1] = n
         if r.get("hi") not in (0, 1, True, False):
             errors.append(f"Relay board {i}: active level must be high or low")
         total += n
@@ -102,23 +133,27 @@ def validate(profile, limits=None):
         if not isinstance(c, dict):
             errors.append(f"CH{i}: invalid entry")
             continue
-        b, inp, a, rl = _int(c.get("b")), _int(c.get("i")), _int(c.get("a")), _int(c.get("r"))
+        b, inp, a, rb, ro = (_int(c.get(k)) for k in ("b", "i", "a", "rb", "ro"))
         if b is None or not 1 <= b <= max(len(boards), 1) or (boards and b > len(boards)):
             errors.append(f"CH{i}: board must be 1 to {len(boards)}")
         if inp is None or not 1 <= inp <= 7:
             errors.append(f"CH{i}: input must be 1 to 7")
         if a not in CLAMPS:
             errors.append(f"CH{i}: clamp model must be one of {', '.join(str(x) for x in CLAMPS if x)} A or keep")
-        if rl is None or not 0 <= rl <= total:
-            errors.append(f"CH{i}: relay must be 0 (none) to {total}")
+        if rb is None or ro is None or not 0 <= rb <= len(sizes):
+            errors.append(f"CH{i}: relay board must be 0 (none) to {len(sizes)}")
+        elif rb == 0 and ro != 0:
+            errors.append(f"CH{i}: choose a relay board for output {ro}, or leave both empty")
+        elif rb and not 1 <= ro <= sizes[rb - 1]:
+            errors.append(f"CH{i}: Board {board_letter(rb)} has outputs 1 to {sizes[rb - 1]}")
         if b is not None and inp is not None:
             if (b, inp) in seen_in:
                 errors.append(f"CH{i}: board {b} input {inp} is used twice")
             seen_in.add((b, inp))
-        if rl:
-            if rl in seen_rl:
-                errors.append(f"CH{i}: relay {rl} is used twice")
-            seen_rl.add(rl)
+        if rb:
+            if (rb, ro) in seen_rl:
+                errors.append(f"CH{i}: Board {board_letter(rb)} relay {ro} is used twice")
+            seen_rl.add((rb, ro))
     return errors
 
 
@@ -128,15 +163,15 @@ def normalize(profile):
         "boards": [int(a) for a in profile["boards"]],
         "relays": [{"drv": r["drv"], "addr": int(r["addr"]), "n": int(r["n"]), "hi": 1 if r.get("hi") else 0}
                    for r in profile["relays"]],
-        "ch": [{"b": int(c["b"]), "i": int(c["i"]), "a": int(c.get("a") or 0), "r": int(c.get("r") or 0)}
-               for c in profile["ch"]],
+        "ch": [{"b": int(c["b"]), "i": int(c["i"]), "a": int(c.get("a") or 0), "rb": int(c.get("rb") or 0),
+                "ro": int(c.get("ro") or 0)} for c in profile["ch"]],
     }
 
 
 def _structure(p):
     """Everything except the clamp models."""
     return (p.get("boards"), p.get("relays"),
-            [(c.get("b"), c.get("i"), c.get("r")) for c in p.get("ch") or []])
+            [(c.get("b"), c.get("i"), c.get("rb"), c.get("ro")) for c in p.get("ch") or []])
 
 
 def change_mode(current, wanted):

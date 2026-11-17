@@ -66,7 +66,7 @@ def cmd_pair(args):
 def default_profile(n):
     """What config.h compiled in: one rbAmp at 0x50, one XL9535 relay board at 0x20, channel k on input k, relay k."""
     return {"boards": [0x50], "relays": [{"drv": "xl9535", "addr": 0x20, "n": n, "hi": 1}],
-            "ch": [{"b": 1, "i": k + 1, "a": 30, "r": k + 1} for k in range(n)]}
+            "ch": [{"b": 1, "i": k + 1, "a": 30, "rb": 1, "ro": k + 1} for k in range(n)]}
 
 
 def validate_profile(p):
@@ -86,7 +86,7 @@ def caps(n, profile=None):
     if profile:
         chans = profile["ch"]
         total = sum(r["n"] for r in profile["relays"])
-        used = {c_["r"] for c_ in chans if c_["r"]}
+        used = {(c_["rb"], c_["ro"]) for c_ in chans if c_["rb"]}
         c.update(channels=len(chans), relays=len(used), aux=total - len(used),
                  ratings=[c_["a"] or 30 for c_ in chans], variant=f"UI{len(chans)}")
     return c
@@ -451,8 +451,8 @@ class MeterMC:
         prof, ver, mode = m.get("profile") or {}, m.get("ver"), m.get("mode")
         errors = validate_profile(prof)
         cur = self.hwp["profile"]
-        same_struct = ([prof.get("boards"), prof.get("relays"), [(c["b"], c["i"], c["r"]) for c in prof.get("ch", [])]] ==
-                       [cur["boards"], cur["relays"], [(c["b"], c["i"], c["r"]) for c in cur["ch"]]]) if not errors else False
+        same_struct = ([prof.get("boards"), prof.get("relays"), [(c["b"], c["i"], c["rb"], c["ro"]) for c in prof.get("ch", [])]] ==
+                       [cur["boards"], cur["relays"], [(c["b"], c["i"], c["rb"], c["ro"]) for c in cur["ch"]]]) if not errors else False
         if errors:
             self.ack(m, False, "invalid", detail=errors[0][:60])
         elif mode == "live" and not same_struct:

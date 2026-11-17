@@ -25,7 +25,7 @@ NOTIFY_TYPES = [
 NOTIFY_DEFAULT_ON = {"meter_status", "temp_high", "ups"}
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
-MIN_FW = (1, 0, 0)  # oldest meter firmware this server works with (both sketches)
+MIN_FW = (1, 1, 0)  # oldest meter firmware this server works with (both sketches)
 
 
 def fw_outdated(device):

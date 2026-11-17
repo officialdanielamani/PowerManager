@@ -27,7 +27,8 @@ struct Channel {
   uint8_t board;  // 1 = first rbAmp of the list
   uint8_t input;  // 1..7
   uint8_t clamp;  // SCT_* model code written to the module (0 = keep)
-  uint8_t relay;  // relay number (1 = first relay of the first relay board), 0 = none
+  uint8_t rb;     // relay board: 1 = first entry of the relay table, 0 = no relay
+  uint8_t ro;     // output on that board: 1..relays of the board (0 when rb is 0)
 };
 struct Profile {
   uint32_t ver = 0;  // 0 = the compiled default

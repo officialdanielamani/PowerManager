@@ -13,12 +13,13 @@ from .test_pairing import _code
 CAPS = {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": "UI2", "channels": 2, "relays": 2, "aux": 0,
         "voltage": True, "drdy": True, "amp_rating": 34.8, "ratings": [30, 30], "hw_cfg": 1}
 DEFAULT = {"boards": [0x50], "relays": [{"drv": "xl9535", "addr": 0x20, "n": 2, "hi": 1}],
-           "ch": [{"b": 1, "i": 1, "a": 30, "r": 1}, {"b": 1, "i": 2, "a": 30, "r": 2}]}
+           "ch": [{"b": 1, "i": 1, "a": 30, "rb": 1, "ro": 1}, {"b": 1, "i": 2, "a": 30, "rb": 1, "ro": 2}]}
 # the example of the design: 2 rbAmp boards, MCP23017 at 0x21 with 8 outputs, 7 channels
 NEW = {"boards": [0x50, 0x51], "relays": [{"drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}],
-       "ch": [{"b": 1, "i": 1, "a": 10, "r": 1}, {"b": 1, "i": 2, "a": 10, "r": 2}, {"b": 1, "i": 3, "a": 30, "r": 3},
-              {"b": 2, "i": 1, "a": 30, "r": 4}, {"b": 2, "i": 2, "a": 30, "r": 5}, {"b": 2, "i": 3, "a": 100, "r": 6},
-              {"b": 2, "i": 4, "a": 100, "r": 7}]}
+       "ch": [{"b": 1, "i": 1, "a": 10, "rb": 1, "ro": 1}, {"b": 1, "i": 2, "a": 10, "rb": 1, "ro": 2},
+              {"b": 1, "i": 3, "a": 30, "rb": 1, "ro": 3}, {"b": 2, "i": 1, "a": 30, "rb": 1, "ro": 4},
+              {"b": 2, "i": 2, "a": 30, "rb": 1, "ro": 5}, {"b": 2, "i": 3, "a": 100, "rb": 1, "ro": 6},
+              {"b": 2, "i": 4, "a": 100, "rb": 1, "ro": 7}]}
 
 
 @pytest.fixture()
@@ -66,9 +67,12 @@ def test_validate_rules():
 
     assert any("0x50 to 0x57" in e for e in bad(lambda p: p["boards"].__setitem__(1, 0x60)))
     assert any("used twice" in e for e in bad(lambda p: p["boards"].__setitem__(1, 0x50)))
-    assert any("relay 3 is used twice" in e for e in bad(lambda p: p["ch"][3].__setitem__("r", 3)))
+    assert any("relay 3 is used twice" in e for e in bad(lambda p: p["ch"][3].update(rb=1, ro=3)))
     assert any("input 1 is used twice" in e for e in bad(lambda p: p["ch"][4].update(b=2, i=1)))
-    assert any("relay must be" in e for e in bad(lambda p: p["ch"][0].__setitem__("r", 9)))
+    assert any("outputs 1 to 8" in e for e in bad(lambda p: p["ch"][0].__setitem__("ro", 9)))
+    assert any("relay board must be" in e for e in bad(lambda p: p["ch"][0].__setitem__("rb", 2)))
+    assert any("choose a relay board" in e for e in bad(lambda p: p["ch"][0].__setitem__("rb", 0)))
+    assert not bad(lambda p: p["ch"][0].update(rb=0, ro=0))  # a channel without relay is fine
     assert any("clamp model" in e for e in bad(lambda p: p["ch"][0].__setitem__("a", 15)))
     assert any("board must be" in e for e in bad(lambda p: p["ch"][0].__setitem__("b", 3)))
     assert any("input must be" in e for e in bad(lambda p: p["ch"][0].__setitem__("i", 8)))
@@ -80,7 +84,24 @@ def test_validate_rules():
     assert any("at most 8 entries" in e for e in bad(lambda p: p["relays"].extend(
         [{"drv": "pcf8574", "addr": 0x38 + k, "n": 1, "hi": 0} for k in range(8)])))
     assert hwprofile.validate({"boards": [0x50], "relays": [{"drv": "gpio", "addr": 0, "n": 3, "hi": 1}],
-                               "ch": [{"b": 1, "i": 1, "a": 0, "r": 1}]}, {"gpio": 2})  # more GPIO relays than pins
+                               "ch": [{"b": 1, "i": 1, "a": 0, "rb": 1, "ro": 1}]}, {"gpio": 2})  # more GPIO relays than pins
+
+
+def test_relay_boards_and_labels():
+    two = copy.deepcopy(NEW)   # Board A = 2 outputs (XL9535), Board B = 8 (MCP23017): channels pick (board, output)
+    two["relays"] = [{"drv": "xl9535", "addr": 0x20, "n": 2, "hi": 1}, {"drv": "mcp23017", "addr": 0x21, "n": 8, "hi": 1}]
+    two["ch"] = [{"b": 1, "i": 1, "a": 10, "rb": 1, "ro": 2}, {"b": 2, "i": 1, "a": 30, "rb": 2, "ro": 8},
+                 {"b": 2, "i": 2, "a": 30, "rb": 0, "ro": 0}]
+    assert hwprofile.validate(two) == []
+    assert hwprofile.relay_number(two, 1, 2) == 2 and hwprofile.relay_number(two, 2, 8) == 10 and hwprofile.relay_number(two, 0, 0) == 0
+    assert hwprofile.relay_label(two, 2) == "Board A relay 2" and hwprofile.relay_label(two, 3) == "Board B relay 1"
+    assert hwprofile.relay_label(two, 10) == "Board B relay 8" and hwprofile.relay_label({}, 4) == "relay 4"
+    assert hwprofile.aux_count(two) == 8 and hwprofile.aux_numbers(two) == [1, 3, 4, 5, 6, 7, 8, 9]
+    assert hwprofile.board_letter(1) == "A" and hwprofile.board_letter(2) == "B"
+    # deleting Board A and moving B up must not leave channels pointing at a board that is gone
+    gone = copy.deepcopy(two)
+    gone["relays"].pop(0)
+    assert any("relay board must be" in e or "outputs 1 to" in e for e in hwprofile.validate(gone))
 
 
 def test_aux_count_and_mode():

@@ -123,6 +123,15 @@ def meter_summary(d, show_price=None, user=None):
     return out
 
 
+def _relay_label(d, number):
+    """"Board B relay 3" from the meter's hardware profile (else "relay N")."""
+    from ..services import hwprofile
+    if not isinstance(number, int):
+        return ""
+    prof = d.hw_current if (d.hw_current or {}).get("relays") else {}
+    return hwprofile.relay_label(prof, number)
+
+
 def _aux_summary(d, st):
     """AUX relays (both firmwares): live state from the meter + name / automation from the config."""
     conf = (d.cfg or {}).get("aux") or []
@@ -132,7 +141,7 @@ def _aux_summary(d, st):
             continue
         c = conf[a["i"]] if a["i"] < len(conf) else {}
         mode = a.get("mode") or c.get("mode") or "manual"
-        out.append({"i": a["i"], "relay": a.get("relay"), "on": bool(a.get("on")),
+        out.append({"i": a["i"], "relay": a.get("relay"), "relay_label": _relay_label(d, a.get("relay")), "on": bool(a.get("on")),
                     "name": f"AUX{a['i'] + 1}" + (f" {c.get('name')}" if c.get("name") else ""),
                     "mode": mode, "override": bool(a.get("override")),
                     "can_override": mode == "manual" or bool(c.get("override", a.get("can_override"))),

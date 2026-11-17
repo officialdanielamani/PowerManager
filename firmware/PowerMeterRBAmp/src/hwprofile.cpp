@@ -95,10 +95,12 @@ bool validate(const Profile &p, uint8_t gpioPins, char *err, size_t n) {
     if (c.board < 1 || c.board > p.nBoards) return fail(err, n, "CH%d: invalid board", i + 1), false;
     if (c.input < 1 || c.input > 7) return fail(err, n, "CH%d: input must be 1 to 7", i + 1), false;
     if (ampsOf(c.clamp) < 0) return fail(err, n, "CH%d: invalid clamp model", i + 1), false;
-    if (c.relay > total) return fail(err, n, "CH%d: relay must be 0 to %d", i + 1, total), false;
+    if (c.rb > p.nRelayBoards) return fail(err, n, "CH%d: relay board must be 0 to %d", i + 1, p.nRelayBoards), false;
+    if (c.rb == 0 ? c.ro != 0 : (c.ro < 1 || c.ro > p.relay[c.rb - 1].relays))
+      return fail(err, n, "CH%d: invalid relay output", i + 1), false;
     for (uint8_t j = 0; j < i; j++) {
       if (p.ch[j].board == c.board && p.ch[j].input == c.input) return fail(err, n, "CH%d: input used twice", i + 1), false;
-      if (c.relay && p.ch[j].relay == c.relay) return fail(err, n, "CH%d: relay used twice", i + 1), false;
+      if (c.rb && p.ch[j].rb == c.rb && p.ch[j].ro == c.ro) return fail(err, n, "CH%d: relay used twice", i + 1), false;
     }
   }
   return true;
@@ -113,7 +115,9 @@ bool sameStructure(const Profile &a, const Profile &b) {
         a.relay[i].relays != b.relay[i].relays || a.relay[i].activeHigh != b.relay[i].activeHigh)
       return false;
   for (uint8_t i = 0; i < a.nCh; i++)
-    if (a.ch[i].board != b.ch[i].board || a.ch[i].input != b.ch[i].input || a.ch[i].relay != b.ch[i].relay) return false;
+    if (a.ch[i].board != b.ch[i].board || a.ch[i].input != b.ch[i].input || a.ch[i].rb != b.ch[i].rb ||
+        a.ch[i].ro != b.ch[i].ro)
+      return false;
   return true;
 }
 
@@ -145,13 +149,13 @@ bool fromJson(JsonVariantConst j, Profile &p, char *err, size_t n) {
     p.relay[p.nRelayBoards++] = {(uint8_t)drv, (uint8_t)addr, (uint8_t)cnt, (uint8_t)((r["hi"] | 1) ? 1 : 0)};
   }
   for (JsonObjectConst c : chans) {
-    int b, i, a, rl;
-    if (!intIn(c["b"], 0, 255, b) || !intIn(c["i"], 0, 255, i) || !intIn(c["r"], 0, 255, rl))
-      return fail(err, n, "ch: b, i and r are required"), false;
+    int b, i, a, rb, ro;
+    if (!intIn(c["b"], 0, 255, b) || !intIn(c["i"], 0, 255, i) || !intIn(c["rb"], 0, 255, rb) || !intIn(c["ro"], 0, 255, ro))
+      return fail(err, n, "ch: b, i, rb and ro are required"), false;
     int amps = c["a"] | 0;
     a = codeOf(amps);
     if (a < 0) return fail(err, n, "ch: invalid clamp model"), false;
-    p.ch[p.nCh++] = {(uint8_t)b, (uint8_t)i, (uint8_t)a, (uint8_t)rl};
+    p.ch[p.nCh++] = {(uint8_t)b, (uint8_t)i, (uint8_t)a, (uint8_t)rb, (uint8_t)ro};
   }
   return true;
 }
@@ -173,7 +177,8 @@ void toJson(const Profile &p, JsonObject o) {
     x["b"] = p.ch[i].board;
     x["i"] = p.ch[i].input;
     x["a"] = ampsOf(p.ch[i].clamp);
-    x["r"] = p.ch[i].relay;
+    x["rb"] = p.ch[i].rb;
+    x["ro"] = p.ch[i].ro;
   }
 }
 

@@ -112,7 +112,7 @@ var PM = (function () {
         (a.override ? '<span class="badge text-bg-warning ms-1" title="Switched by hand: the automation takes over again at its next change">overridden</span>' : '') : '';
       var canSwitch = admin && a.can_override;
       return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100"><div class="d-flex align-items-center gap-2">' +
-        '<span class="fw-semibold">' + esc(a.name) + '</span><span class="small text-body-secondary text-nowrap">relay ' + esc(a.relay) + '</span>' + modeBadge +
+        '<span class="fw-semibold">' + esc(a.name) + '</span><span class="small text-body-secondary text-nowrap">' + esc(a.relay_label || 'relay ' + a.relay) + '</span>' + modeBadge +
         '<span class="ms-auto">' + chBadge({relay_on: a.on}) + '</span></div>' +
         (a.desc && a.mode !== 'manual' ? '<div class="small text-body-secondary mt-1">' + esc(a.desc) + '</div>' : '') +
         (canSwitch ? '<div class="d-flex gap-1 mt-2"><button class="btn btn-sm btn-success" data-mc-action="aux_on" data-i="' + a.i + '">ON</button>' +

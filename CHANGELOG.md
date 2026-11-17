@@ -4,6 +4,12 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 
 ## Unreleased (1.1.0)
 
+- **Breaking:** server 1.1.0 needs meter firmware **1.1.0** (`MIN_FW`); older firmware is no longer supported. In the rbAmp
+  `CHANNELS` table (`config.h`, hardware profile, generator) a channel's relay is now **relay board + output** (`{board,
+  input, clamp, relayBoard, relayOutput}`, e.g. Board A relay 2) instead of one number across all boards. Existing
+  `config.h` files must be regenerated (Firmware → Generate config.h) or edited: `{1, 2, SCT_30A, 2}` becomes
+  `{1, 2, SCT_30A, 1, 2}` when relay 2 is output 2 of the first relay board. AUX relays keep their number across boards.
+
 - Boards are now ESP32-S3 **N16R8** (16 MB flash, octal PSRAM): custom `partitions.csv` in both sketches (64 KB NVS,
   two 6 MB app slots for OTA, 3.8 MB LittleFS). Build scripts, CI and README use `FlashSize=16M,PSRAM=opi,PartitionScheme=custom`.
   **One USB flash is needed** to change the partition table of an existing meter (readings in the offline buffer are lost).

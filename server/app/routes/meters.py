@@ -18,7 +18,7 @@ from ..services import access, auxcfg, commands, devconfig, mqtt_bridge, history
 from ..services import tare as tare_svc
 from .decorators import staff_required
 from .device_api import ensure_device_defaults
-from .main import meter_summary
+from .main import _relay_label, meter_summary
 
 bp = Blueprint("meters", __name__, url_prefix="/meters")
 log = logging.getLogger(__name__)
@@ -243,8 +243,8 @@ def configure(pk):
                            protect_actions=devconfig.PROTECT_ACTIONS, kwh_action_of=devconfig.kwh_action,
                            viewers=_viewers(), linked={v.user_fk: v for v in MeterViewer.query.filter_by(device_fk=device.id)},
                            managers=access.managers() if current_user.is_admin else [],
-                           aux_relays={a.get("i"): a.get("relay") for a in (device.last_state or {}).get("aux") or []
-                                       if isinstance(a, dict)},
+                           aux_relays={a.get("i"): _relay_label(device, a.get("relay")) for a in (device.last_state or {}).get("aux") or []
+                                       if isinstance(a, dict) and a.get("relay")},
                            n_temp=auxcfg.temp_count(device), aux_sched_max=auxcfg.SCHED_MAX, fw_old=devconfig.fw_outdated(device),
                            mqtt_meter=mqtt_bridge.meter_config(),
                            aux_sources=auxcfg.sources(device), aux_flags=auxcfg.FLAGS, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,

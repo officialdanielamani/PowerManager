@@ -286,8 +286,9 @@ Protocol, rollback and rules: [protocol.md §12](protocol.md).
    (with the reason, e.g. `no_reply 0x51`), *Rejected* (the meter refused it). The page polls every 2.5 s.
 3. **rbAmp boards**: one address (0x50–0x57) per module, board 1 first. **Relay boards**: type (MCP23017, XL9535 / TCA9535,
    PCF8574 / PCF8574A, ESP32 pins), address, outputs used, active high; the relay numbers of each row are shown.
-   **Channels**: board, input 1–7, clamp (5 … 100 A or *Keep*), relay (none or a relay number); relays no channel uses become
-   AUX relays (listed under the table).
+   Relay boards are shown as **Board A [2C]**, **Board B [8C]** … (the number is the outputs used).
+   **Channels**: rbAmp board, input 1–7, clamp (5 … 100 A or *Keep*), and the relay as **[Board A] [relay 2]** (or none);
+   outputs no channel uses become AUX relays (listed under the table as "Board B relay 3").
 4. **Scan Address**: the meter lists every I2C address that answers; rbAmp modules are confirmed, other addresses are labelled by
    range. The rows above then show *found / not found* badges. Needs the meter online.
 5. **Update Clamp Model**: enabled when only clamp models differ from what the meter uses; applied at once, no restart.
