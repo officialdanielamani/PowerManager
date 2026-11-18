@@ -587,3 +587,68 @@ meter that has a tare on any channel.
    resulting gain per segment (a gain outside 0.8–1.25 is refused as "wrong reference or wiring").
 Calibration changes the values that sessions, kWh limits and costs are based on, so it is built after zero / tare have been proven
 on a real meter.
+
+## 14. Firmware update over the air (OTA) — design, not implemented yet
+
+Status: **specification only** (decisions of the discussion; nothing is built, no tests). The first OTA-capable firmware has to be
+flashed over USB once; after that, updates go from the server. Transport for now: **HTTP(S) only** (the meter downloads the file).
+
+### 14.1 What the administrator uploads
+The zip made by the Arduino IDE (*Export compiled binary*, zipped by the user). Only **one file** is used, `<sketch>.ino.bin` (the
+app image); the bootloader, partitions, `boot_app0` and `merged.bin` are only for USB flashing and are ignored by OTA.
+
+On upload the server:
+- finds the app image: `*.ino.bin` that is not `*.bootloader.bin`, `*.partitions.bin` or `*.merged.bin`; stores that file and its
+  SHA-256 (the zip itself is not kept); limits the zip and file sizes and rejects odd paths (zip-slip);
+- reads the **firmware tag** inside the image. Every firmware contains a constant string `PMFWTAG|<type>|<version>|<hw>|` (placed
+  in the code with `used` so the linker keeps it; the Arduino build does not carry the sketch name, so the tag is the reliable way).
+  `<type>` is a free text id (`rbamp`, `pzem`, later `logger-pzem`, `smart-relay` ... the server has **no fixed list**: it shows
+  whatever the tag says). No tag → refused ("not a PowerManager firmware");
+- compares `partitions.csv` of the zip with the layout of the meters (it is also reported in the hello, 14.3): a different layout
+  cannot be changed by OTA and is refused with "needs a USB flash";
+- checks the size against the OTA slot.
+
+### 14.2 Server data and pages
+`Firmware` row: id, title (short), info (short), description, version (pre-filled from the tag; warn when edited to something
+else), **type** (from the tag), size, sha256, file name, partitions hash, uploaded_at, uploaded_by.
+- List: checkbox (bulk delete for now), title, info, **type**, version, size, by, [Flash] [Info] [Edit] [Delete]. Delete is refused
+  while the firmware is being flashed. Edit changes the text fields; replacing the zip is optional.
+- Add / Edit / Delete: admin only. Info and Flash: admin, and a manager for **their own meters** (managers cannot add firmware yet).
+- Info (read only): title, info, description, version, type, size, updated date / time, updated by.
+- Flash: *search and select a meter* → the meter's information (as *Get meter info*) next to the firmware information, side by
+  side: type, version (running → new), hardware, flash size, partition layout, free OTA space, channels. A verdict on top:
+  **blocked** (type differs from `hello.fw_type`, layout differs, too big, meter firmware without `caps.ota`: "needs one USB
+  flash first", meter offline) or **warning** (downgrade, a session is running). The text says: keep the internet connection
+  stable, unplug the appliances (the relays switch off), wait for the reboot. A check box confirms the warnings; **[Upload the
+  Firmware to Meter]** is greyed out when the meter is offline or blocked. Progress is shown on the same page.
+
+### 14.3 Meter
+`hello.caps.ota` = `{"slot": <bytes free>, "layout": "<hash of the partition table>"}`; `hello.fw_type` / `hello.fw` as now.
+Command (server → meter): `{"t":"cmd","c":"ota","url":"https://…/ota/<token>","size":N,"sha256":"…","ver":"1.3.0","type":"rbamp"}`.
+The meter ends its sessions and switches the relays off, downloads into the spare OTA slot (streaming, `Update` / `esp_https_ota`),
+checks size and SHA-256 and the tag (type must equal its own `FW_TYPE`), then sets the slot and reboots (events `ota_progress`
+{state: downloading|verifying|rebooting, pct}, `ota_failed` {why}). The download URL carries a **one-time token** (valid for
+that meter and file, about 10 minutes). A failed download changes nothing.
+
+Rollback is the same idea as 12.5: the new app must connect to the server and send its hello within `OTA_CONFIRM_MS` (60 s); only
+then it marks itself valid (`esp_ota_mark_app_valid_cancel_rollback`). Otherwise the bootloader returns to the old app and the
+meter reports `ota_rollback` on its next hello. Settings and sessions (NVS) are kept.
+
+### 14.4 Sessions
+When the OTA starts the sessions of the meter are **ended** (the server sends the stop for every running session first;
+end reason "restart"); nothing resumes by itself afterwards. The administrator is warned before (the check box).
+
+### 14.5 Notifications: reboot pending
+New notification type `reboot_pending` ("Meter restart pending (hardware change / firmware update)"), on by default for the users
+who get meter status: sent when a restart is announced and when it is done (or rolled back / failed):
+- hardware profile with `mode: reboot` (the 60 s delay of §12.4, event `hw_reboot_pending`): "Meter X restarts in 60 s: hardware change";
+- OTA: "Meter X is updated to 1.3.0 and restarts" then "updated" / "rolled back to 1.2.0" / "failed: reason".
+The AUX source *reboot* (§12) also stays active for the OTA restart.
+
+### 14.6 Bulk update (planned, not now)
+Select several meters of the **same type** and one firmware; the server sends them one after another (not in parallel; the next
+starts when the previous is confirmed or failed) and shows a table of results. The per-meter flow above stays the building block.
+
+### 14.7 Open points
+`PMFWTAG` and `caps.ota` need firmware changes in both sketches; `MAX_CONTENT_LENGTH` and the Docker data volume must allow the
+uploads; a signature on the image (more than SHA-256) is a later option.
