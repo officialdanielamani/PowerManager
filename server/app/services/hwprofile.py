@@ -371,6 +371,8 @@ def on_event(device, ev):
             device.hw_due_at = ev.ts + int(d.get("in_s", DELAY_DEFAULT))
         except (TypeError, ValueError):
             device.hw_due_at = None
+        notify.notify(device, "reboot_pending",
+                      f"Meter restarts in {int(d.get('in_s') or DELAY_DEFAULT)} s: hardware change (profile v{ver if ver is not None else '?'})")
     elif ev.type == "hw_active":
         device.hw_active_ver = ver or device.hw_active_ver
         device.hw_due_at = None

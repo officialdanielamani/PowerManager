@@ -13,6 +13,7 @@
 #include "battery.h"
 #include "ups.h"
 #include "certs.h"
+#include "ota.h"
 #include "control.h"
 #include "led.h"
 #include "mesh.h"
@@ -71,6 +72,14 @@ static bool mdnsStarted = false;
 
 String apSsid() { return "Power_" + store::deviceId(); }
 String serverHost() { return srv.host; }
+bool serverParams(String &host, uint16_t &port, bool &tls, bool &insecure) {
+  if (leafMode || !srv.host.length()) return false;
+  host = srv.host;
+  port = srv.port;
+  tls = srv.tls;
+  insecure = srv.insecure;
+  return true;
+}
 String linkMode() {
   if (leafMode) return mesh::leafLinked() ? "mesh" : "searching";
   return WiFi.status() == WL_CONNECTED ? "wifi" : "none";
@@ -436,6 +445,7 @@ static void fillCaps(JsonObject caps) {
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
+  ota::capsJson(caps["ota"].to<JsonObject>());  // firmware update over the air (docs/protocol.md §14)
   caps["hw_cfg"] = 1;               // hardware profile can be sent by the server (docs/protocol.md §12)
   caps["hw_limits"].to<JsonObject>()["gpio"] = hw::RELAY_GPIO_COUNT;
   if (temp::hasHumidity()) caps["hum"] = true;
@@ -622,6 +632,9 @@ static void sendHello() {
   JsonDocument doc;
   doc["t"] = "hello";
   doc["fw"] = FW_VERSION;
+  doc["fw_type"] = FW_TYPE;
+  doc["hw"] = HW_NAME;
+  ota::stateJson(doc["ota"].to<JsonObject>());
   doc["proto"] = PROTO_VERSION;
   doc["boot"] = store::bootCount();
   doc["up"] = millis() / 1000;
@@ -845,6 +858,9 @@ static void handleCommand(JsonObject m) {
       tryWifi(ssid, pass);
       return;
     }
+  } else if (!strcmp(c, "hw_profile") && ota::busy()) {
+    ok = false;
+    err = "busy";
   } else if (!strcmp(c, "hw_profile")) {
     char detail[64];
     HwRes r = {"", 0, nullptr, 0};
@@ -856,6 +872,8 @@ static void handleCommand(JsonObject m) {
     // event "sensor_check" (docs/protocol.md §13.1).
     int n = m["n"] | 10;
     ok = control::startSensorCheck(ch < 0 ? 0 : (uint8_t)ch, (uint8_t)(n < 0 ? 10 : n > 255 ? 255 : n), err);
+  } else if (!strcmp(c, "ota")) {
+    ok = ota::onCommand(m, err);  // docs/protocol.md §14.3
   } else if (!strcmp(c, "hw_cancel")) {
     ok = hwp::onCancel();
     if (!ok) err = "nothing_pending";
@@ -907,6 +925,7 @@ static void handleMessage(const char *payload, size_t len) {
 
   if (!strcmp(t, "welcome")) {
     helloDone = true;
+    ota::confirm();  // a freshly installed firmware is good once the server answers
     linkTrySinceMs = 0;  // connected: the MQTT fallback timer starts again at the next loss
     goOnline();
     Serial.println("[net] online");

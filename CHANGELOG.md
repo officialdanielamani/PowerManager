@@ -4,6 +4,17 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 
 ## Unreleased (1.1.0)
 
+- **Firmware list, OTA update and USB flash from the browser** (design + rules: `docs/protocol.md` §14): Firmware page lists firmware
+  (admin: Add New Firmware / Edit / bulk Delete; manager: Info and Flash). The admin uploads the zip of the Arduino IDE export; the server
+  keeps the app image and the USB files and reads the firmware **tag** (type / version / hardware) from the image. *Flash* a meter:
+  search a meter, firmware and meter side by side with a verdict (blocked: offline / other type / other partition layout / too big / no
+  OTA support; warnings: downgrade, running session), then the meter downloads the image over HTTP(S) with a one-time token, checks SHA-256
+  and tag, restarts and must reach the server again, otherwise it goes back to the old firmware (rollback by the app, NVS). Sessions end
+  when the update starts. *By USB (browser)*: Web Serial + esptool-js (vendored), no online meter needed, Update or Erase all flash first
+  (typed device ID / chip MAC), needs HTTPS (reverse proxy) or localhost. New notification **Meter restart** (hardware change + update).
+  Firmware: new `ota.cpp/.h/otatag.h` (both sketches), `hello.fw_type / hw / ota / caps.ota`, command `ota`, events `ota_*`, session end reason
+  `restart`. **Meters need one USB flash (or Erase All Flash) with this firmware before they can be updated over the air.**
+  Tests: `firmware/tools/ota_test`, `server/tests/test_firmware.py`, browser test (upload, OTA with the simulator, delete).
 - **Zero & Tare for all meters, per channel** (design: `docs/protocol.md` §13): Configuration → *Tune* tab (between Channels and AUX relays; Calibration greyed out; tare minimum depends on the clamp range) with a sensor check (>= 10
   readings / 10 s, stable), *Set zero* (sensor offset with no load, subtracted on the meter), *Set tare* (a connected load that counts as 0;
   tared values in the views, CSV and the meter's limits), Clear. Replaces the single-channel tare of the Configuration form (the

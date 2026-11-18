@@ -4,8 +4,8 @@ from ..models import Command, now
 from . import hub
 
 KNOWN = {"relay", "aux", "renew", "end", "send_now", "reset_trip", "get_state", "remove", "disable", "enable", "get_info",
-         "set_mqtt", "set_wifi", "hw_profile", "hw_cancel", "i2c_scan", "rbamp_addr", "sensor_check"}
-NEEDS_WATCHER = {"i2c_scan", "rbamp_addr", "sensor_check"}  # only useful while someone waits for the answer: never queued
+         "set_mqtt", "set_wifi", "hw_profile", "hw_cancel", "i2c_scan", "rbamp_addr", "sensor_check", "ota"}
+NEEDS_WATCHER = {"i2c_scan", "rbamp_addr", "sensor_check", "ota"}  # only useful while someone waits for the answer: never queued
 SECRET = {"set_mqtt", "set_wifi"}  # carry a password: wiped from the stored command once it is acknowledged
 QUEUE_MAX_AGE_S = 7 * 86400
 

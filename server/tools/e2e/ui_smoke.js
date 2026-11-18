@@ -52,9 +52,13 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.waitForTimeout(2500);
   const z = await page.textContent('#tuneCh');
   check(/not set/.test(z) && /0\.0\d+ A/.test(z), 'channel 0 has a zero, channel 1 and the tares are not set');
-  await post('/action', {action: 'send_now'});   // the live values are the last report: ask the meter for a fresh one
-  await page.waitForTimeout(1500);
-  let after = await live();
+  let after;
+  for (let i = 0; i < 8; i++) {   // the live values are the last report: ask the meter for a fresh one (until the zero is applied)
+    await post('/action', {action: 'send_now'});
+    await page.waitForTimeout(1500);
+    after = await live();
+    if (after.channels[0].w < 1.0) break;
+  }
   check(after.channels[0].w < 1.0 && after.channels[1].w > 4, 'after zeroing channel 0 reads ~0 W, channel 1 (not zeroed) still shows its offset (' + after.channels[0].w + ' / ' + after.channels[1].w + ' W)');
   // an unstable / loaded check is refused: channel 0 has no load, so a TARE check says "too small"
   await page.click('[data-act=check][data-kind=tare][data-ch="0"]');
@@ -135,6 +139,42 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.waitForSelector('#gOut:not(.d-none)');
   const text = await page.inputValue('#gText');
   check(/\{\s*1,\s+3,\s+SCT_30A,\s+1,\s+3 \}/.test(text), 'config.h has the relay board + output columns (CH3 = relay board 1, output 3)');
+
+  // ---------------- Firmware list, OTA update of the simulated meter, USB tab
+  await page.goto(base + '/firmware');
+  await page.click('text=Add New Firmware');
+  await page.fill('input[name=title]', 'RB-Amp 16C Relay');
+  await page.fill('input[name=info]', '7C RB-Amp');
+  await page.fill('textarea[name=description]', 'test firmware');
+  await page.setInputFiles('input[name=zip]', process.env.FW_ZIP);
+  await page.click('button:has-text("Save")');
+  await page.waitForSelector('text=RB-Amp 16C Relay');
+  const frow = await page.locator('tr', { hasText: 'RB-Amp 16C Relay' }).textContent();
+  check(frow.includes('7C RB-Amp') && frow.includes('rbamp-mc') && frow.includes('1.3.0'), 'firmware list shows title, info, type, version');
+  await page.click('tr:has-text("RB-Amp 16C Relay") >> text=Info');
+  check((await page.textContent('body')).includes('test firmware') && (await page.textContent('body')).includes('Updated by'), 'firmware info page');
+  await page.goBack();
+  await page.click('tr:has-text("RB-Amp 16C Relay") >> text=Flash');
+  await page.selectOption('#mSel', { index: 0 });
+  await page.waitForSelector('#verdict .alert-success', { timeout: 15000 });
+  check((await page.textContent('#fwBox')).includes('1.3.0') && (await page.textContent('#mBox')).includes('1.1.0'), 'Firmware Info and Meter Info side by side (1.3.0 vs 1.1.0)');
+  check(await page.isDisabled('#goBtn'), 'upload button waits for the confirmation');
+  await page.check('#okBox');
+  await page.click('#goBtn');
+  await page.waitForSelector('#progTxt:has-text("Done: the meter runs 1.3.0")', { timeout: 90000 });
+  check(true, 'OTA: the simulated meter downloaded, restarted and confirmed 1.3.0');
+  await page.waitForTimeout(1500);
+  await page.reload();
+  await page.selectOption('#mSel', { index: 0 });
+  await page.waitForSelector('#mBox');
+  check((await page.textContent('#mBox')).includes('1.3.0'), 'the meter now reports 1.3.0');
+  await page.click('[data-way=usb]');
+  check(await page.locator('#usbConnect').count() + await page.locator('#usbNo:not(.d-none)').count() >= 1, 'USB tab: Connect button (or the reason why not)');
+  await page.goto(base + '/firmware');
+  await page.check('tr:has-text("RB-Amp 16C Relay") .pick');
+  await page.click('#delBtn');
+  await page.waitForSelector('text=No firmware yet');
+  check(true, 'firmware deleted (bulk)');
 
   check(errors.length === 0, 'no browser errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await browser.close();

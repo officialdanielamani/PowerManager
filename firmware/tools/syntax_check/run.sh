@@ -37,8 +37,8 @@ check() {  # check <label> <include dir with config.h and src/> <source files...
 }
 
 # ---- default config.h of both sketches
-check "rbAmp config.h" firmware/PowerMeterRBAmp rbamp.cpp relays.cpp i2cbus.cpp control.cpp app_state.cpp storage.cpp battery.cpp temp.cpp ups.cpp auxrelay.cpp
-check "PZEM config.h" firmware/PowerMeterPZEM relays.cpp i2cbus.cpp control.cpp app_state.cpp storage.cpp battery.cpp temp.cpp ups.cpp auxrelay.cpp sensor_pzem.cpp
+check "rbAmp config.h" firmware/PowerMeterRBAmp rbamp.cpp relays.cpp i2cbus.cpp control.cpp app_state.cpp storage.cpp battery.cpp temp.cpp ups.cpp auxrelay.cpp ota.cpp
+check "PZEM config.h" firmware/PowerMeterPZEM relays.cpp i2cbus.cpp control.cpp app_state.cpp storage.cpp battery.cpp temp.cpp ups.cpp auxrelay.cpp sensor_pzem.cpp ota.cpp
 
 # ---- every example config as the rbAmp config.h
 for ex in firmware/examples/config_rbamp_*.h; do

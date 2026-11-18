@@ -5,12 +5,12 @@ import re
 import secrets
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, abort, jsonify, request, send_file
 from simple_websocket import ConnectionClosed
 
 from ..extensions import db, limiter, sock
 from ..models import Channel, Device, PairingCode, User, now
-from ..services import devconfig, hub, ingest, mesh, notify
+from ..services import devconfig, firmware as fw_svc, hub, ingest, mesh, notify
 
 bp = Blueprint("device_api", __name__)
 log = logging.getLogger(__name__)
@@ -223,3 +223,16 @@ def device_ws(ws):
                 ws.close(reason=conn.close_code)
             except Exception:
                 pass
+
+
+@bp.get("/api/v1/ota/<token>")
+@limiter.limit("30 per minute")
+def ota_download(token):
+    """The firmware image for a meter: the one-time token of the update job is the only credential (docs/protocol.md §14.3)."""
+    job, fw = fw_svc.download(token)
+    if job is None:
+        abort(404)
+    path = fw_svc.file_path(fw, fw.files["app"])
+    if path is None:
+        abort(404)
+    return send_file(path, mimetype="application/octet-stream", as_attachment=False, max_age=0)

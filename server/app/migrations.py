@@ -48,6 +48,9 @@ def _migrate_tare():
 
 
 def run():
+    # firmware type / OTA state of the meter (docs/protocol.md §14)
+    _add_column("device", "fw_type VARCHAR(24) NOT NULL DEFAULT ''")
+    _add_column("device", "ota JSON NOT NULL DEFAULT '{}'")
     # v0.1 -> v0.2: viewer links, per-user notifications, login lockout
     _add_column("user", "view_all BOOLEAN NOT NULL DEFAULT 0")
     _add_column("user", "failed_logins INTEGER NOT NULL DEFAULT 0")

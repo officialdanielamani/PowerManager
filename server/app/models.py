@@ -154,6 +154,10 @@ class Device(db.Model):
     hw_state = db.Column(db.String(16), nullable=False, default="")
     hw_reason = db.Column(db.String(100))
     hw_due_at = db.Column(db.Integer)
+    # Firmware type / hardware name the meter reports in its hello (docs/protocol.md §14) and its OTA state
+    # {state: ok | trial | rolled_back, ver, why?, tried?, hw}. The partition layout / free OTA slot are in caps["ota"].
+    fw_type = db.Column(db.String(24), nullable=False, default="")
+    ota = db.Column(db.JSON, nullable=False, default=dict)
     # Last answer to "Get meter info".
     last_info = db.Column(db.JSON, nullable=False, default=dict)
     last_info_at = db.Column(db.Integer)
@@ -359,3 +363,42 @@ class Command(db.Model):
     err = db.Column(db.String(40))
     res = db.Column(db.JSON)  # result data of the acknowledgement (i2c_scan, hw_profile ...)
     cancelled = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class Firmware(db.Model):
+    """A firmware that can be flashed to a meter over the air or by USB from the browser (docs/protocol.md §14)."""
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(40), nullable=False)
+    info = db.Column(db.String(60), nullable=False, default="")
+    description = db.Column(db.Text, nullable=False, default="")
+    version = db.Column(db.String(24), nullable=False, default="")
+    fw_type = db.Column(db.String(24), nullable=False, default="")   # from the firmware tag in the image
+    hw = db.Column(db.String(32), nullable=False, default="")        # from the tag (e.g. esp32s3-n16r8)
+    chip = db.Column(db.String(16), nullable=False, default="")      # esp32s3 ... (for the USB flash)
+    size = db.Column(db.Integer, nullable=False, default=0)          # app image (OTA)
+    sha256 = db.Column(db.String(64), nullable=False, default="")    # of the app image
+    layout = db.Column(db.String(8), nullable=False, default="")     # hash of the partition table of the zip
+    files = db.Column(db.JSON, nullable=False, default=dict)         # USB flash: {"parts": [{name, offset, size}], "flash": {...}}
+    created_at = db.Column(db.Integer, nullable=False, default=now)
+    updated_at = db.Column(db.Integer, nullable=False, default=now)
+    updated_by = db.Column(db.String(32), nullable=False, default="")
+
+
+class OtaJob(db.Model):
+    """One firmware update of one meter (state follows the events of the meter)."""
+    id = db.Column(db.Integer, primary_key=True)
+    device_fk = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+    firmware_fk = db.Column(db.Integer, db.ForeignKey("firmware.id"), index=True)
+    token = db.Column(db.String(64), nullable=False, unique=True)
+    # pending (command sent) | downloading | verifying | rebooting | ok | failed | rolled_back
+    state = db.Column(db.String(12), nullable=False, default="pending")
+    pct = db.Column(db.Integer, nullable=False, default=0)
+    why = db.Column(db.String(60))
+    ver_from = db.Column(db.String(24), nullable=False, default="")
+    ver_to = db.Column(db.String(24), nullable=False, default="")
+    fw_title = db.Column(db.String(40), nullable=False, default="")
+    hits = db.Column(db.Integer, nullable=False, default=0)          # downloads of the file with this token
+    expires_at = db.Column(db.Integer, nullable=False, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.Integer, nullable=False, default=now)
+    updated_at = db.Column(db.Integer, nullable=False, default=now)

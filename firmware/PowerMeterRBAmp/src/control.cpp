@@ -274,6 +274,7 @@ static const char *stopReasonName(uint8_t why) {
     case STOP_MODE: return "mode";
     case STOP_TEMP: return "temp";
     case STOP_HW: return "hw_change";
+    case STOP_OTA: return "restart";
     default: return "disabled";
   }
 }
@@ -321,10 +322,10 @@ bool anySessionRunning() {
   return false;
 }
 
-void prepareRestart() {
+void prepareRestart(bool ota) {
   {
     StateLock l;
-    stopAll(STOP_HW);  // every running session ends (event session_end, reason hw_change)
+    stopAll(ota ? STOP_OTA : STOP_HW);  // every running session ends (event session_end, reason hw_change / restart)
     saveEnergy();
     saveFlags();
   }

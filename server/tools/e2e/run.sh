@@ -16,4 +16,5 @@ $PY ../sim_meter_mc.py --state "$W/mc.json" pair --server "http://127.0.0.1:$POR
 $PY ../sim_meter_mc.py --state "$W/mc.json" run --speed 0.2 --offset-w 6 --load 600,300 --bus 0x50,0x51,0x20,0x21,0x68 > "$W/sim.log" 2>&1 &
 SIM_PID=$!
 sleep 4
-NODE_PATH=${NODE_PATH:-$(npm root -g)} node ui_smoke.js "http://127.0.0.1:$PORT" || { echo "--- server log"; tail -20 "$W/server.log"; echo "--- simulator log"; tail -20 "$W/sim.log"; exit 1; }
+$PY make_fw_zip.py "$W/fw.zip" 1.3.0
+FW_ZIP="$W/fw.zip" NODE_PATH=${NODE_PATH:-$(npm root -g)} node ui_smoke.js "http://127.0.0.1:$PORT" || { echo "--- server log"; tail -20 "$W/server.log"; echo "--- simulator log"; tail -20 "$W/sim.log"; exit 1; }

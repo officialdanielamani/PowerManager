@@ -322,3 +322,22 @@ has its own zero and tare); the specification is [protocol.md §13](protocol.md)
   the same kind. **[Clear]** removes the value. Every change raises the config version and is sent to the meter at once.
 - Events *zero_set*, *tare_set* and *calibration_cleared* are recorded in the meter's event list. Calibration (known loads) is designed in
   protocol.md §13.7 and not implemented yet.
+
+## Firmware list, Flash (OTA) and USB flash
+
+*Firmware* page: **List of firmware** (checkbox, title, info, type, version, size, by, [Flash] [Info] [Edit]). Admin: **Add New Firmware**
+(title, info, description, version, zip), Edit (text; optionally a new zip of the same firmware type), *Delete selected* (bulk). Manager: Info and
+Flash only. The zip is the Arduino IDE export (`*.ino.bin`, bootloader, partitions, `boot_app0`, `flash_args`); the server reads type, version
+and hardware from the tag inside the image and refuses a file without it. Needs `client_max_body_size` of about 80 MB on a reverse proxy.
+
+**Flash** has two ways:
+- **Over the air**: *Search & select meter*, then *Firmware Info* and *Meter Info* side by side (type, version, hardware, free update space,
+  partition layout). Red verdicts block (offline, other type, other layout, too big, a firmware without OTA support = flash once by USB);
+  warnings (older version, running session, relays off) need the check box. *Upload the Firmware to Meter* starts it; the page shows
+  downloading / checking / restarting / done, or failed / rolled back (the meter went back to its old version).
+- **By USB (browser)**: Connect (port picker) → chip, MAC and flash size are read and checked → *Update* (keeps the settings) or *Erase all
+  flash first* (type the device ID of the meter, or the chip MAC of a new board) → Flash with a progress bar and log. Works in Chrome / Edge /
+  Opera on a computer over **https://** or `localhost`; otherwise the tab says why it is off. If the board does not enter download mode:
+  hold BOOT, press RESET.
+
+Notification **Meter restart** (on by default): hardware profile restart pending, firmware update restarting / updated / failed / rolled back.

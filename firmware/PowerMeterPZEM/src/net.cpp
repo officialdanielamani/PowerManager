@@ -13,6 +13,7 @@
 #include "battery.h"
 #include "ups.h"
 #include "certs.h"
+#include "ota.h"
 #include "control.h"
 #include "i2cbus.h"
 #include "led.h"
@@ -70,6 +71,14 @@ static bool mdnsStarted = false;
 
 String apSsid() { return "Power_" + store::deviceId(); }
 String serverHost() { return srv.host; }
+bool serverParams(String &host, uint16_t &port, bool &tls, bool &insecure) {
+  if (leafMode || !srv.host.length()) return false;
+  host = srv.host;
+  port = srv.port;
+  tls = srv.tls;
+  insecure = srv.insecure;
+  return true;
+}
 String linkMode() {
   if (leafMode) return mesh::leafLinked() ? "mesh" : "searching";
   return WiFi.status() == WL_CONNECTED ? "wifi" : "none";
@@ -430,6 +439,7 @@ static String pairBody(const PairRequest &r) {
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
+  ota::capsJson(caps["ota"].to<JsonObject>());  // firmware update over the air (docs/protocol.md §14)
   caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
   caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
@@ -590,6 +600,9 @@ static void sendHello() {
   JsonDocument doc;
   doc["t"] = "hello";
   doc["fw"] = FW_VERSION;
+  doc["fw_type"] = FW_TYPE;
+  doc["hw"] = HW_NAME;
+  ota::stateJson(doc["ota"].to<JsonObject>());
   doc["proto"] = PROTO_VERSION;
   doc["boot"] = store::bootCount();
   doc["up"] = millis() / 1000;
@@ -734,6 +747,8 @@ static void handleCommand(JsonObject m) {
     control::renew("manual", false);
   } else if (!strcmp(c, "end")) {
     control::endSession();
+  } else if (!strcmp(c, "ota")) {
+    ok = ota::onCommand(m, err);  // docs/protocol.md §14.3
   } else if (!strcmp(c, "sensor_check")) {
     // Zero & Tare wizard: measure the raw values for >= 10 readings (>= 10 s); the result comes as an event
     // "sensor_check" (docs/protocol.md §13.1). This meter has one channel (0).
@@ -813,6 +828,7 @@ static void handleMessage(const char *payload, size_t len) {
 
   if (!strcmp(t, "welcome")) {
     helloDone = true;
+    ota::confirm();  // a freshly installed firmware is good once the server answers
     linkTrySinceMs = 0;  // connected: the MQTT fallback timer starts again at the next loss
     goOnline();
     Serial.println("[net] online");

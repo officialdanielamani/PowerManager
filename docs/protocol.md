@@ -588,9 +588,9 @@ meter that has a tare on any channel.
 Calibration changes the values that sessions, kWh limits and costs are based on, so it is built after zero / tare have been proven
 on a real meter.
 
-## 14. Firmware update over the air (OTA) — design, not implemented yet
+## 14. Firmware update over the air (OTA) and USB flash — firmware / server 1.1.0
 
-Status: **specification only** (decisions of the discussion; nothing is built, no tests). The first OTA-capable firmware has to be
+Status: **implemented** (server + both sketches); tested with the PC tests and the simulated meter, **not yet on real hardware**. The first OTA-capable firmware has to be
 flashed over USB once; after that, updates go from the server. Transport for now: **HTTP(S) only** (the meter downloads the file).
 
 ### 14.1 What the administrator uploads
@@ -623,16 +623,26 @@ else), **type** (from the tag), size, sha256, file name, partitions hash, upload
   Firmware to Meter]** is greyed out when the meter is offline or blocked. Progress is shown on the same page.
 
 ### 14.3 Meter
-`hello.caps.ota` = `{"slot": <bytes free>, "layout": "<hash of the partition table>"}`; `hello.fw_type` / `hello.fw` as now.
-Command (server → meter): `{"t":"cmd","c":"ota","url":"https://…/ota/<token>","size":N,"sha256":"…","ver":"1.3.0","type":"rbamp"}`.
-The meter ends its sessions and switches the relays off, downloads into the spare OTA slot (streaming, `Update` / `esp_https_ota`),
-checks size and SHA-256 and the tag (type must equal its own `FW_TYPE`), then sets the slot and reboots (events `ota_progress`
-{state: downloading|verifying|rebooting, pct}, `ota_failed` {why}). The download URL carries a **one-time token** (valid for
-that meter and file, about 10 minutes). A failed download changes nothing.
+`hello` carries `fw_type` (`FW_TYPE`), `hw` (`HW_NAME`), `caps.ota` = `{"slot": <bytes of the spare app slot>, "layout": "<CRC-32 of the
+partition table: type, subtype, offset, size of every entry, 8 hex digits>", "tag": "PMFWTAG|…"}` and `ota` = `{"state": "ok" | "trial" |
+"rolled_back", "ver", "why"?, "tried"?}`. A firmware without `caps.ota` cannot be updated over the air (one USB flash first).
 
-Rollback is the same idea as 12.5: the new app must connect to the server and send its hello within `OTA_CONFIRM_MS` (60 s); only
-then it marks itself valid (`esp_ota_mark_app_valid_cancel_rollback`). Otherwise the bootloader returns to the old app and the
-meter reports `ota_rollback` on its next hello. Settings and sessions (NVS) are kept.
+Command (server → meter): `{"t":"cmd","c":"ota","path":"/api/v1/ota/<token>","size":N,"sha256":"…","ver":"1.3.0","type":"rbamp-mc"}`. The meter
+builds the address from the server it is paired with (scheme, host, port; so a reverse proxy works) and refuses with an ack error
+`busy`, `wrong_type`, `too_big`, `bad_request`, `no_server` (not paired / mesh leaf), `no_wifi`. Otherwise it **ends its sessions
+(reason `restart`), saves, switches the relays off**, and a task downloads the image (HTTP / HTTPS, streaming, `Update`) into the spare
+slot while it computes the SHA-256 and scans the stream for the firmware tag. It checks size, SHA-256 and that the tag type equals
+its own `FW_TYPE`, then switches the boot slot and restarts. Events: `ota_progress` {state: downloading | verifying | rebooting, pct,
+ver} (downloading every 10 %), `ota_failed` {why: size, sha256, wrong_type, timeout, flash_write, http_<code>, net_<code> ...}, `ota_ok`
+{ver} after the confirmation. A failed download changes nothing (the sessions stay ended). The token is valid about 10 minutes and for
+3 downloads. The hardware profile command is refused (`busy`) while an update runs.
+
+Rollback is done by the app (the prebuilt Arduino bootloader has no rollback support): before the restart the meter stores in NVS
+(namespace `ota`) `prev` (slot it came from) and `try` (the new version); every boot of a `try` firmware counts (`boots`). The new
+firmware is **confirmed** when the server answers its hello (`welcome`) within `OTA_CONFIRM_MS` (config.h, default 120 s); then
+`try` is cleared and it sends `ota_ok`. When the time runs out, or the firmware boots more than 3 times unconfirmed (crash loop), it sets
+the boot slot back to `prev`, notes `rb` / `rbver` and restarts; the old firmware reports `ota.state = "rolled_back"` in its next hello.
+Settings and sessions (NVS) are kept.
 
 ### 14.4 Sessions
 When the OTA starts the sessions of the meter are **ended** (the server sends the stop for every running session first;
@@ -679,5 +689,4 @@ without the Arduino IDE.
 - **Notifications:** none (nobody is told about a USB flash, there is no meter connection); the audit log entry is the record.
 
 ### 14.7 Open points
-The USB way (14.8) needs HTTPS (reverse proxy) or `localhost`: to be tested behind the reverse proxy. `PMFWTAG` and `caps.ota` need firmware changes in both sketches; `MAX_CONTENT_LENGTH` and the Docker data volume must allow the
-uploads; a signature on the image (more than SHA-256) is a later option.
+The USB way (14.8) needs HTTPS (reverse proxy) or `localhost`: to be tested behind the reverse proxy. `MAX_CONTENT_LENGTH` is 80 MB (a reverse proxy must allow uploads of that size, e.g. nginx `client_max_body_size`); the files live in the instance folder (`instance/firmware/<id>/`); a signature on the image (more than SHA-256) is a later option.

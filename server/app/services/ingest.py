@@ -6,6 +6,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from ..extensions import db
 from ..models import Channel, Device, Event, Incident, Measurement, RollupDirty, Session, Temperature, now
 from . import calib, commands, devconfig, hwprofile, incidents, notify, settings
+from . import firmware as firmware_svc
 
 log = logging.getLogger(__name__)
 
@@ -190,6 +191,7 @@ def h_hello(conn, device, msg):
         _apply_state(device, state)
         _reconcile_incidents(device, state)
     hwprofile.on_hello(device, msg.get("hwp"))
+    firmware_svc.on_hello(device, msg)  # fw_type, OTA state (docs/protocol.md §14)
     try:
         dev_ver = int(msg.get("cfg_ver", 0))
     except (TypeError, ValueError):
@@ -482,6 +484,8 @@ def h_cmd_ack(conn, device, msg):
         hwprofile.on_ack(device, cmd, msg.get("ok"), msg.get("err"), res)
     elif cmd is not None and cmd.c == "sensor_check":
         calib.on_ack(device, cmd, msg.get("ok"), msg.get("err"))
+    elif cmd is not None and cmd.c == "ota":
+        firmware_svc.on_cmd_ack(device, cmd)
 
 
 HANDLERS = {
@@ -618,6 +622,8 @@ def process_event(device, ev):
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
     elif e in ("hw_reboot_pending", "hw_active", "hw_rollback"):
         hwprofile.on_event(device, ev)
+    elif e in ("ota_progress", "ota_failed", "ota_ok"):  # firmware update over the air (docs/protocol.md §14)
+        firmware_svc.on_event(device, ev)
     elif e == "sensor_check":  # result of a sensor check (Zero & Tare wizard)
         calib.on_event(device, ev)
     elif e == "relay_error":

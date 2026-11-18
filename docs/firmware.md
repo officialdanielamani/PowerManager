@@ -262,3 +262,13 @@ Specification: [protocol.md §13](protocol.md). The server stores a zero and a t
   at a time (`busy`), only with a working sensor (`no_sensor`), channel must exist (`bad_channel`). The relay and the sessions are not
   touched. The server judges the result (stability, magnitude) and decides.
 - Host test: `firmware/tools/sensorcheck_test` (collector timing / statistics / timeout, zero and tare maths).
+
+## Over-the-air update and the firmware tag (both sketches)
+
+`src/ota.cpp` / `ota.h` / `otatag.h` are the same in both sketches. The image holds the constant `PMFWTAG|<FW_TYPE>|<FW_VERSION>|<HW_NAME>|` (it is
+sent in `caps.ota.tag`, so the linker keeps it): the server reads type / version / hardware from it when a zip is uploaded and the meter
+checks it again while downloading. The `ota` command (docs/protocol.md §14.3) ends the sessions, switches the relays off and downloads the image
+in a task (12 KB stack) from the paired server; a failure leaves the running firmware untouched. The new firmware is confirmed when the
+server answers its hello (`OTA_CONFIRM_MS`, default 120 s); a firmware that does not get there, or reboots 3 times unconfirmed, switches back to the previous
+slot (NVS namespace `ota`: `prev`, `try`, `boots`, `rb`). The partition table must stay the one of `partitions.csv` (two 6 MB app slots): a changed
+table can only be flashed by USB. `FW_TYPE` of the PZEM sketch is `pzem-ac` / `pzem-dc` (plain string literals, the tag needs them).

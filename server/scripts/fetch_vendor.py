@@ -26,6 +26,10 @@ FILES = [
     ("chart.js", "4.4.1", [
         ("package/dist/chart.umd.js", "chartjs/chart.umd.js"),
     ]),
+    ("esptool-js", "0.5.4", [
+        ("package/bundle.js", "esptool-js/bundle.js"),
+        ("package/LICENSE", "esptool-js/LICENSE"),
+    ]),
 ]
 
 

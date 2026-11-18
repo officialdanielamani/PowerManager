@@ -16,7 +16,11 @@
 #define METER_KIND "ac"
 #define SENSOR_NAME "AC Power Sensor"
 #endif
-#define FW_TYPE (METER_DC ? "pzem-dc" : "pzem-ac")  // stored on the meter: a different firmware type clears old state
+#if METER_DC
+#define FW_TYPE "pzem-dc"  // stored on the meter: a different firmware type clears old state (also the OTA firmware tag)
+#else
+#define FW_TYPE "pzem-ac"
+#endif
 #define HW_INFO SENSOR_NAME " 1Chn"  // free text shown in "Get meter info" on the server
 
 // ================================================================ [2] ENABLE FLAGS (1 = on, 0 = off)

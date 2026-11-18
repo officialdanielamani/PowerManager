@@ -293,7 +293,9 @@ def firmware():
         from flask import abort
         abort(403)
     outdated = sum(1 for d in access.visible_devices(current_user) if devconfig.fw_outdated(d))
-    return render_template("firmware.html", outdated=outdated, min_fw=".".join(map(str, devconfig.MIN_FW)))
+    from ..models import Firmware
+    return render_template("firmware.html", outdated=outdated, min_fw=".".join(map(str, devconfig.MIN_FW)),
+                           items=Firmware.query.order_by(Firmware.title, Firmware.id.desc()).all())
 
 
 @bp.get("/firmware/config")

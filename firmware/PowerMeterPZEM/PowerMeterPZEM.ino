@@ -8,6 +8,7 @@
 //   led     (core 1): status LED
 //   loop()          : BOOT button (factory reset) + soft watchdog
 
+#include <WiFi.h>
 #include <esp_task_wdt.h>
 
 // Files of the rbAmp sketch in this folder (copied / merged over it): the build then fails with errors in rbamp.cpp.
@@ -25,6 +26,7 @@
 #include "src/i2cbus.h"
 #include "src/led.h"
 #include "src/net.h"
+#include "src/ota.h"
 #include "src/outbox.h"
 #include "src/sensor_pzem.h"
 #include "src/storage.h"
@@ -37,6 +39,30 @@ static Pzem017Sensor pzem(Serial1, PIN_PZEM_RX, PIN_PZEM_TX, PZEM_ADDRESS, PIN_R
 #else
 static PzemSensor pzem(Serial1, PIN_PZEM_RX, PIN_PZEM_TX, PZEM_ADDRESS);
 #endif
+
+// ---- firmware update over the air (ota.h, docs/protocol.md §14)
+struct OtaEvt {
+  const char *state, *why, *ver;
+  int pct;
+};
+static void otaFill(JsonObject o, void *p) {
+  OtaEvt *e = (OtaEvt *)p;
+  o["state"] = e->state;
+  o["pct"] = e->pct;
+  if (e->why) o["why"] = e->why;
+  if (e->ver) o["ver"] = e->ver;
+}
+static void otaEvent(const char *name, const char *state, int pct, const char *why, const char *ver) {
+  OtaEvt e = {state, why, ver, pct};
+  control::emitEvent(name, otaFill, &e);
+}
+static void otaPrepare() { control::prepareRestart(true); }  // sessions end ("restart"), kWh + state saved, relays off
+static void otaRestart() { sys::reboot(200); }
+static bool otaWifi() { return WiFi.status() == WL_CONNECTED; }
+static void otaInit() {
+  ota::Hooks h = {otaPrepare, otaRestart, otaEvent, net::serverParams, otaWifi};
+  ota::begin(h);
+}
 
 static void loadState() {
   StateLock l;
@@ -107,6 +133,7 @@ void setup() {
   delay(200);
   // Boot steps are printed so a crash during start-up shows how far it got.
   sys::bootCheck();
+  otaInit();  // a new firmware that never reached the server goes back to the old one (before anything else)
   auto step = [](const char *what) {
     sys::crumb(sys::CR_BOOT, what);
     Serial.printf("[boot] %s\n", what);
@@ -157,6 +184,7 @@ void loop() {
   }
   sys::crumb(sys::CR_MAIN, "loop");
   i2cbus::tick();  // frees a stuck I2C bus (a device holding SDA low)
+  ota::tick();  // firmware update: progress events, confirm timeout
   sys::tick();
   sys::checkHeartbeats();
   sys::checkStacks();

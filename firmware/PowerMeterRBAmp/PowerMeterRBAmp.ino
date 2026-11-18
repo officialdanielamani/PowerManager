@@ -9,6 +9,7 @@
 //   led     (core 1): status LED
 //   loop()          : BOOT button (factory reset) + soft watchdog
 
+#include <WiFi.h>
 #include <esp_task_wdt.h>
 
 // Files of the PZEM sketch in this folder (copied / merged over it): Arduino compiles every .cpp in src/, so the build fails
@@ -25,6 +26,7 @@
 #include "src/i2cbus.h"
 #include "src/led.h"
 #include "src/net.h"
+#include "src/ota.h"
 #include "src/outbox.h"
 #include "src/rbamp.h"
 #include "src/relays.h"
@@ -67,6 +69,30 @@ static void hwInit() {  // before anything uses the hardware tables
   hwp::Hooks h = {hwProbe, hwEvent, hwRestart, hwApplyClamps, nullptr};
   hwp::begin(hw::defaultProfile(), hw::RELAY_GPIO_COUNT, h);
   hw::reload();
+}
+
+// ---- firmware update over the air (ota.h, docs/protocol.md §14)
+struct OtaEvt {
+  const char *state, *why, *ver;
+  int pct;
+};
+static void otaFill(JsonObject o, void *p) {
+  OtaEvt *e = (OtaEvt *)p;
+  o["state"] = e->state;
+  o["pct"] = e->pct;
+  if (e->why) o["why"] = e->why;
+  if (e->ver) o["ver"] = e->ver;
+}
+static void otaEvent(const char *name, const char *state, int pct, const char *why, const char *ver) {
+  OtaEvt e = {state, why, ver, pct};
+  control::emitEvent(name, otaFill, &e);
+}
+static void otaPrepare() { control::prepareRestart(true); }  // sessions end ("restart"), kWh + state saved, relays off
+static void otaRestart() { sys::reboot(200); }
+static bool otaWifi() { return WiFi.status() == WL_CONNECTED; }
+static void otaInit() {
+  ota::Hooks h = {otaPrepare, otaRestart, otaEvent, net::serverParams, otaWifi};
+  ota::begin(h);
 }
 
 static void loadState() {
@@ -188,6 +214,7 @@ void setup() {
   delay(200);
   // Boot steps are printed so a crash during start-up shows how far it got.
   sys::bootCheck();
+  otaInit();  // a new firmware that never reached the server goes back to the old one (before anything else)
   auto step = [](const char *what) {
     sys::crumb(sys::CR_BOOT, what);
     Serial.printf("[boot] %s\n", what);
@@ -240,6 +267,7 @@ void loop() {
   sys::crumb(sys::CR_MAIN, "loop");
   i2cbus::tick();  // frees a stuck I2C bus (a device holding SDA low)
   hwp::tick();  // hardware profile: restart countdown, confirm check, rollback
+  ota::tick();  // firmware update: progress events, confirm timeout
   sys::tick();
   sys::checkHeartbeats();
   sys::checkStacks();

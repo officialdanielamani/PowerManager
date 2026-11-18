@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Flash {{ fw.title }} · PowerManager{% endblock %}
+{% block content %}
+<h1 class="h4 mb-1">Flash: {{ fw.title }} <span class="badge text-bg-secondary">{{ fw.version }}</span></h1>
+<div class="text-body-secondary small mb-3">{{ fw.info }} · type <code>{{ fw.fw_type }}</code> · hardware <code>{{ fw.hw }}</code></div>
+
+<ul class="nav nav-tabs mb-3" id="wayTabs">
+  <li class="nav-item"><button type="button" class="nav-link active" data-way="ota"><i class="bi bi-cloud-arrow-down me-1"></i>Over the air</button></li>
+  <li class="nav-item"><button type="button" class="nav-link" data-way="usb"><i class="bi bi-usb-symbol me-1"></i>By USB (browser)</button></li>
+</ul>
+
+{# ---------------------------------------------------------------- over the air #}
+<div id="way-ota" style="max-width:1100px">
+  <div class="card mb-3"><div class="card-body">
+    <label class="form-label fw-semibold">Search &amp; select meter</label>
+    <input class="form-control mb-2" id="mFilter" placeholder="Type a name or device ID…" autocomplete="off">
+    <select class="form-select" id="mSel" size="6">
+      {% for m in meters %}<option value="{{ m.id }}" data-text="{{ (m.name ~ ' ' ~ m.device_id)|lower }}" {{ 'selected' if pre == m.id }}>{{ m.name }} · {{ m.device_id }} · {{ m.fw or '?' }}{{ '' if m.online else ' · offline' }}</option>{% endfor %}
+    </select>
+  </div></div>
+  <div id="cmp" class="d-none">
+    <div id="verdict"></div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6"><div class="card h-100"><div class="card-header fw-semibold">Firmware Info</div><div class="card-body small" id="fwBox"></div></div></div>
+      <div class="col-md-6"><div class="card h-100"><div class="card-header fw-semibold">Meter Info <span id="mOn" class="badge ms-1"></span></div><div class="card-body small" id="mBox"></div></div></div>
+    </div>
+    <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Keep the internet connection stable. Unplug any appliance connected to the meter: the relays switch off and its sessions end. Stand by for the meter to reboot after the update.</div>
+    <div id="warnList" class="small mb-2"></div>
+    <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="okBox"><label class="form-check-label" for="okBox">I understand, continue</label></div>
+    <button class="btn btn-primary" id="goBtn" disabled><i class="bi bi-cloud-upload me-1"></i>Upload the Firmware to Meter</button>
+    <div id="prog" class="mt-3 d-none"><div class="progress" style="height:1.5rem"><div class="progress-bar" id="bar" style="width:0%">0%</div></div><div class="small mt-2" id="progTxt"></div></div>
+  </div>
+</div>
+
+{# ---------------------------------------------------------------- by USB #}
+<div id="way-usb" class="d-none" style="max-width:1100px">
+  <div id="usbNo" class="alert alert-secondary d-none"></div>
+  <div id="usbBox">
+    <div class="card mb-3"><div class="card-body small">
+      <p class="mb-2">Writes the firmware through the USB cable of the meter, from this browser. The meter does <strong>not</strong> need to be online, paired or even running: use it for the first flash, a changed partition layout or a meter that does not start.</p>
+      <ol class="mb-0"><li>Plug the USB cable of the board into this computer.</li><li>Press <strong>Connect</strong> and choose the port. The board is read.</li><li>Choose the options and press <strong>Flash</strong>. If the board does not enter download mode by itself: hold <kbd>BOOT</kbd>, press and release <kbd>RESET</kbd>, then connect again.</li></ol>
+    </div></div>
+    <div class="card mb-3"><div class="card-body">
+      <button class="btn btn-outline-primary" id="usbConnect"><i class="bi bi-plug me-1"></i>Connect</button>
+      <span class="ms-2 small" id="usbChip"></span>
+      <div id="usbChecks" class="small mt-2"></div>
+    </div></div>
+    <div id="usbOpts" class="card mb-3 d-none"><div class="card-body">
+      <div class="form-check"><input class="form-check-input" type="radio" name="usbMode" id="modeKeep" value="keep" checked><label class="form-check-label" for="modeKeep"><strong>Update</strong>: bootloader, partition table and app are written; the settings (pairing, Wi-Fi) stay.</label></div>
+      <div class="form-check mt-1"><input class="form-check-input" type="radio" name="usbMode" id="modeErase" value="erase"><label class="form-check-label" for="modeErase"><strong>Erase all flash first</strong>: needed once when the partition layout changed.</label></div>
+      <div id="eraseBox" class="alert alert-danger mt-2 d-none small">
+        <i class="bi bi-exclamation-octagon me-1"></i><strong>The whole flash is erased</strong>: the settings, Wi-Fi and the pairing with the server are lost, and the meter has to be paired again.
+        <div class="mt-2">Meter this board belongs to (optional)
+          <select class="form-select form-select-sm d-inline-block w-auto" id="usbMeter"><option value="">– none / new board –</option>{% for m in meters %}<option value="{{ m.device_id }}">{{ m.name }} · {{ m.device_id }}</option>{% endfor %}</select></div>
+        <div class="mt-2">Type <code id="eraseWord"></code> to confirm: <input class="form-control form-control-sm d-inline-block w-auto" id="eraseType" autocomplete="off"></div>
+      </div>
+      <button class="btn btn-primary mt-3" id="usbFlash" disabled><i class="bi bi-lightning-charge me-1"></i>Flash</button>
+      <div id="usbProg" class="mt-3 d-none"><div class="progress" style="height:1.5rem"><div class="progress-bar" id="usbBar" style="width:0%">0%</div></div></div>
+      <pre id="usbLog" class="small bg-body-tertiary border rounded p-2 mt-3 d-none" style="max-height:220px;overflow:auto"></pre>
+    </div></div>
+  </div>
+</div>
+<div class="mt-3"><a class="btn btn-outline-secondary" href="{{ url_for('main.firmware') }}">Back</a></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var FW = {{ {'id': fw.id, 'title': fw.title, 'version': fw.version, 'type': fw.fw_type, 'hw': fw.hw, 'size': fw.size, 'layout': fw.layout, 'chip': fw.chip}|tojson }};
+  var $ = function (id) { return document.getElementById(id); };
+  var base = "{{ url_for('fw.flash_page', fid=fw.id) }}".replace(/\/flash$/, '');
+  function fmtSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1024).toFixed(1) + ' KB'; }
+  // ---- way tabs
+  document.querySelectorAll('#wayTabs [data-way]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('#wayTabs [data-way]').forEach(function (x) { x.classList.toggle('active', x === b); });
+      $('way-ota').classList.toggle('d-none', b.dataset.way !== 'ota');
+      $('way-usb').classList.toggle('d-none', b.dataset.way !== 'usb');
+    });
+  });
+  // ---- over the air
+  var sel = $('mSel'), cur = null, jobTimer = null;
+  $('mFilter').addEventListener('input', function () {
+    var q = this.value.toLowerCase();
+    Array.prototype.forEach.call(sel.options, function (o) { o.hidden = q && o.dataset.text.indexOf(q) < 0; });
+  });
+  function row(k, v) { return '<div class="d-flex justify-content-between border-bottom py-1"><span class="text-body-secondary">' + k + '</span><span class="text-end">' + v + '</span></div>'; }
+  function render(v) {
+    var m = v.meter;
+    $('cmp').classList.remove('d-none');
+    $('fwBox').innerHTML = row('Type', '<code>' + PM.esc(FW.type) + '</code>') + row('Version', PM.esc(FW.version)) + row('Hardware', PM.esc(FW.hw)) +
+      row('Size', fmtSize(FW.size)) + row('Partition layout', '<code>' + PM.esc(FW.layout || '?') + '</code>');
+    $('mOn').className = 'badge ' + (m.online ? 'text-bg-success' : 'text-bg-secondary'); $('mOn').textContent = m.online ? 'Online' : 'Offline';
+    $('mBox').innerHTML = row('Meter', PM.esc(m.name) + ' <code>' + PM.esc(m.device_id) + '</code>') + row('Type', '<code>' + PM.esc(m.fw_type || '?') + '</code>') +
+      row('Version', PM.esc(m.fw || '?')) + row('Hardware', PM.esc(m.hw || '?')) + row('Free update space', m.slot ? fmtSize(m.slot) : '?') +
+      row('Partition layout', '<code>' + PM.esc(m.layout || '?') + '</code>') + row('Channels', m.channels);
+    var html = '';
+    v.blocked.forEach(function (t) { html += '<div class="alert alert-danger py-2"><i class="bi bi-x-octagon me-1"></i>' + PM.esc(t) + '</div>'; });
+    if (!v.blocked.length) html += '<div class="alert alert-success py-2"><i class="bi bi-check-circle me-1"></i>This firmware fits this meter.</div>';
+    $('verdict').innerHTML = html;
+    $('warnList').innerHTML = v.warnings.map(function (t) { return '<div><i class="bi bi-exclamation-circle text-warning me-1"></i>' + PM.esc(t) + '</div>'; }).join('');
+    cur = v; sync();
+  }
+  function sync() { $('goBtn').disabled = !(cur && !cur.blocked.length && $('okBox').checked && !jobTimer); }
+  $('okBox').addEventListener('change', sync);
+  function load() {
+    if (!sel.value) return;
+    fetch(base + '/check?meter=' + sel.value, {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(render);
+  }
+  sel.addEventListener('change', function () { $('okBox').checked = false; $('prog').classList.add('d-none'); load(); });
+  if (sel.value) load();
+  setInterval(function () { if (sel.value && !jobTimer) load(); }, 10000);
+  function pollJob(id) {
+    jobTimer = setInterval(function () {
+      fetch('{{ url_for("fw.job_status", jid=0) }}'.replace(/0$/, id), {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (s) {
+        var j = s.job, pct = j.state === 'ok' ? 100 : j.pct;
+        $('bar').style.width = pct + '%'; $('bar').textContent = pct + '%';
+        var txt = {pending: 'Waiting for the meter…', downloading: 'The meter downloads the firmware…', verifying: 'Checking the firmware…', rebooting: 'Installed. The meter restarts: stand by…',
+                   ok: 'Done: the meter runs ' + j.ver_to + '.', failed: 'Failed: ' + (j.why || 'unknown'), rolled_back: 'The new firmware did not work: the meter went back to its previous version (' + (j.why || '') + ').'}[j.state] || j.state;
+        $('progTxt').textContent = txt;
+        $('bar').className = 'progress-bar ' + (j.state === 'ok' ? 'bg-success' : (j.state === 'failed' || j.state === 'rolled_back') ? 'bg-danger' : 'progress-bar-striped progress-bar-animated');
+        if (['ok', 'failed', 'rolled_back'].indexOf(j.state) >= 0) { clearInterval(jobTimer); jobTimer = null; load(); }
+      });
+    }, 2000);
+  }
+  $('goBtn').addEventListener('click', function () {
+    $('goBtn').disabled = true;
+    PM.post(base + '/ota', {meter: +sel.value, confirm: $('okBox').checked}).then(function (r) {
+      if (!r.ok) { PM.toast(r.error || 'Failed', 'danger'); sync(); return; }
+      $('prog').classList.remove('d-none'); pollJob(r.job.id);
+    });
+  });
+  // ---- by USB
+  var secure = window.isSecureContext, hasSerial = 'serial' in navigator;
+  if (!hasSerial || !secure) {
+    $('usbBox').classList.add('d-none'); $('usbNo').classList.remove('d-none');
+    $('usbNo').innerHTML = !secure ? '<i class="bi bi-lock me-1"></i>The browser only allows USB access on a secure page. Open this server with <strong>https://</strong> (or <code>http://localhost</code> on the server computer).'
+      : '<i class="bi bi-browser-chrome me-1"></i>This browser cannot use USB (Web Serial). Use Chrome, Edge or Opera on a computer.';
+  }
+})();
+</script>
+<script type="module">
+import { ESPLoader, Transport } from "{{ url_for('static', filename='vendor/esptool-js/bundle.js') }}";
+(function () {
+  if (!window.isSecureContext || !('serial' in navigator)) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var FW = {{ {'id': fw.id, 'chip': fw.chip, 'type': fw.fw_type, 'hw': fw.hw}|tojson }};
+  var base = "{{ url_for('fw.flash_page', fid=fw.id) }}".replace(/\/flash$/, '');
+  var loader = null, transport = null, mac = '', busy = false;
+  function log(t) { var p = $('usbLog'); p.classList.remove('d-none'); p.textContent += t + '\n'; p.scrollTop = p.scrollHeight; }
+  var term = {clean: function () {}, writeLine: log, write: function (t) { log(String(t).replace(/\n$/, '')); }};
+  function chipName(c) { return String(c || '').toUpperCase().replace('ESP32S3', 'ESP32-S3').replace('ESP32S2', 'ESP32-S2').replace('ESP32C3', 'ESP32-C3'); }
+  function ready() {
+    var erase = $('modeErase').checked;
+    var word = (erase && $('usbMeter').value) ? $('usbMeter').value : mac;
+    $('eraseWord').textContent = word;
+    $('eraseBox').classList.toggle('d-none', !erase);
+    $('usbFlash').disabled = !(loader && !busy && (!erase || ($('eraseType').value.trim().toUpperCase() === String(word).toUpperCase() && word)));
+  }
+  ['modeKeep', 'modeErase', 'usbMeter'].forEach(function (id) { $(id).addEventListener('change', ready); });
+  $('eraseType').addEventListener('input', ready);
+  $('usbConnect').addEventListener('click', async function () {
+    try {
+      if (transport) { try { await transport.disconnect(); } catch (e) {} transport = loader = null; }
+      $('usbLog').textContent = ''; $('usbChecks').innerHTML = '';
+      var port = await navigator.serial.requestPort();
+      transport = new Transport(port, false);
+      loader = new ESPLoader({transport: transport, baudrate: 460800, romBaudrate: 115200, terminal: term});
+      var desc = await loader.main();
+      mac = (await loader.chip.readMac(loader)).toUpperCase();
+      var size = await loader.getFlashSize();
+      $('usbChip').innerHTML = '<span class="badge text-bg-success">Connected</span> ' + PM.esc(desc) + ' · MAC <code>' + PM.esc(mac) + '</code> · flash ' + (size / 1048576) + ' MB';
+      var checks = [];
+      if (FW.chip && desc.toUpperCase().replace(/[^A-Z0-9]/g, '').indexOf(chipName(FW.chip).replace(/[^A-Z0-9]/g, '')) < 0)
+        checks.push('<div class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>The board is ' + PM.esc(desc) + ' but this firmware is built for ' + PM.esc(FW.chip) + '.</div>');
+      var man = await (await fetch(base + '/usb/manifest', {credentials: 'same-origin'})).json();
+      var want = parseInt((man.flash.size || '').replace(/\D/g, ''), 10);
+      if (want && size < want * 1048576) checks.push('<div class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>The firmware expects ' + want + ' MB of flash, the board has ' + (size / 1048576) + ' MB.</div>');
+      if (!man.parts.length) checks.push('<div class="text-danger"><i class="bi bi-x-octagon me-1"></i>This firmware has no files for a USB flash.</div>');
+      $('usbChecks').innerHTML = checks.join('');
+      $('usbOpts').classList.remove('d-none'); ready();
+    } catch (e) { log('Connect failed: ' + e); PM.toast('Connect failed: ' + e, 'danger'); }
+  });
+  function toBin(buf) {
+    var u = new Uint8Array(buf), s = '', n = 0x8000;
+    for (var i = 0; i < u.length; i += n) s += String.fromCharCode.apply(null, u.subarray(i, i + n));
+    return s;
+  }
+  $('usbFlash').addEventListener('click', async function () {
+    var erase = $('modeErase').checked, ok = false;
+    busy = true; ready(); $('usbProg').classList.remove('d-none');
+    try {
+      var man = await (await fetch(base + '/usb/manifest', {credentials: 'same-origin'})).json();
+      var arr = [], total = 0;
+      for (var p of man.parts) {
+        var r = await fetch(p.url, {credentials: 'same-origin'});
+        if (!r.ok) throw new Error('download of ' + p.name + ' failed');
+        arr.push({data: toBin(await r.arrayBuffer()), address: p.offset}); total += p.size;
+      }
+      var done = arr.map(function () { return 0; });
+      await loader.writeFlash({fileArray: arr, flashSize: man.flash.size || 'keep', flashMode: man.flash.mode || 'dio', flashFreq: man.flash.freq || '80m',
+        eraseAll: erase, compress: true, reportProgress: function (i, written, t) {
+          done[i] = arr[i].data.length * (written / t);
+          var pct = Math.min(100, Math.round(done.reduce(function (a, b) { return a + b; }, 0) * 100 / total));
+          $('usbBar').style.width = pct + '%'; $('usbBar').textContent = pct + '%';
+        }});
+      await loader.after();
+      ok = true; log('Done. The board restarts.'); PM.toast('Flashed. The board restarts.', 'success');
+    } catch (e) { log('Flash failed: ' + e); PM.toast('Flash failed: ' + e, 'danger'); }
+    try { await PM.post(base + '/usb/log', {ok: ok, erase: erase, mac: mac, chip: $('usbChip').textContent.slice(0, 40)}); } catch (e) {}
+    try { await transport.disconnect(); } catch (e) {}
+    transport = loader = null; busy = false; $('usbChip').textContent = ''; $('usbOpts').classList.add('d-none');
+  });
+})();
+</script>
+{% endblock %}

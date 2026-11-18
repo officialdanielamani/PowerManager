@@ -15,6 +15,7 @@ block = net[net.index('  } else if (!strcmp(c, "hw_profile")) {'):net.index('  }
 open(os.path.join(out, "net_snippet.cpp"), "w", encoding="utf-8").write('''#include "Arduino.h"
 #include <ArduinoJson.h>
 #include "hwprofile.h"
+#include "ota.h"
 SerialT Serial;
 static void sendJson(JsonDocument &) {}
 namespace rbamp { uint8_t scan(uint8_t *, uint8_t) { return 0; } bool isRbamp(uint8_t) { return true; }
@@ -41,11 +42,16 @@ open(os.path.join(out, "glue_snippet.cpp"), "w", encoding="utf-8").write('''#inc
 #include <ArduinoJson.h>
 #include "hwmap.h"
 #include "hwprofile.h"
+#include "ota.h"
 SerialT Serial;
+namespace net { bool serverParams(String &, uint16_t &, bool &, bool &) { return false; } }
+struct WifiT { int status() { return 0; } };
+static WifiT WiFi;
+#define WL_CONNECTED 3
 namespace rbamp { bool isRbamp(uint8_t) { return true; } void applyClamps() {} }
 namespace i2cbus { bool probe(uint8_t) { return true; } }
 namespace control { void emitEvent(const char *, void (*)(JsonObject, void *) = nullptr, void * = nullptr) {}
-                    void prepareRestart() {} void bumpState() {} }
+                    void prepareRestart(bool = false) {} void bumpState() {} }
 namespace sys { void reboot(uint32_t) {} }
 ''' + glue)
 

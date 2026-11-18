@@ -20,9 +20,10 @@ NOTIFY_TYPES = [
     ("disconnected", "Device disconnected for"),
     ("reconnected", "Device reconnected"),
     ("meter_status", "Meter status (disabled / enabled / unsynced / synced / removed)"),
+    ("reboot_pending", "Meter restart (hardware change / firmware update)"),
 ]
 # Types that are on for every account until the account switches them off.
-NOTIFY_DEFAULT_ON = {"meter_status", "temp_high", "ups"}
+NOTIFY_DEFAULT_ON = {"meter_status", "temp_high", "ups", "reboot_pending"}
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
 MIN_FW = (1, 1, 0)  # oldest meter firmware this server works with (both sketches)

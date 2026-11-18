@@ -82,7 +82,7 @@ def validate_profile(p):
 def caps(n, profile=None):
     c = {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": f"UI{n}", "channels": n, "relays": n,
          "voltage": True, "drdy": True, "rtc": True, "amp_rating": 34.8, "ratings": [30] * n, "inputs": ["tamper"],
-         "hw_cfg": 1}
+         "hw_cfg": 1, "ota": {"slot": 6291456, "layout": "3e58d8a2", "tag": "PMFWTAG|rbamp-mc|1.1.0|esp32s3-n16r8|"}}
     if profile:
         chans = profile["ch"]
         total = sum(r["n"] for r in profile["relays"])
@@ -431,6 +431,8 @@ class MeterMC:
                     ok, err = False, "busy"   # one check at a time
                 else:
                     self.checks[i] = {"n": max(10, min(60, int(m.get("n", 10)))), "vals": []}
+            elif c == "ota":
+                ok, err = self.cmd_ota(m)
             elif c == "i2c_scan":
                 res = {"found": sorted(self.bus), "rbamp": sorted(a for a in self.bus if 0x50 <= a <= 0x57)}
                 self.send({"t": "cmd_ack", "ref": m.get("ref"), "ok": True, "res": res})
@@ -472,6 +474,63 @@ class MeterMC:
     # ------------------------------------------------------------ hardware profile (protocol.md §12)
     def ack(self, m, ok=True, err=None, **extra):
         self.send({"t": "cmd_ack", "ref": m.get("ref"), "ok": ok, **({"err": err} if err else {}), **extra})
+
+    def cmd_ota(self, m):
+        """Firmware update over the air (docs/protocol.md §14): download with the token, check, "restart" with the new version."""
+        if getattr(self, "ota_busy", False):
+            return False, "busy"
+        if m.get("type") != self.st.get("fw_type", "rbamp-mc"):
+            return False, "wrong_type"
+        if not m.get("size") or m["size"] > 6291456:
+            return False, "too_big"
+        self.ota_busy = True
+        for s_ in range(self.slots()):  # sessions end, relays off
+            self.stop_slot(s_, "restart")
+        threading.Thread(target=self.ota_run, args=(m,), daemon=True).start()
+        return True, None
+
+    def ota_run(self, m):
+        import hashlib
+        import urllib.request
+        ver = m.get("ver")
+
+        def prog(state, pct):
+            self.event("ota_progress", state=state, pct=pct, ver=ver)
+        try:
+            prog("downloading", 0)
+            data = urllib.request.urlopen(self.st["server"].rstrip("/") + m["path"], timeout=30).read()
+            prog("downloading", 60)
+            if len(data) != m["size"] or hashlib.sha256(data).hexdigest() != m["sha256"]:
+                self.event("ota_failed", state="failed", why="sha256", ver=ver)
+                return
+            prog("verifying", 100)
+            time.sleep(0.5)
+            prog("rebooting", 100)
+            time.sleep(1.5)
+            with self.lock:
+                self.st["fw_prev"], self.st["fw"], self.st["ota_try"] = self.st.get("fw", "1.1.0"), ver, ver
+                self.st["boot"] += 1
+                save_state(self.args.state, self.st)
+            self.reconnect()
+        except Exception as e:  # download failed
+            self.log("OTA ERROR", e)
+            self.event("ota_failed", state="failed", why="net", ver=ver)
+        finally:
+            self.ota_busy = False
+
+    def ota_after_hello(self):
+        """First thing after the hello of a freshly updated firmware: the server answered, so it confirms (or --ota-rollback)."""
+        if not self.st.get("ota_try"):
+            return
+        tried = self.st.pop("ota_try")
+        if getattr(self.args, "ota_rollback", False):
+            self.st["fw"] = self.st.get("fw_prev", "1.1.0")
+            self.st["ota_note"] = {"why": "no_server", "tried": tried}
+            save_state(self.args.state, self.st)
+            self.reconnect()
+            return
+        save_state(self.args.state, self.st)
+        self.event("ota_ok", state="ok", pct=100, ver=tried)
 
     def cmd_hw_profile(self, m):
         prof, ver, mode = m.get("profile") or {}, m.get("ver"), m.get("mode")
@@ -575,12 +634,18 @@ class MeterMC:
                 self.ws = Client.connect(self.ws_url(), headers=headers)
                 self.log("CONNECTED")
                 with self.lock:
-                    self.send({"t": "hello", "fw": "sim-mc-0.7", "proto": 1, "boot": self.st["boot"],
+                    fw = self.st.get("fw", "1.1.0")
+                    ota = {"state": "trial" if self.st.get("ota_try") else "ok", "ver": fw}
+                    if self.st.get("ota_note") and not self.st.get("ota_try"):
+                        ota = dict(ota, state="rolled_back", **self.st.pop("ota_note"))
+                    self.send({"t": "hello", "fw": fw, "fw_type": self.st.get("fw_type", "rbamp-mc"), "hw": "esp32s3-n16r8",
+                               "ota": ota, "proto": 1, "boot": self.st["boot"],
                                "up": int(time.time() - self.boot_t), "tv": 1, "ts": int(time.time()),
                                "cfg_ver": self.st.get("cfg_ver", 0), "caps": caps(self.n, self.hwp["profile"]),
                                "hwp": {"ver": self.hwp["ver"], "state": self.hwp["state"],
                                        "profile": self.hwp["profile"]}, "state": self.state_msg()})
                 last_flush = 0
+                threading.Timer(1.5, self.ota_after_hello).start()
                 while self.running:
                     if time.time() - last_flush > 3:
                         last_flush = time.time()
@@ -650,6 +715,7 @@ def main():
     b.add_argument("--bus", help="I2C addresses that answer, e.g. 0x50,0x20 (default: those of the profile)")
     b.add_argument("--duration", type=float, default=0, help="stop after N seconds (0 = forever)")
     b.add_argument("--speed", type=float, default=1.0, help="<1 makes the loop faster")
+    b.add_argument("--ota-rollback", action="store_true", help="a firmware installed over the air does not work: roll back")
     b.add_argument("--offset-w", type=float, default=0.0, help="sensor offset added to every channel's power (W): what Zeroing finds")
     b.add_argument("--energy-x", type=float, default=1.0, help="multiply energy accumulation (test quotas)")
     args = p.parse_args()

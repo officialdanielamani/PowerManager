@@ -233,7 +233,7 @@ void renew(const char *reason, bool autoRenew) {
 
 static const char *stopReasonName(uint8_t why) {
   return why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : why == STOP_SENSOR ? "sensor"
-       : why == STOP_MANUAL ? "stopped" : why == STOP_TEMP ? "temp" : "disabled";
+       : why == STOP_MANUAL ? "stopped" : why == STOP_TEMP ? "temp" : why == STOP_OTA ? "restart" : "disabled";
 }
 
 // Voltage / tamper / sensor protection with action "end": end the session now (relay off until renewed).
@@ -253,6 +253,16 @@ static const char *ACTION_NAME[] = {"run", "hold", "end"};
 void endSession() {
   StateLock l;
   stopSession(STOP_MANUAL);
+}
+
+// Planned restart (firmware update, docs/protocol.md §14): the session ends (event session_end, reason "restart"), relays off.
+void prepareRestart(bool ota) {
+  (void)ota;
+  {
+    StateLock l;
+    stopSession(STOP_OTA);
+  }
+  relays::write(0);
 }
 
 void setDisabled(bool disabled) {
