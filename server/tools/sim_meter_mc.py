@@ -120,6 +120,7 @@ class MeterMC:
             pr = self.hwp["profile"]
             self.bus = {0x68, *pr["boards"], *[r["addr"] for r in pr["relays"] if r["drv"] != "gpio"]}
         self.countdown = None   # (due epoch, wanted profile message) while a reboot is pending
+        self.checks = {}        # channel -> running sensor check {"n", "vals"}
 
     # ------------------------------------------------------------ helpers
     def log(self, *a):
@@ -275,8 +276,18 @@ class MeterMC:
         v = random.uniform(228, 234)
         self.reading = []
         for i in range(self.n):
-            w = self.load[i] * random.uniform(0.95, 1.05) if self.relay_on[i] else 0.0
+            w = self.load[i] * random.uniform(0.995, 1.005) if self.relay_on[i] else 0.0
+            w += self.args.offset_w * random.uniform(0.99, 1.01)   # the sensor's offset (what Zeroing finds)
             a = w / v
+            chk = self.checks.get(i)
+            if chk is not None:   # sensor check (docs/protocol.md §13.1): raw values, before the zero
+                chk["vals"].append((a, w, v))
+                if len(chk["vals"]) >= chk["n"]:
+                    self.finish_check(i)
+            z = (self.cfg().get("ch") or [{}] * self.n)[i].get("zero") if i < len(self.cfg().get("ch") or []) else None
+            if z:   # zero: subtracted right after the read, so energy and limits never see the offset
+                a, w = max(0.0, a - z.get("a", 0)), max(0.0, w - z.get("w", 0))
+                a, w = (a, w) if a > 0 else (0.0, 0.0)
             self.st["e"][i] += w / 1000 / 3600 * self.args.energy_x
             self.reading.append({"i": i, "v": round(v, 1), "a": round(a, 3), "w": round(w, 1), "pf": 0.98, "hz": 50,
                                  "e": round(self.st["e"][i], 4)})
@@ -373,6 +384,13 @@ class MeterMC:
         elif t == "cmd":
             self.command(msg)
 
+    def finish_check(self, i):
+        vals, n = self.checks.pop(i)["vals"], None
+        n = len(vals)
+        tri = lambda xs: [round(sum(xs) / len(xs), 4), round(min(xs), 4), round(max(xs), 4)]
+        self.event("sensor_check", ch=i, n=n, secs=n, a=tri([x[0] for x in vals]), w=tri([x[1] for x in vals]),
+                   v=tri([x[2] for x in vals]), ok=True)
+
     def command(self, m):
         c, ch, ok, err = m.get("c"), m.get("ch"), True, None
         with self.lock:
@@ -405,6 +423,14 @@ class MeterMC:
                 if self.disabled:
                     for s in range(self.slots()):
                         self.stop_slot(s, "disabled")
+            elif c == "sensor_check":
+                i = m.get("ch", 0)
+                if not isinstance(i, int) or not 0 <= i < self.n:
+                    ok, err = False, "bad_channel"
+                elif self.checks:
+                    ok, err = False, "busy"   # one check at a time
+                else:
+                    self.checks[i] = {"n": max(10, min(60, int(m.get("n", 10)))), "vals": []}
             elif c == "i2c_scan":
                 res = {"found": sorted(self.bus), "rbamp": sorted(a for a in self.bus if 0x50 <= a <= 0x57)}
                 self.send({"t": "cmd_ack", "ref": m.get("ref"), "ok": True, "res": res})
@@ -624,6 +650,7 @@ def main():
     b.add_argument("--bus", help="I2C addresses that answer, e.g. 0x50,0x20 (default: those of the profile)")
     b.add_argument("--duration", type=float, default=0, help="stop after N seconds (0 = forever)")
     b.add_argument("--speed", type=float, default=1.0, help="<1 makes the loop faster")
+    b.add_argument("--offset-w", type=float, default=0.0, help="sensor offset added to every channel's power (W): what Zeroing finds")
     b.add_argument("--energy-x", type=float, default=1.0, help="multiply energy accumulation (test quotas)")
     args = p.parse_args()
     if args.cmd == "pair":

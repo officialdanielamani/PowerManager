@@ -98,9 +98,7 @@ def default_cfg(n_channels=1):
         "volt_action": DEFAULT_PROTECT_ACTION,
         "tamper_protect": False,
         "tamper_action": DEFAULT_PROTECT_ACTION,
-        "tare_a": 0.0,             # own consumption (ESP32 + SSR) on the measured line
-        "tare_w": 0.0,
-        "tare_limits": True,       # the meter uses tared values for the kWh limit and max current
+        "tare_limits": True,       # the meter uses tared values (per channel) for the kWh limit and max current
         "sensor_to_s": SENSOR_TIMEOUT_DEFAULT,  # no valid reading for this long = sensor error; 0 = off
         "sensor_action": DEFAULT_PROTECT_ACTION,
         "summary": False,          # "Core data only": no interval readings, only the session summary
@@ -146,8 +144,6 @@ def default_for(device):
     if device.is_mc:
         cfg.update({"mode": "shared", "drdy": False, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION})
         cfg["ch"] = [_mc_channel_default() for _ in range(n)]
-        for k in ("tare_a", "tare_w", "tare_limits"):  # the clamps measure only the load
-            cfg.pop(k, None)
     if aux_count(device):
         cfg["aux"] = auxcfg.fit([], aux_count(device))
     return cfg
@@ -195,6 +191,8 @@ def fit_channels(device):
     cfg["ch"] = chans
     cfg["aux"] = auxcfg.fit(cfg.get("aux"), aux_count(device))
     device.cfg = cfg
+    from . import calib
+    calib.prune(device)  # channels that no longer exist lose their zero / tare
     return True
 
 
@@ -261,8 +259,7 @@ def _parse_mc(form, device, cfg, errors):
         c.update(_parse_sess(form, f"_{i}", errors, label))
         chans.append(c)
     cfg["ch"] = chans
-    for k in ("tare_a", "tare_w", "tare_limits"):
-        cfg.pop(k, None)
+    cfg["tare_limits"] = form.get("tare_limits") == "on"
 
 
 def parse_form(form, device):
@@ -313,8 +310,6 @@ def parse_form(form, device):
         errors.append("Operating voltage: Min must be lower than Max")
     a = form.get("volt_action", DEFAULT_PROTECT_ACTION)
     cfg["volt_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
-    cfg["tare_a"] = _num(form, "tare_a", float, 0, 5, "Tare current", errors, 0.0)
-    cfg["tare_w"] = _num(form, "tare_w", float, 0, 500, "Tare power", errors, 0.0)
     cfg["tare_limits"] = form.get("tare_limits") == "on"
     cfg["tamper_protect"] = form.get("tamper_protect") == "on"
     a = form.get("tamper_action", DEFAULT_PROTECT_ACTION)
@@ -346,7 +341,20 @@ def _sess_doc(c):
     return sess
 
 
-def to_device(cfg, ver):
+def _calib_doc(calib, i):
+    """zero / tare of channel i for the meter (absent = none)."""
+    c = (calib or {}).get(str(i)) or {}
+    out = {}
+    for k in ("zero", "tare"):
+        v = c.get(k) or {}
+        a, w = float(v.get("a") or 0), float(v.get("w") or 0)
+        if a or w:
+            out[k] = {"a": a, "w": w}
+    return out
+
+
+def to_device(cfg, ver, calib=None):
+    """The config document for the meter. `calib` = Device.calib: zero / tare of each channel (docs/protocol.md §13)."""
     if "mode" in cfg:  # multi-channel meter (docs/multichannel.md)
         return {"ver": ver, "cfg": {
             "report_s": int(cfg.get("report_s", 60)),
@@ -368,7 +376,8 @@ def to_device(cfg, ver):
             "summary": bool(cfg.get("summary")),
             "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
                     "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
-                    "sess": _sess_doc(c)} for i, c in enumerate(cfg.get("ch", []))],
+                    "sess": _sess_doc(c), **_calib_doc(calib, i)} for i, c in enumerate(cfg.get("ch", []))],
+            "tare_limits": bool(cfg.get("tare_limits", True)),
             "aux": auxcfg.to_device(cfg.get("aux")),
             "tz_min": auxcfg.tz_minutes(),
         }}
@@ -382,8 +391,7 @@ def to_device(cfg, ver):
             "sess": sess,
             "volt": {"min": float(cfg.get("volt_min", 0) or 0), "max": float(cfg.get("volt_max", 0) or 0),
                      "action": cfg.get("volt_action", DEFAULT_PROTECT_ACTION)},
-            "tare": {"a": float(cfg.get("tare_a", 0) or 0), "w": float(cfg.get("tare_w", 0) or 0),
-                     "limits": bool(cfg.get("tare_limits", True))},
+            "tare_limits": bool(cfg.get("tare_limits", True)),
             "tamper": {"protect": bool(cfg.get("tamper_protect")),
                        "action": cfg.get("tamper_action", DEFAULT_PROTECT_ACTION)},
             "sensor": {"timeout_s": int(cfg.get("sensor_to_s", SENSOR_TIMEOUT_DEFAULT)),
@@ -392,7 +400,7 @@ def to_device(cfg, ver):
             "summary": bool(cfg.get("summary")),
             "ch": [
                 {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_action": kwh_action(c),
-                 "amp_max": float(c.get("amp_max", 0))}
+                 "amp_max": float(c.get("amp_max", 0)), **_calib_doc(calib, i)}
                 for i, c in enumerate(cfg.get("ch", []))
             ],
             "aux": auxcfg.to_device(cfg.get("aux")),

@@ -16,14 +16,17 @@ def test_tare_math():
     assert tare.kwh(1.0, 3600, t) == pytest.approx(0.9985)  # 1.5 W for 1 h = 1.5 Wh
     assert tare.kwh(0.001, 3600, t) == 0.0
     assert tare.reading({"v": 230, "a": 0.5, "w": 100, "e": 5}, t) == {"v": 230, "a": 0.48, "w": 98.5, "e": 5}
-    assert tare.offsets(Device(tare_a=0, tare_w=0)) is None
+    assert tare.offsets(Device(calib={})) is None and tare.offsets(Device(calib={"0": {"tare": {"a": 0.1, "w": 5}}})) == (0.1, 5.0)
+    assert tare.offsets(Device(calib={"1": {"tare": {"a": 0.1, "w": 5}}}), 1) == (0.1, 5.0) and tare.offsets(Device(calib={"1": {"tare": {"a": 1, "w": 1}}})) is None
+    d = Device(calib={"0": {"tare": {"a": 0.1, "w": 5}}, "2": {"tare": {"a": 0.3, "w": 10}}, "x": {}})
+    assert tare.any_tare(d) and tare.total(d, [0, 1, 2]) == pytest.approx((0.4, 15.0)) and tare.total(d, [1]) is None
 
 
 def test_live_and_history_tared(app, admin):
     with app.app_context():
         pk = _meter("Dryer A", "AAAA1111")
         d = db.session.get(Device, pk)
-        d.cfg = {**d.cfg, "tare_a": 0.01, "tare_w": 2.0}
+        d.calib = {"0": {"tare": {"a": 0.01, "w": 2.0}}}
         conn = FakeConn()
         t0 = now() - 3600
         ingest.handle(conn, d, {"t": "evt", "seq": 1, "ts": t0, "tv": 1, "e": "session_start", "sid": 1})
@@ -43,29 +46,12 @@ def test_live_and_history_tared(app, admin):
     assert "A_tared (-0.01)" in csv[0] and csv[1].endswith(",98.0")
 
 
-def test_tare_now_needs_relay_off_and_fresh_reading(app, admin):
-    with app.app_context():
-        pk = _meter("Dryer A", "AAAA1111")
-        d = db.session.get(Device, pk)
-        d.last_state = {"relay": [{"i": 0, "on": True}]}
-        d.last_reading = {"ts": now(), "ch": [{"i": 0, "a": 0.012, "w": 1.6}]}
-        db.session.commit()
-    r = admin.post(f"/meters/{pk}/action", json={"action": "tare_now"})
-    assert r.status_code == 409 and r.get_json()["error"] == "relay_on"
-    with app.app_context():
-        d = db.session.get(Device, pk)
-        d.last_state = {"relay": [{"i": 0, "on": False}]}
-        db.session.commit()
-    r = admin.post(f"/meters/{pk}/action", json={"action": "tare_now"}).get_json()
-    assert r["ok"] and r["a"] == 0.012 and r["w"] == 1.6
-
-
 def test_meter_reported_tared_kwh_wins(app, admin):
     """Firmware 0.3+ sends its own tared session kWh (the value its limit uses)."""
     with app.app_context():
         pk = _meter("Dryer A", "AAAA1111")
         d = db.session.get(Device, pk)
-        d.cfg = {**d.cfg, "tare_w": 2.0}
+        d.calib = {"0": {"tare": {"a": 0.0, "w": 2.0}}}
         ingest.handle(FakeConn(), d, {"t": "tel", "items": [{**tel(5, now(), 3.0), "s": {"sid": 1, "kwh": 0.8, "kwh_t": 0.75}}]})
         db.session.commit()
     m = admin.get(f"/meters/{pk}/live").get_json()
@@ -75,8 +61,11 @@ def test_meter_reported_tared_kwh_wins(app, admin):
 def test_tare_goes_to_the_meter_config(app):
     from app.services import devconfig
     with app.app_context():
-        cfg, errors = devconfig.parse_form({"report_s": "60", "sess_mode": "none", "daily_at": "00:00",
-                                            "tare_a": "0.012", "tare_w": "1.6", "tare_limits": "on"}, Device(caps={}))
-        assert not errors and devconfig.to_device(cfg, 1)["cfg"]["tare"] == {"a": 0.012, "w": 1.6, "limits": True}
-        cfg, errors = devconfig.parse_form({"tare_w": "900"}, Device(caps={}))
-        assert any("Tare power" in e for e in errors)
+        cfg, errors = devconfig.parse_form({"report_s": "60", "sess_mode": "none", "daily_at": "00:00", "tare_limits": "on"}, Device(caps={}))
+        calib = {"0": {"zero": {"a": 0.004, "w": 0.5}, "tare": {"a": 0.012, "w": 1.6}}}
+        doc = devconfig.to_device(cfg, 1, calib)["cfg"]
+        assert not errors and doc["tare_limits"] is True and "tare" not in doc
+        assert doc["ch"][0]["zero"] == {"a": 0.004, "w": 0.5} and doc["ch"][0]["tare"] == {"a": 0.012, "w": 1.6}
+        assert "zero" not in devconfig.to_device(cfg, 1, {})["cfg"]["ch"][0]       # nothing set = nothing sent
+        off, _ = devconfig.parse_form({"report_s": "60", "sess_mode": "none", "daily_at": "00:00"}, Device(caps={}))
+        assert devconfig.to_device(off, 1)["cfg"]["tare_limits"] is False

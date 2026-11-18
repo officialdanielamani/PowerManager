@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "_macros.html" import kind_badge %}
+{% block title %}Zero &amp; Tare · {{ d.name }} · PowerManager{% endblock %}
+{% block content %}
+<h1 class="h4 mb-1">{{ d.name }} {{ kind_badge(d.kind) }}</h1>
+<div class="text-body-secondary small mb-3">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
+{% set active = 'calibration' %}{% include "meters/_tabs.html" %}
+
+<div class="card mb-3" style="max-width:1000px"><div class="card-body small">
+  <p class="mb-2"><strong>Zero</strong>: the sensor's offset with <strong>no load</strong>. Disconnect the load, run the check, then set it: the meter subtracts it from
+    every reading (current, power, energy, limits, history).</p>
+  <p class="mb-2"><strong>Tare</strong>: a load that is <strong>connected</strong> and should count as 0 (a charger, a fixture). Connect it, run the check, then set it:
+    values are shown without it, and the meter's limits use the tared values (<em>Configuration → Use tared values for limits</em>).</p>
+  <p class="mb-0 text-body-secondary">The <strong>sensor check</strong> takes at least {{ limits.min_secs }} s ({{ limits.min_readings }} readings) and must be stable.
+    {% if d.is_mc %}Every channel has its own zero and tare.{% endif %} <span id="online" class="badge ms-1"></span></p>
+</div></div>
+
+<div id="channels" style="max-width:1000px"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var BASE = "{{ url_for('meters.calibration', pk=d.id) }}";
+  var LIM = {{ limits|tojson }};
+  var state = {{ {'channels': view, 'online': online, 'server_time': 0}|tojson }};
+  var $ = function (id) { return document.getElementById(id); };
+  function fmtA(v) { return v == null ? '–' : (+v).toFixed(3) + ' A'; }
+  function fmtW(v) { return v == null ? '–' : (+v).toFixed(1) + ' W'; }
+  function when(t) { return t ? new Date(t * 1000).toLocaleString() : ''; }
+
+  function stat(name, tri, f) {
+    if (!tri) return '';
+    return '<tr><td>' + name + '</td><td>' + f(tri[0]) + '</td><td>' + f(tri[1]) + '</td><td>' + f(tri[2]) + '</td></tr>';
+  }
+  function block(c, kind) {
+    var cur = c[kind], chk = c.check || {}, mine = chk.kind === kind;
+    var ev = c.eval && mine ? c.eval : null;
+    var label = kind === 'zero' ? 'Zero' : 'Tare';
+    var html = '<div class="border rounded p-3 mb-2"><div class="d-flex flex-wrap align-items-center gap-2">' +
+      '<span class="fw-semibold">' + label + '</span>' +
+      (cur ? '<span class="badge text-bg-success">' + fmtA(cur.a) + ' · ' + fmtW(cur.w) + '</span><span class="small text-body-secondary">' + (cur.at ? when(cur.at) : '') + (c.by ? ' · ' + PM.esc(c.by) : '') + '</span>'
+           : '<span class="badge text-bg-secondary">not set</span>') +
+      '<span class="ms-auto d-flex gap-2">' +
+      '<button class="btn btn-sm btn-outline-primary" data-act="check" data-ch="' + c.ch + '" data-kind="' + kind + '"><i class="bi bi-activity me-1"></i>Check sensor</button>' +
+      '<button class="btn btn-sm btn-primary" data-act="apply" data-ch="' + c.ch + '" data-kind="' + kind + '"' + (ev && ev.ok ? '' : ' disabled') + '><i class="bi bi-check2 me-1"></i>Set ' + kind + '</button>' +
+      '<button class="btn btn-sm btn-outline-danger" data-act="clear" data-ch="' + c.ch + '" data-kind="' + kind + '"' + (cur ? '' : ' disabled') + '>Clear</button></span></div>';
+    if (mine && chk.state === 'running') {
+      var secs = Math.max(0, Math.round((state.server_time || Date.now() / 1000) - chk.at));
+      html += '<div class="mt-2 small"><span class="spinner-border spinner-border-sm me-1"></span>Checking the sensor… <strong>' + Math.min(secs, LIM.min_readings) + ' / ' + LIM.min_readings + '</strong> readings (at least ' + LIM.min_secs + ' s). ' +
+        (kind === 'zero' ? 'Keep the load disconnected.' : 'Keep the load connected and steady.') + '</div>';
+    } else if (mine && (chk.state === 'done' || chk.state === 'failed') && ev) {
+      var s = ev.stats;
+      html += '<div class="mt-2 small">';
+      if (s) html += '<table class="table table-sm mb-1" style="max-width:420px"><thead><tr><th></th><th>mean</th><th>min</th><th>max</th></tr></thead><tbody>' +
+        stat('Current', s.a, fmtA) + stat('Power', s.w, fmtW) + stat('Voltage', s.v, function (v) { return (+v).toFixed(1) + ' V'; }) +
+        '</tbody></table><div class="text-body-secondary">' + s.n + ' readings in ' + s.secs + ' s · ' + when(chk.at) + '</div>';
+      if (ev.ok) html += '<div class="text-success mt-1"><i class="bi bi-check-circle me-1"></i>Good: would set <strong>' + fmtA(ev.a) + ' · ' + fmtW(ev.w) + '</strong>' + (kind === 'tare' ? ' (without the zero)' : '') + '. Press <em>Set ' + kind + '</em>.</div>';
+      else ev.reasons.forEach(function (r) { html += '<div class="text-danger mt-1"><i class="bi bi-x-circle me-1"></i>' + PM.esc(r) + '</div>'; });
+      html += '</div>';
+    }
+    return html + '</div>';
+  }
+  function render() {
+    $('online').className = 'badge ' + (state.online ? 'text-bg-success' : 'text-bg-secondary');
+    $('online').textContent = state.online ? 'Online' : 'Offline';
+    $('channels').innerHTML = state.channels.map(function (c) {
+      return '<div class="card mb-3"><div class="card-header fw-semibold">' + PM.esc(c.name) + '</div><div class="card-body pb-1">' + block(c, 'zero') + block(c, 'tare') + '</div></div>';
+    }).join('');
+  }
+  render();
+  var busy = false;
+  PM.poll(BASE + '/status', 1000, function (s) { if (!busy) { state = s; render(); } });
+  $('channels').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]');
+    if (!b || b.disabled) return;
+    var body = {ch: +b.dataset.ch, kind: b.dataset.kind, what: b.dataset.kind};
+    if (b.dataset.act === 'clear' && !confirm('Clear the ' + b.dataset.kind + ' of this channel?')) return;
+    busy = true;
+    PM.post(BASE + '/' + b.dataset.act, body).then(function (r) {
+      if (r.ok) PM.toast(b.dataset.act === 'check' ? 'Sensor check started' : b.dataset.act === 'apply' ? 'Saved: sent to the meter' : 'Cleared', 'success');
+      else PM.toast((r.errors || [r.error || 'Failed']).join(' '), 'danger');
+    }).finally(function () { busy = false; });
+  });
+})();
+</script>
+{% endblock %}

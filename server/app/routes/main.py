@@ -53,8 +53,13 @@ def meter_summary(d, show_price=None, user=None):
     cost = round(float(kwh_now) * price, 4) if show_price and price is not None and kwh_now is not None else None
     sess_end = cur.ended_at if cur and cur.ended_at else None
     # Tared view (own consumption subtracted); raw values stay in the normal fields.
-    tare = tare_svc.offsets(d)
-    chans_t = [tare_svc.reading(c, tare) for c in chans]
+    if d.is_mc:  # per channel (independent of each other); the whole-meter tare is their sum
+        seen = [i for i in range(devconfig.channel_count(d)) if allowed is None or i in allowed]
+        tare = tare_svc.total(d, seen)
+        chans_t = [tare_svc.reading(c, tare_svc.offsets(d, c.get("i", 0))) for c in chans]
+    else:
+        tare = tare_svc.offsets(d)
+        chans_t = [tare_svc.reading(c, tare) for c in chans]
     w_t = sum((c.get("w") or 0) for c in chans_t) if chans_t else None
     kwh_t = None
     if tare and sess.get("kwh_t") is not None:
@@ -74,7 +79,7 @@ def meter_summary(d, show_price=None, user=None):
         "temp_high": bool(st.get("temp_high")),
         "clamp_rev": [d.channel_name(i) if d.is_mc else "" for i in rev],  # channels with a reversed clamp
         "clamp_rev_idx": rev,
-        "tare": {"a": d.tare_a, "w": d.tare_w} if tare else None,
+        "tare": {"a": tare[0], "w": tare[1]} if tare else None,
         "reading_tared": chans_t,
         "w_tared": round(w_t, 1) if w_t is not None else None,
         "kwh_tared": kwh_t,
@@ -160,15 +165,20 @@ def _mc_summary(d, base, show_price, allowed=None):
     sessions = {s.get("ch"): s for s in st.get("sessions") or []} if indep else {}
     t = now()
     channels, totals, costs, maxes = [], 0.0, [], []
+    totals_t, costs_t = 0.0, []
     for i in range(devconfig.channel_count(d)):
         if allowed is not None and i not in allowed:
             continue
         rd, rl = readings.get(i) or {}, relays.get(i) or {}
+        tr = tare_svc.offsets(d, i)  # this channel's tare (independent of the other channels)
         c = {"i": i, "name": d.channel_name(i), "label": (ccfg[i].get("name") if i < len(ccfg) else "") or "",
              "w": rd.get("w"), "a": rd.get("a"), "pf": rd.get("pf"), "e": rd.get("e"),
              "relay_on": bool(rl.get("on")), "relay_block": rl.get("block"), "tripped": bool(rl.get("tripped")),
              "amp_max": (ccfg[i].get("amp_max") if i < len(ccfg) else 0) or 0,
-             "reversed": bool(((st.get("clamp_rev") or {}).get(str(i)) or {}).get("flag"))}
+             "reversed": bool(((st.get("clamp_rev") or {}).get(str(i)) or {}).get("flag")),
+             "tare": {"a": tr[0], "w": tr[1]} if tr else None,
+             "a_tared": round(tare_svc.amps(rd.get("a"), tr), 3) if tr and rd.get("a") is not None else rd.get("a"),
+             "w_tared": round(tare_svc.watts(rd.get("w"), tr), 1) if tr and rd.get("w") is not None else rd.get("w")}
         if indep:
             ss = sessions.get(i) or {}
             rec = None
@@ -187,7 +197,13 @@ def _mc_summary(d, base, show_price, allowed=None):
                 cur, price = rec.currency or "", rec.price_per_kwh
             cost = round(float(kwh) * price, 4) if show_price and price is not None and kwh is not None else None
             start = ss.get("start") or (rec.started_at if rec else None)
+            secs = ((rec.ended_at if rec and rec.ended_at else t) - start) if start else 0
+            kwh_t = None
+            if kwh is not None:  # the meter's own tared value (its limit) wins, else computed from the tare
+                kwh_t = round(float(ss["kwh_t"]), 4) if tr and ss.get("kwh_t") is not None else round(tare_svc.kwh(float(kwh), secs, tr), 4)
+            cost_t = round(kwh_t * price, 4) if show_price and price is not None and kwh_t is not None else None
             c.update({"sid": ss.get("sid"), "status": status, "kwh": kwh, "kwh_max": ss.get("max") or 0,
+                      "kwh_tared": kwh_t, "cost_tared": settings.money(cost_t, cur) if cost_t is not None else None,
                       "cost": settings.money(cost, cur) if cost is not None else None,
                       "sess_start_ts": start, "sess_start": settings.fmt_ts(start) if start else None,
                       "sess_end_ts": rec.ended_at if rec and rec.ended_at else None,
@@ -198,6 +214,9 @@ def _mc_summary(d, base, show_price, allowed=None):
                       "session_desc": devconfig.describe_session(ccfg[i] if i < len(ccfg) else {})})
             if kwh is not None:
                 totals += float(kwh)
+                totals_t += kwh_t if kwh_t is not None else float(kwh)
+                if cost_t is not None:
+                    costs_t.append((cost_t, cur))
             if cost is not None:
                 costs.append((cost, cur))
             maxes.append(float(ss.get("max") or 0))
@@ -210,7 +229,8 @@ def _mc_summary(d, base, show_price, allowed=None):
         out.update({
             "status": "active" if statuses <= {"active"} else ("independent_mixed" if "active" in statuses else
                                                               next(iter(statuses)) if len(statuses) == 1 else "independent_mixed"),
-            "kwh": round(totals, 4),
+            "kwh": round(totals, 4), "kwh_tared": round(totals_t, 4),
+            "cost_tared": settings.money(sum(c for c, _ in costs_t), costs_t[0][1]) if costs_t else None,
             "kwh_max": round(sum(maxes), 4) if maxes and all(m > 0 for m in maxes) else 0,
             "cost": settings.money(sum(c for c, _ in costs), costs[0][1]) if costs else None,
             "sess_start": None, "next_reset": None, "session_desc": "Per channel (independent)",

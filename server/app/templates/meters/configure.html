@@ -271,23 +271,18 @@
       {% endfor %}
     </div></div>
   </div>
-  {% else %}
+  {% endif %}
   <div class="col-12" data-pane="channels">
     <div class="card"><div class="card-body">
-      <p class="small text-body-secondary mb-2">If the meter's own power supply (ESP32, SSR) is on the measured line, the power sensor also measures it.
-        These offsets are subtracted when showing <strong>Tared</strong> values (Info page switch, dashboard, CSV extra columns) and, if ticked below, by the meter for its limits. Raw readings are always stored.</p>
       <div class="d-flex flex-wrap gap-2 align-items-center">
-        <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Current</span><input class="form-control" type="number" step="0.001" min="0" max="5" name="tare_a" id="tare_a" value="{{ val('tare_a', cfg.get('tare_a', d.tare_a)) }}"><span class="input-group-text">A</span></div>
-        <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Power</span><input class="form-control" type="number" step="0.1" min="0" max="500" name="tare_w" id="tare_w" value="{{ val('tare_w', cfg.get('tare_w', d.tare_w)) }}"><span class="input-group-text">W</span></div>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="tareNow" title="Fill from the latest reading (relay must be OFF)"><i class="bi bi-bullseye me-1"></i>Tare now</button>
-        <button type="button" class="btn btn-sm btn-link" onclick="document.getElementById('tare_a').value=0;document.getElementById('tare_w').value=0">Clear</button>
+        <span class="fw-semibold small">Zero &amp; Tare</span>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('meters.calibration', pk=d.id) }}"><i class="bi bi-bullseye me-1"></i>Open Zero &amp; Tare</a>
+        <span class="small text-body-secondary">Zero: sensor offset with no load. Tare: a connected load that should count as 0. Per channel, with a sensor check.</span>
       </div>
       <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="tare_limits" id="tare_limits" {{ chk('tare_limits', cfg.get('tare_limits', true)) }}>
-        <label class="form-check-label" for="tare_limits">Use tared values for limits (kWh limit and max current, on the meter)</label></div>
-      <div class="form-text">Tare now: turn the relay OFF, wait for a fresh reading (or use Get Data Now), then press it. 0 = no tare. Voltage is never tared.</div>
+        <label class="form-check-label" for="tare_limits">Use tared values for limits (max current and kWh limit, on the meter)</label></div>
     </div></div>
   </div>
-  {% endif %}
 
   <div class="col-12" data-pane="data" style="max-width:900px">
     <div class="card"><div class="card-body">
@@ -622,14 +617,6 @@
   }
   document.querySelectorAll('input[name=drdy]').forEach(function (r) { r.addEventListener('change', syncDm); });
   syncDm();
-  var tn = document.getElementById('tareNow');
-  if (tn) tn.addEventListener('click', function () {
-    PM.post(actionUrl, {action: 'tare_now'}).then(function (r) {
-      if (!r.ok) return PM.toast(r.message || r.error, 'warning');
-      document.getElementById('tare_a').value = r.a; document.getElementById('tare_w').value = r.w;
-      PM.toast(r.message, 'info');
-    });
-  });
   var tp = document.getElementById('tamper_protect'), to = document.getElementById('tamperOpts');  // (tare: only single-channel meters)
   function syncTamper() { to.querySelectorAll('input').forEach(function (r) { r.disabled = !tp.checked; }); to.style.opacity = tp.checked ? 1 : .5; }
   tp.addEventListener('change', syncTamper); syncTamper();

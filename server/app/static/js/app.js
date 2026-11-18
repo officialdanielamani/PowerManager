@@ -78,6 +78,12 @@ var PM = (function () {
     if (!tared || !m.tare) return m;
     var o = Object.assign({}, m);
     o.w = m.w_tared; o.kwh = m.kwh_tared; o.cost = m.cost_tared; o.reading = m.reading_tared;
+    if (m.mc && m.channels) {  // each channel has its own tare
+      o.channels = m.channels.map(function (c) {
+        return c.tare ? Object.assign({}, c, {w: c.w_tared, a: c.a_tared, kwh: c.kwh_tared == null ? c.kwh : c.kwh_tared,
+                                             cost: c.cost_tared == null ? c.cost : c.cost_tared}) : c;
+      });
+    }
     return o;
   }
 

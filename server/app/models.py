@@ -127,9 +127,13 @@ class Device(db.Model):
     link_key = db.Column(db.String(64))
     link_up = db.Column(db.Integer, nullable=False, default=0)
     via_fk = db.Column(db.Integer)  # gateway (device pk) of the last mesh connection
-    # Tare: the meter's own consumption, subtracted when showing "tared" values (server-only).
+    # Legacy (before per-channel zero / tare): not used any more, kept so old databases keep their columns.
     tare_a = db.Column(db.Float, nullable=False, default=0.0)
     tare_w = db.Column(db.Float, nullable=False, default=0.0)
+    # Zero and tare per channel (docs/protocol.md §13): {"<ch>": {"zero": {"a","w","at"}, "tare": {...}, "by": user}}.
+    calib = db.Column(db.JSON, nullable=False, default=dict)
+    # Last sensor check per channel: {"<ch>": {"state": running|done|failed, "ref", "at", "stats", "why"}}.
+    last_check = db.Column(db.JSON, nullable=False, default=dict)
     # Owner: a manager account (null = the admin). The owner manages the meter and its viewers.
     owner_fk = db.Column(db.Integer, db.ForeignKey("user.id"))
     # Electricity price of this meter (null = no cost shown). Locked into each session when it starts.

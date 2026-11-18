@@ -5,7 +5,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..extensions import db
 from ..models import Channel, Device, Event, Incident, Measurement, RollupDirty, Session, Temperature, now
-from . import commands, devconfig, hwprofile, incidents, notify, settings
+from . import calib, commands, devconfig, hwprofile, incidents, notify, settings
 
 log = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ def h_hello(conn, device, msg):
     if getattr(conn, "direct", True) and device.link_key:
         conn.send({"t": "link_key", "key": device.link_key})  # meter stores it (needed for mesh)
     if dev_ver != device.cfg_ver_wanted:
-        conn.send({"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted)})
+        conn.send({"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted, device.calib)})
     commands.flush_pending(device, conn)
 
 
@@ -478,6 +478,8 @@ def h_cmd_ack(conn, device, msg):
     cmd = commands.ack(device, msg.get("ref"), msg.get("ok"), msg.get("err"), res)
     if cmd is not None and cmd.c in ("hw_profile", "hw_cancel"):
         hwprofile.on_ack(device, cmd, msg.get("ok"), msg.get("err"), res)
+    elif cmd is not None and cmd.c == "sensor_check":
+        calib.on_ack(device, cmd, msg.get("ok"), msg.get("err"))
 
 
 HANDLERS = {
@@ -614,6 +616,8 @@ def process_event(device, ev):
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
     elif e in ("hw_reboot_pending", "hw_active", "hw_rollback"):
         hwprofile.on_event(device, ev)
+    elif e == "sensor_check":  # result of a sensor check (Zero & Tare wizard)
+        calib.on_event(device, ev)
     elif e == "relay_error":
         notify.notify(device, "sensor_error", "Relay board not answering on I2C: the relays cannot be switched")
     elif e == "relay_ok":

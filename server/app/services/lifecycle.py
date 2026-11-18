@@ -107,7 +107,7 @@ def hardware_changed(device, new_caps, new_sig):
                           info=device.info, caps=device.caps, cfg=device.cfg, fw=device.fw, hw=device.hw,
                           hw_sig=old_sig, pair_gen=device.pair_gen, paired_at=device.paired_at,
                           last_seen_at=device.last_seen_at, removed_at=t, last_reading=device.last_reading,
-                          tare_a=device.tare_a, tare_w=device.tare_w, owner_fk=device.owner_fk,
+                          calib=device.calib, last_check=device.last_check, owner_fk=device.owner_fk,
                           currency=device.currency, price_per_kwh=device.price_per_kwh,
                           last_state={"archive": {"reason": "hardware", "at": t, "from": old_label,
                                                   "to": devconfig.hw_label(new_sig), "live": device.id}})
@@ -139,7 +139,7 @@ def hardware_changed(device, new_caps, new_sig):
     device.cfg_ver_wanted = (device.cfg_ver_wanted or 0) + 1
     device.cfg_ver_applied = 0
     device.cfg_error = None
-    device.tare_a = device.tare_w = 0.0
+    device.calib, device.last_check = {}, {}  # zero / tare belong to the old hardware
     device.last_state, device.last_reading, device.last_info = {}, {}, {}
     ingest.server_event(device, "hardware_changed", {"from": old_sig, "to": new_sig,
                                                      "archive": archived.device_id if archived else None})
