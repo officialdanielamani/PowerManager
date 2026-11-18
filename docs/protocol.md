@@ -599,7 +599,7 @@ app image); the bootloader, partitions, `boot_app0` and `merged.bin` are only fo
 
 On upload the server:
 - finds the app image: `*.ino.bin` that is not `*.bootloader.bin`, `*.partitions.bin` or `*.merged.bin`; stores that file and its
-  SHA-256 (the zip itself is not kept); limits the zip and file sizes and rejects odd paths (zip-slip);
+  SHA-256, **and** the files for a USB flash (14.8: `flash_args`, `*.bootloader.bin`, `*.partitions.bin`, `boot_app0.bin`, `partitions.csv`; `merged.bin` only as a fallback) — not the `.elf` / `.map`; limits the zip and file sizes and rejects odd paths (zip-slip);
 - reads the **firmware tag** inside the image. Every firmware contains a constant string `PMFWTAG|<type>|<version>|<hw>|` (placed
   in the code with `used` so the linker keeps it; the Arduino build does not carry the sketch name, so the tag is the reliable way).
   `<type>` is a free text id (`rbamp`, `pzem`, later `logger-pzem`, `smart-relay` ... the server has **no fixed list**: it shows
@@ -649,6 +649,31 @@ The AUX source *reboot* (§12) also stays active for the OTA restart.
 Select several meters of the **same type** and one firmware; the server sends them one after another (not in parallel; the next
 starts when the previous is confirmed or failed) and shows a table of results. The per-meter flow above stays the building block.
 
+### 14.8 USB flash from the browser (Web Serial, like esptool.spacehuhn.com)
+The Flash page has two ways, chosen at the top: **Over the air** (14.2, the meter must be online) and **By USB (browser)**. The USB
+way does **not** need the meter to be online, paired or even running: it writes the flash through the serial port of the browser.
+It is also the way to flash the **first** OTA-capable firmware, to change the partition layout, and to recover a meter that does not boot,
+without the Arduino IDE.
+
+- **Browser:** needs Web Serial: Chrome, Edge, Opera on a computer (not Firefox, not Safari, not iOS). The page needs a **secure
+  context**: `https://` or `http://localhost`; on plain `http://` on the LAN the browser hides Web Serial, so the page shows that
+  reason ("open the server over HTTPS") instead of a dead button. Without support the USB option is greyed out with the reason.
+- **Tool:** Espressif's `esptool-js`, stored in `static/vendor` (works without internet, like the other vendor files).
+- **Steps shown on the page:** connect the USB cable → *Connect* (browser port picker) → the page reads the chip (type, MAC, flash
+  size) and checks it against the firmware (ESP32-S3, flash size at least the layout's) → options → *Flash* → progress bar and log →
+  the board resets. If the board does not enter download mode by itself: hold BOOT, press and release RESET.
+- **What is written** (offsets from the zip's `flash_args`; for an ESP32-S3: bootloader `0x0`, partitions `0x8000`, boot_app0
+  `0xe000`, app `0x10000`); `merged.bin` at `0x0` only when `flash_args` is missing. Options:
+  - **Update** (default): all files above, the settings area (NVS) is kept; pairing and Wi-Fi stay.
+  - **Erase all flash first**: needed once when the layout changed (as for the 16 MB layout); the settings are lost and the meter is
+    paired again. Asks for a confirmation; **admin only**.
+- **Server side:** the browser downloads the files from an authenticated endpoint (admin, and a manager as for OTA); the server never
+  talks to the board. At the end the page may report `usb_flash` (firmware id, chip MAC, who) to the server for the audit log; a flash
+  that was cancelled halfway leaves the board in download mode, and can simply be flashed again.
+- **The layout check of 14.1 does not apply** to USB (the partition table is written too); the type / hardware tag is still compared
+  and a mismatch is a warning (a USB flash can put any firmware on a board).
+- **Notifications:** none (nobody is told about a USB flash, there is no meter connection); the audit log entry is the record.
+
 ### 14.7 Open points
-`PMFWTAG` and `caps.ota` need firmware changes in both sketches; `MAX_CONTENT_LENGTH` and the Docker data volume must allow the
+The server must be reachable over HTTPS for the USB way (14.8). `PMFWTAG` and `caps.ota` need firmware changes in both sketches; `MAX_CONTENT_LENGTH` and the Docker data volume must allow the
 uploads; a signature on the image (more than SHA-256) is a later option.
