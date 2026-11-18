@@ -165,7 +165,7 @@ static void startSession(uint8_t slot, bool autoRenew) {
   store::saveSession(slot, s);
   saveEnergy();
   stats_[slot].reset();
-  SessCtx ctx = {s.sid, (int8_t)(indep() ? slot : -1), autoRenew, slotKwhMax(slot), nullptr, 0};
+  SessCtx ctx = {s.sid, (int8_t)(indep() ? slot : -1), autoRenew, slotKwhMax(slot), nullptr, 0, nullptr};
   emitEvent("session_start", [](JsonObject o, void *p) {
     SessCtx *c = (SessCtx *)p;
     o["sid"] = c->sid;

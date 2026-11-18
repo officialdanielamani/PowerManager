@@ -11,6 +11,12 @@
 
 #include <esp_task_wdt.h>
 
+// Files of the PZEM sketch in this folder (copied / merged over it): Arduino compiles every .cpp in src/, so the build fails
+// with errors in sensor_pzem.cpp. Use a clean copy of firmware/PowerMeterRBAmp (delete the old folder first).
+#if __has_include("src/sensor_pzem.h")
+#error "PowerMeterRBAmp/src contains sensor_pzem.h from the PowerMeterPZEM sketch. Delete the folder and copy firmware/PowerMeterRBAmp again (do not merge the two sketches)."
+#endif
+
 #include "config.h"
 #include "src/app_state.h"
 #include "src/auxrelay.h"

@@ -10,6 +10,12 @@
 
 #include <esp_task_wdt.h>
 
+// Files of the rbAmp sketch in this folder (copied / merged over it): the build then fails with errors in rbamp.cpp.
+// Use a clean copy of firmware/PowerMeterPZEM (delete the old folder first).
+#if __has_include("src/rbamp.h")
+#error "PowerMeterPZEM/src contains rbamp.h from the PowerMeterRBAmp sketch. Delete the folder and copy firmware/PowerMeterPZEM again (do not merge the two sketches)."
+#endif
+
 #include "config.h"
 #include "src/app_state.h"
 #include "src/auxrelay.h"

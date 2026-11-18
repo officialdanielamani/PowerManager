@@ -190,3 +190,13 @@ firmware/tools/host_tests.sh                    # PC tests: shared files, AUX au
 `arduino-cli` must be installed. The PC tests need g++, OpenSSL headers and
 `pip install -r server/requirements-dev.txt`. CI runs all of this (`.github/workflows/ci.yml`).
 Rules for changing the firmware (shared files, `config.h` copies, versions): [`../docs/handover.md`](../docs/handover.md) §5.
+
+
+## Troubleshooting
+
+- **Errors in `sensor_pzem.cpp` (`PZEM_TIMEOUT_MS was not declared`, `struct Reading has no member named v`) when building PowerMeterRBAmp**,
+  or errors in `rbamp.cpp` when building PowerMeterPZEM: the sketch folder contains files of the other sketch (a copy that was merged
+  over an older one). Arduino compiles every `.cpp` in `src/`. Delete the sketch folder and copy a clean `firmware/PowerMeterRBAmp`
+  (or `PowerMeterPZEM`) again. Each sketch now stops with a clear `#error` when it finds a file of the other one.
+- **Boot loop / `No bootable app partitions in the partition table`**: see the partition notes in [docs/firmware.md](../docs/firmware.md)
+  (erase the flash once, keep the offsets of `partitions.csv`).

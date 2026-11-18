@@ -62,6 +62,12 @@ for sk in ("PowerMeterPZEM", "PowerMeterRBAmp"):
     for e in check_partitions(A.parent.parent / sk / "partitions.csv"):
         print(f"PARTITIONS {sk}: {e}")
         bad.append("partitions.csv")
+# Files of one sketch must not be in the other (a merged copy breaks the Arduino build: every .cpp in src/ is compiled).
+for sk, foreign in (("PowerMeterRBAmp", ("sensor_pzem.cpp", "sensor_pzem.h")), ("PowerMeterPZEM", ("rbamp.cpp", "rbamp.h", "hwprofile.cpp", "hwprofile.h"))):
+    for f in foreign:
+        if (A.parent.parent / sk / "src" / f).exists():
+            print(f"FOREIGN FILE: {sk}/src/{f} belongs to the other sketch")
+            bad.append(f)
 print("shared files identical" if not bad else f"{len(bad)} shared file(s) differ")
 print("differ on purpose (check by hand): " + ", ".join(DIFFERENT))
 sys.exit(1 if bad else 0)
