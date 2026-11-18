@@ -463,7 +463,7 @@ def h_info(conn, device, msg):
     """Answer to "Get meter info"."""
     keep = ("ip", "ssid", "rssi", "mac", "heap", "heap_min", "psram", "psram_free", "fw", "hw", "hw_info",
             "bat_v", "bat_pct", "uptime", "boot", "core", "chip", "flash", "outbox", "time_src",
-            "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "sensor_detail", "relay_board", "clamps",
+            "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "i2c_recov", "sensor_detail", "relay_board", "clamps",
             "sensor_boards", "temp_sensors", "transport", "mqtt", "wifi_net", "wifi2")
     device.last_info = {k: msg[k] for k in keep if k in msg}
     device.last_info_at = now()

@@ -16,6 +16,7 @@
 #include "src/control.h"
 #include "src/hwmap.h"
 #include "src/relays.h"
+#include "src/i2cbus.h"
 #include "src/led.h"
 #include "src/net.h"
 #include "src/outbox.h"
@@ -149,6 +150,7 @@ void loop() {
     pressedMs = 0;
   }
   sys::crumb(sys::CR_MAIN, "loop");
+  i2cbus::tick();  // frees a stuck I2C bus (a device holding SDA low)
   sys::tick();
   sys::checkHeartbeats();
   sys::checkStacks();

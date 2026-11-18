@@ -14,6 +14,7 @@
 #include "ups.h"
 #include "certs.h"
 #include "control.h"
+#include "i2cbus.h"
 #include "led.h"
 #include "mesh.h"
 #include "mqttlink.h"
@@ -678,6 +679,7 @@ static void sendInfo() {
   if (rtc >= 0) doc["rtc"] = (uint32_t)rtc;  // DS3231 fitted: its own time (0 = not readable)
   doc["stack"] = sys::stackReport();
   doc["relay_sw"] = control::relaySwitches();
+  doc["i2c_recov"] = i2cbus::recoveries();  // times a stuck I2C bus had to be freed since start
   doc["reset"] = String(sys::resetReason()) + (sys::safeMode ? " - SAFE MODE (mesh + DS3231 off)" : "");
   if (battery::enabled()) {
     float v = battery::volts();

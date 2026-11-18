@@ -232,6 +232,7 @@ void loop() {
     pressedMs = 0;
   }
   sys::crumb(sys::CR_MAIN, "loop");
+  i2cbus::tick();  // frees a stuck I2C bus (a device holding SDA low)
   hwp::tick();  // hardware profile: restart countdown, confirm check, rollback
   sys::tick();
   sys::checkHeartbeats();

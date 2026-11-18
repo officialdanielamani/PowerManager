@@ -9,11 +9,13 @@
 #include "freertos/semphr.h"
 #define HIGH 1
 #define LOW 0
+#define INPUT 0
 #define OUTPUT 1
 #define INPUT_PULLUP 2
 #define IRAM_ATTR
 inline uint32_t millis() { return 0; }
 inline void delay(uint32_t) {}
+inline void delayMicroseconds(uint32_t) {}
 inline void digitalWrite(int, int) {}
 inline int digitalRead(int) { return 0; }
 inline void pinMode(int, int) {}

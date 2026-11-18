@@ -218,3 +218,19 @@ The sensor sits behind a small `Sensor` interface (`begin()`, `channels()`, `rea
 
 - The `control` task never touches the network, so a stuck TLS handshake or HTTP call cannot stop limit enforcement.
 - `net` and `web` report a heartbeat; `loop()` restarts the meter if one is stuck (net: 3 min, web: 1 min). Relay state, trip latch and session survive the restart (NVS).
+
+
+## I2C faults: what the meter does when a device goes away
+
+The I2C bus is shared by the rbAmp module(s), the relay board(s), the DS3231 clock and the SHT sensors (`i2cbus.cpp`, one
+lock). Nothing needs a restart:
+
+| Device | What happens when it disconnects / loses power | Recovery |
+|---|---|---|
+| rbAmp module | reads fail: after `sensor.timeout_s` (default 10 s) one `sensor_error` event and the configured action (run / hold / end session); with several modules one missing module fails the whole read | reads continue every cycle, the first good one sends `sensor_ok`. After 5 s of silence the module is forgotten and probed again every 5 s (`rbamp::begin()`): variant, CHANNELS table and clamp models are checked / written again. A restart of the module inside an energy period is detected from its uptime (period discarded, models written again) |
+| relay board (MCP23017 / XL9535) | writes fail: one `relay_error` event; the other boards are still written | the state **and the pin directions** are written every 2 s and on every change, so a board that lost power or was plugged in after the start works again by itself (`relay_ok`). PCF8574: the byte is the state |
+| SHT sensor | no value for that sensor | read again every poll cycle |
+| DS18B20 | not found at start-up: searched for again every minute | — |
+| a device holding SDA low (brownout in the middle of a byte) | every transaction would time out | **bus recovery** (`i2cbus.cpp`): after 3 failures that are not a plain NACK, or when SDA is low on an idle bus (checked every second), the Wire driver stops, SCL is clocked up to 9 times, a STOP is sent and Wire restarts; at most once per 2 s. A device that is simply absent (NACK) never triggers it. `info.i2c_recov` counts the recoveries |
+
+Host tests: `firmware/tools/i2c_test` (the real `relays.cpp` and `i2cbus.cpp` against fake expanders / a fake Wire).

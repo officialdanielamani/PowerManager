@@ -11,6 +11,9 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 - Test tools in the repository: `firmware/tools/hwprofile_test`, `firmware/tools/syntax_check` (ESP32 sources against
   stubs), `server/tools/e2e` (browser test against a real server + simulated meter), `make syntax-check`, `make e2e`; CI runs
   the browser test as its own job (`e2e` in `ci.yml`).
+- I2C fault handling: relay board pin directions are written with every state write (MCP23017 / XL9535 boards that lose power or are
+  plugged in later work again by themselves), a stuck bus is freed (`i2cbus.cpp`: SCL clocking + STOP + restart, `info.i2c_recov`),
+  an rbAmp module that is silent for 5 s is probed again. Test: `firmware/tools/i2c_test`.
 - **Breaking:** server 1.1.0 needs meter firmware **1.1.0** (`MIN_FW`); older firmware is no longer supported. In the rbAmp
   `CHANNELS` table (`config.h`, hardware profile, generator) a channel's relay is now **relay board + output** (`{board,
   input, clamp, relayBoard, relayOutput}`, e.g. Board A relay 2) instead of one number across all boards. Existing

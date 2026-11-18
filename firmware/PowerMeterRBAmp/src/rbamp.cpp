@@ -265,6 +265,24 @@ float rating(uint8_t ch) {
 }
 uint8_t lastError() { return err; }
 
+// A module that stays silent for LOST_REPROBE_MS is forgotten: the control task then probes the boards again (every 5 s,
+// begin()), which re-reads the variant, checks the CHANNELS table against it and writes the clamp models again. Without
+// this a module that comes back changed (other variant, replaced, restarted without the uptime check noticing) would
+// only be used as it was at start-up.
+static const uint32_t LOST_REPROBE_MS = 5000;
+static uint32_t lostSinceMs = 0;
+static void noteSilent() {
+  if (!lostSinceMs) {
+    lostSinceMs = millis();
+    return;
+  }
+  if (millis() - lostSinceMs < LOST_REPROBE_MS) return;
+  lostSinceMs = 0;
+  for (uint8_t i = 0; i < hw::BOARDS; i++) boards[i].found = false;
+  ready = false;
+  Serial.println("[rbamp] no answer for 5 s: the module(s) will be probed again");
+}
+
 bool read(Sample &out) {
   if (!ready) {
     err = SENS_NO_REPLY;
@@ -279,6 +297,7 @@ bool read(Sample &out) {
       i2cbus::Lock l;
       if (!i2cbus::readRegs(b.addr, REG_RT, rt[i], sizeof(rt[i]))) {
         err = SENS_NO_REPLY;
+        noteSilent();
         return false;
       }
       i2cbus::readRegs(b.addr, REG_STATUS, &st, 1);
@@ -311,11 +330,13 @@ bool read(Sample &out) {
       if (!windowRead(addr, F_I_RMS, in, out.a[c]) || !windowRead(addr, F_P_REAL, in, out.w[c]) ||
           !windowRead(addr, F_PF, in, out.pf[c])) {
         err = SENS_NO_REPLY;
+        noteSilent();
         return false;
       }
     }
   }
   err = SENS_OK;
+  lostSinceMs = 0;
   return true;
 }
 
