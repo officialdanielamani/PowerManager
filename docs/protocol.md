@@ -656,7 +656,8 @@ It is also the way to flash the **first** OTA-capable firmware, to change the pa
 without the Arduino IDE.
 
 - **Browser:** needs Web Serial: Chrome, Edge, Opera on a computer (not Firefox, not Safari, not iOS). The page needs a **secure
-  context**: `https://` or `http://localhost`; on plain `http://` on the LAN the browser hides Web Serial, so the page shows that
+  context**: `https://` or `http://localhost`. Both are supported: the normal setup is HTTPS from the reverse proxy (to be tested there)
+  and `http://localhost` works on the server PC. On plain `http://` on the LAN the browser hides Web Serial, so the page shows that
   reason ("open the server over HTTPS") instead of a dead button. Without support the USB option is greyed out with the reason.
 - **Tool:** Espressif's `esptool-js`, stored in `static/vendor` (works without internet, like the other vendor files).
 - **Steps shown on the page:** connect the USB cable → *Connect* (browser port picker) → the page reads the chip (type, MAC, flash
@@ -666,7 +667,10 @@ without the Arduino IDE.
   `0xe000`, app `0x10000`); `merged.bin` at `0x0` only when `flash_args` is missing. Options:
   - **Update** (default): all files above, the settings area (NVS) is kept; pairing and Wi-Fi stay.
   - **Erase all flash first**: needed once when the layout changed (as for the 16 MB layout); the settings are lost and the meter is
-    paired again. Asks for a confirmation; **admin only**.
+    paired again. **Admin and manager** may use it, behind a typed confirmation like *Remove meter*: a red warning (settings, Wi-Fi and
+    pairing are lost, the meter must be paired again) and the user must **type the device ID** of the meter to enable the button. The
+    device ID is that of the meter chosen on the page (optional, offered for the manager's own meters); for a board that is not a
+    paired meter yet, the text to type is the **chip MAC** shown after *Connect*.
 - **Server side:** the browser downloads the files from an authenticated endpoint (admin, and a manager as for OTA); the server never
   talks to the board. At the end the page may report `usb_flash` (firmware id, chip MAC, who) to the server for the audit log; a flash
   that was cancelled halfway leaves the board in download mode, and can simply be flashed again.
@@ -675,5 +679,5 @@ without the Arduino IDE.
 - **Notifications:** none (nobody is told about a USB flash, there is no meter connection); the audit log entry is the record.
 
 ### 14.7 Open points
-The server must be reachable over HTTPS for the USB way (14.8). `PMFWTAG` and `caps.ota` need firmware changes in both sketches; `MAX_CONTENT_LENGTH` and the Docker data volume must allow the
+The USB way (14.8) needs HTTPS (reverse proxy) or `localhost`: to be tested behind the reverse proxy. `PMFWTAG` and `caps.ota` need firmware changes in both sketches; `MAX_CONTENT_LENGTH` and the Docker data volume must allow the
 uploads; a signature on the image (more than SHA-256) is a later option.
