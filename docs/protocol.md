@@ -504,3 +504,86 @@ offline meter are queued like other commands, except that a newer `hw_profile` r
   later re-flash keeps the changes. It writes `RBAMP_BOARDS`, `RELAY_BOARDS`, `CHANNELS` as before.
 - Meter configuration, history and notifications are unchanged; the new events (`hw_reboot_pending`,
   `hw_active`, `hw_rollback`) appear in the meter's event list and as *Meter status* notifications.
+
+## 13. Zero, Tare and Calibration (per channel, all meters) — design, firmware / server 1.1.0
+
+Status: Zero and Tare are specified for implementation; **Calibration is designed here and held** (not implemented yet).
+Every value belongs to **one channel**: a single-channel meter has channel 0, on a multi-channel meter each channel has its own
+zero / tare (independent of the others, also in Shared session mode).
+
+| | What it is | How it is made | Where it acts |
+|---|---|---|---|
+| **Zero** | the sensor's offset with **no load** (clamp / shunt noise floor, ADC offset) | sensor check with the load disconnected | **on the meter**, right after every sensor read: all readings, limits, energy and history are already corrected |
+| **Tare** | a **load that is connected and should count as 0** (a charger, a fixture, the meter's own supply) | sensor check with that load connected | server views (display, history, CSV, cost) and the **meter's limits** (max current, session kWh) |
+| **Calibration** *(held)* | gain / linearity of the sensor against a reference meter | zero + 1 to 3 known loads | on the meter (correction curve) |
+
+### 13.1 Sensor check (meter)
+
+A sensor check measures the **raw** values of one channel (before zero and tare, so repeating it never compounds) and returns
+statistics; the server decides what to do with them. Command (server → meter):
+
+`{"t":"cmd","c":"sensor_check","ref":9,"ch":0,"n":10}` — `ch` channel (default 0), `n` readings to collect (10–60, default 10).
+
+- The meter acknowledges at once (`cmd_ack`; `err`: `bad_channel`, `busy` = a check is already running, `no_sensor` = the sensor is
+  not answering) and collects **n valid readings, at most one per second, so a check takes at least 10 s** (n readings = n seconds).
+  A failed read does not count and is not retried faster; the check ends with `ok: false, why: "sensor"` after 60 s without enough
+  valid readings. Only one check runs at a time; a restart or a new profile cancels it.
+- The result is an **event** (it arrives seconds later and must not be lost offline):
+  `{"e":"sensor_check","ch":0,"n":10,"secs":10,"a":[mean,min,max],"w":[mean,min,max],"v":[mean,min,max],"ok":true}`
+  (`ok: false` with `why`: `sensor`, `cancelled`). Values are the raw sensor values (A, W, V).
+- The relay and sessions are **not** touched by a check: the user connects / disconnects the load; the meter just measures.
+
+### 13.2 What the server checks (it owns the thresholds, so they can change without a firmware update)
+
+A check is **acceptable** when `n ≥ 10` and `secs ≥ 10` and the readings are **stable**: for current `max − min ≤ max(0.03 A,
+3 % of the mean)`, for power `max − min ≤ max(3 W, 5 % of the mean)`. Additionally:
+- **Zero**: the mean must be small: `a ≤ 1.0 A` and `w ≤ 100 W` — otherwise "a load is still connected".
+- **Tare**: the load must be measurable: `a − zero.a ≥ 0.01 A`, and not above the sensor rating.
+The page shows the numbers and why a check failed; **Set zero / Set tare** is only offered for an acceptable check.
+
+### 13.3 Stored values and config
+
+The server keeps `Device.calib` = `{"<ch>": {"zero": {"a", "w", "at"}, "tare": {"a", "w", "at"}, "by": "<user>"}}` (`at` = epoch). It is
+sent in the config, per channel: `cfg.ch[i].zero = {"a": 0.012, "w": 1.6}` and `cfg.ch[i].tare = {"a": 0.4, "w": 85}` (absent or
+zeros = none), plus `cfg.tare_limits` (bool, default true) for **all** meters. Setting or clearing a value raises `cfg_ver`; the meter
+stores them with its config. The earlier single-channel `cfg.tare {a, w, limits}` is gone (firmware 1.1.0 and newer only).
+Changing the hardware profile keeps the values of channels that keep their number; channels that no longer exist lose theirs.
+
+### 13.4 Zero on the meter
+
+After every read of channel *c*: `a' = max(0, a − zero.a)`, `w' = max(0, w − zero.w)`; with `a' == 0` also `w' = 0`. Power factor,
+voltage and frequency are not changed. rbAmp: the energy of a period is computed from the corrected average power, so the noise
+floor is not accumulated. PZEM: the energy register is the source of truth (D8) and cannot be corrected; only current / power are.
+
+### 13.5 Tare on the meter and on the server
+
+Tare does not change what the meter measures or records: raw (zero-corrected) values stay raw in the history; tared values are
+computed when displayed or exported (as the single-channel tare did before), **per channel**:
+`a_t = max(0, a' − tare.a)`, `w_t = max(0, w' − tare.w)`, `kWh_t = max(0, kWh − tare.w × time)`; voltage is never tared.
+With `cfg.tare_limits` the meter uses the tared values for its limits, **per channel**: max current (`a_t > amp_max`) and the session
+kWh limit (`kWh_t`, accumulated as `Σ tare.w × dt` over the readings of the session: per channel in Independent mode, summed over
+the channels in Shared mode). Session progress items carry `kwh_t` when a tare is set (`s.kwh_t`, `ss[].kwh_t`).
+
+### 13.6 Server pages
+
+Meter → **Zero & Tare** (all meters; one block per channel on multi-channel meters): current zero / tare with date and user;
+**[Check sensor]** for Zero and for Tare (progress "7 / 10 readings", then the numbers and OK / not stable / load still connected),
+**[Set zero]** / **[Set tare]**, **[Clear]**. The *Tare* fields of the old Configure form (single-channel) are replaced; the
+*Use tared values for limits* option stays in Configure. Display: the *Raw | Tared* switch and the tared columns exist for every
+meter that has a tare on any channel.
+
+### 13.7 Calibration (held) — design
+
+**Goal:** correct the gain / non-linearity of one channel with a few known loads, from the server, erasable.
+1. **Zero point** — the channel's zero (13.4), measured with no load.
+2. **Points 1..3** — the user connects a **known load** and enters its true value from a reference meter, **A or W** (per point);
+   the page starts a sensor check (13.1, ≥ 10 stable readings) and stores `(measured, true)`. Points must be increasing, at least 10 %
+   apart; unstable checks are refused.
+3. **Correction curve** — piecewise linear through `(0, 0)`, `(m1, t1)`, `(m2, t2)`, `(m3, t3)`; above the last point the last
+   segment's gain continues. Current and power are corrected from their own points (A points correct current, W points power).
+4. **Meter:** `cfg.ch[i].cal = {"a": [[m,t],…], "w": [[m,t],…]}` applied **after** zero and before tare / limits; stored with the config.
+5. **Erase** = remove the points (the meter goes back to the default, uncorrected values); zero and tare are separate and stay.
+6. **Run from the server** as a wizard (*Zero → known load 1 → 2 → 3 → Review → Apply*) with the measured vs true table and the
+   resulting gain per segment (a gain outside 0.8–1.25 is refused as "wrong reference or wiring").
+Calibration changes the values that sessions, kWh limits and costs are based on, so it is built after zero / tare have been proven
+on a real meter.
