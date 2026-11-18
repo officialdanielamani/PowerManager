@@ -120,7 +120,7 @@ static double slotKwhLimit(uint8_t s) {  // the kWh the limit is compared with: 
 static sc::Check check_;                       // running sensor check (one at a time)
 static float rawA_[MC_MAX_CH], rawW_[MC_MAX_CH];  // the latest read of every channel before the zero
 
-static void addStat(JsonObject o, const char *key, const sc::Stat &s, uint8_t dec) {
+static void addStat(JsonObject o, const char *key, const sc::Stat &s, int dec) {
   JsonArray a = o[key].to<JsonArray>();
   a.add(serialized(String(s.mean, dec)));
   a.add(serialized(String(s.mn, dec)));

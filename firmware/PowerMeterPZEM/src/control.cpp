@@ -481,7 +481,7 @@ static void checkSensor(bool ok, uint8_t err) {
 // ---- sensor check for Zero & Tare (docs/protocol.md §13.1): raw values, once per second, at least 10 s
 static sc::Check check_;
 
-static void addStat(JsonObject o, const char *key, const sc::Stat &s, uint8_t dec) {
+static void addStat(JsonObject o, const char *key, const sc::Stat &s, int dec) {
   JsonArray a = o[key].to<JsonArray>();
   a.add(serialized(String(s.mean, dec)));
   a.add(serialized(String(s.mn, dec)));
