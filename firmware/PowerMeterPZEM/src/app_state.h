@@ -42,7 +42,9 @@ struct MeterConfig {
   float volt_min = 0;  // operating voltage range; 0 = no limit on that side
   float volt_max = 0;
   uint8_t volt_action = ACT_HOLD;
-  float tare_a = 0;    // own consumption on the measured line (ESP32 + SSR)
+  float zero_a = 0;    // sensor offset with no load, subtracted from current / power after every read (docs/protocol.md §13.4)
+  float zero_w = 0;
+  float tare_a = 0;    // a connected load that counts as 0 (the meter's own supply, a charger ...)
   float tare_w = 0;
   bool tare_limits = true;  // use tared values for the kWh limit and max current
   bool tamper_protect = false;

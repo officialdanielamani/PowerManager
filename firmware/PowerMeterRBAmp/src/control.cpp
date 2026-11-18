@@ -6,6 +6,7 @@
 #include "../config.h"
 #include "outbox.h"
 #include "rbamp.h"
+#include "sensorcheck.h"
 #include "hwprofile.h"
 #include "relays.h"
 #include "storage.h"
@@ -91,6 +92,75 @@ double slotKwh(uint8_t s) {
   return k > 0 ? k : 0;
 }
 
+// ---- zero / tare (docs/protocol.md §13): zero is applied right after every sensor read, tare acts on the limits
+static sc::Offsets offs(uint8_t i) {
+  const ChConfig &c = g.cfg.ch[i];
+  sc::Offsets o;
+  o.zeroA = c.zeroA;
+  o.zeroW = c.zeroW;
+  o.tareA = c.tareA;
+  o.tareW = c.tareW;
+  return o;
+}
+static bool slotHasTare(uint8_t slot) {  // a channel governed by this session slot has a tare
+  for (uint8_t i = 0; i < g.nch && i < MC_MAX_CH; i++)
+    if (slotOf(i) == slot && (g.cfg.ch[i].tareW > 0 || g.cfg.ch[i].tareA > 0)) return true;
+  return false;
+}
+static double slotKwhTared(uint8_t s) {
+  double k = slotEnergy(s) - g.sess[s].e0 - g.sess[s].tareKwh;
+  return k > 0 ? k : 0;
+}
+static double slotKwhLimit(uint8_t s) {  // the kWh the limit is compared with: tared when "tare_limits" is on
+  if (g.cfg.tare_limits) return slotKwhTared(s);
+  double k = slotEnergy(s) - g.sess[s].e0;
+  return k > 0 ? k : 0;
+}
+
+static sc::Check check_;                       // running sensor check (one at a time)
+static float rawA_[MC_MAX_CH], rawW_[MC_MAX_CH];  // the latest read of every channel before the zero
+
+static void addStat(JsonObject o, const char *key, const sc::Stat &s, uint8_t dec) {
+  JsonArray a = o[key].to<JsonArray>();
+  a.add(serialized(String(s.mean, dec)));
+  a.add(serialized(String(s.mn, dec)));
+  a.add(serialized(String(s.mx, dec)));
+}
+static void reportCheck(sc::Result &r) {
+  // caller holds StateLock
+  emitEvent("sensor_check", [](JsonObject o, void *p) {
+    sc::Result *x = (sc::Result *)p;
+    o["ch"] = x->ch;
+    o["n"] = x->n;
+    o["secs"] = x->secs;
+    o["ok"] = x->ok;
+    if (x->why) o["why"] = x->why;
+    addStat(o, "a", x->a, 4);
+    addStat(o, "w", x->w, 2);
+    addStat(o, "v", x->v, 1);
+  }, &r);
+}
+
+bool startSensorCheck(uint8_t ch, uint8_t readings, const char *&err) {
+  StateLock l;
+  err = nullptr;
+  if (!g.nch || ch >= g.nch) {
+    err = "bad_channel";
+    return false;
+  }
+  if (!rbamp::present() || !g.readOk) {
+    err = "no_sensor";
+    return false;
+  }
+  if (check_.active()) {
+    err = "busy";
+    return false;
+  }
+  check_.start(ch, readings, millis());
+  Serial.printf("[check] CH%u: sensor check started (%u readings, at least %u s)\n", ch + 1, readings < 10 ? 10 : readings, readings < 10 ? 10 : readings);
+  return true;
+}
+
 static uint16_t wantMask() {
   uint16_t m = 0;
   for (uint8_t i = 0; i < MC_MAX_CH && i < 16; i++)
@@ -162,6 +232,7 @@ static void startSession(uint8_t slot, bool autoRenew) {
   s.over = false;
   s.ended = false;
   s.stopReason = STOP_NONE;
+  s.tareKwh = 0;
   store::saveSession(slot, s);
   saveEnergy();
   stats_[slot].reset();
@@ -365,7 +436,7 @@ void applyConfig(const MeterConfig &c) {
   // ends"): that session continues. A session that already ENDED stays ended: use Renew to start a new one.
   for (uint8_t i = 0; i < sessSlots(); i++) {
     SessionState &ss = g.sess[i];
-    double used = slotEnergy(i) - ss.e0;
+    double used = slotKwhLimit(i);
     float max = slotKwhMax(i);
     bool room = max <= 0 || used < max;
     if (!ss.sid || !room || !((ss.status == SESS_QUOTA && !ss.ended) || ss.over)) continue;
@@ -400,6 +471,7 @@ static void sessJson(JsonObject s, uint8_t slot) {
   if (ss.start) s["start"] = ss.start;
   double k = slotEnergy(slot) - ss.e0;
   s["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+  if (slotHasTare(slot)) s["kwh_t"] = serialized(String(slotKwhTared(slot), 4));  // the value the limit uses (tare_limits)
   s["max"] = num4(slotKwhMax(slot));
   s["status"] = sessStatusName(ss.status);
   if (ss.over) s["over"] = true;
@@ -525,12 +597,14 @@ static void addSessionProgress(JsonDocument &doc) {
       o["sid"] = g.sess[i].sid;
       double k = slotEnergy(i) - g.sess[i].e0;
       o["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+      if (slotHasTare(i)) o["kwh_t"] = serialized(String(slotKwhTared(i), 4));
     }
   } else {
     JsonObject se = doc["s"].to<JsonObject>();
     se["sid"] = g.sess[0].sid;
     double k = slotEnergy(0) - g.sess[0].e0;
     se["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+    if (slotHasTare(0)) se["kwh_t"] = serialized(String(slotKwhTared(0), 4));
   }
 }
 
@@ -773,6 +847,16 @@ static void readSensor() {
     g.hz = smp.hz;
     g.readAtMs = millis();
     g.sensorEverOk = true;
+    for (uint8_t i = 0; i < g.nch; i++) {  // zero: the sensor offset is subtracted right after the read (§13.4)
+      rawA_[i] = smp.a[i];
+      rawW_[i] = smp.w[i];
+      sc::applyZero(smp.a[i], smp.w[i], offs(i));
+    }
+    if (check_.active()) {  // sensor check: the RAW values, once per second
+      sc::Result res;
+      if (check_.channel() >= g.nch) check_.cancel();
+      else if (check_.feed(rawA_[check_.channel()], rawW_[check_.channel()], smp.v, millis(), res)) reportCheck(res);
+    }
     for (uint8_t i = 0; i < g.nch; i++) {
       g.ch[i].r.a = smp.a[i];
       g.ch[i].r.w = smp.w[i];
@@ -801,14 +885,15 @@ static void readSensor() {
   for (uint8_t i = 0; i < g.nch; i++) {
     ChState &c = g.ch[i];
     float lim = g.cfg.ch[i].amp_max;
-    if (!c.tripped && lim > 0 && c.r.a > lim) {
+    float aNow = g.cfg.tare_limits ? sc::taredCurrent(c.r.a, offs(i)) : c.r.a;  // tared current when "tare_limits" is on
+    if (!c.tripped && lim > 0 && aNow > lim) {
       if (++c.overReads >= TRIP_CONFIRM_READS) {
         c.tripped = true;
         saveFlags();
         struct Ctx {
           uint8_t ch;
           float a, limit;
-        } ctx = {i, c.r.a, lim};
+        } ctx = {i, aNow, lim};
         emitEvent("overcurrent", [](JsonObject o, void *p) {
           Ctx *x = (Ctx *)p;
           o["ch"] = x->ch;
@@ -845,13 +930,21 @@ static void energyTick() {
     bool valid = false;
     if (rbamp::periodFinish(avg, valid) && valid && pendingDt > 0 && pendingDt < 10000) {
       StateLock l;
-      for (uint8_t i = 0; i < g.nch; i++) g.ch[i].e += (double)avg[i] * pendingDt / 3.6e9;  // W x ms -> kWh
+      for (uint8_t i = 0; i < g.nch; i++) {
+        sc::Offsets o = offs(i);
+        float w = avg[i] > o.zeroW ? avg[i] - o.zeroW : 0;  // the zero is subtracted from the energy too
+        g.ch[i].e += (double)w * pendingDt / 3.6e9;           // W x ms -> kWh
+        SessionState &ss = g.sess[slotOf(i)];
+        if (ss.sid && !ss.ended && o.tareW > 0) ss.tareKwh += sc::tareEnergyKwh(w, o, pendingDt);  // the tare's share
+      }
     }
   }
   if (now - lastSaveMs >= ENERGY_SAVE_MS) {
     lastSaveMs = now;
     StateLock l;
     saveEnergy();
+    for (uint8_t sl = 0; sl < sessSlots(); sl++)  // the tare's share must survive a restart (only sessions with a tare: flash wear)
+      if (g.sess[sl].sid && slotHasTare(sl)) store::saveSession(sl, g.sess[sl]);
   }
 }
 
@@ -891,7 +984,7 @@ static void checkRules(bool firstPass) {
   for (uint8_t s = 0; s < slots; s++) {
     SessionState &ss = g.sess[s];
     // kWh quota
-    double kwh = slotEnergy(s) - ss.e0;
+    double kwh = slotKwhLimit(s);
     float max = slotKwhMax(s);
     uint8_t act = slotKwhAction(s);
     if (ss.sid && ss.status == SESS_ACTIVE && max > 0 && kwh >= max) {
@@ -1062,7 +1155,7 @@ static void auxTick() {
       in.running[i] = ss.sid && ss.status == SESS_ACTIVE && !g.disabled;
       float max = slotKwhMax(s);
       if (ss.sid && max > 0) {
-        double left = max - (slotEnergy(s) - ss.e0);
+        double left = max - slotKwhLimit(s);
         in.balance[i] = left > 0 ? (float)left : 0.0f;
       }
     }
@@ -1160,6 +1253,11 @@ void task(void *) {
     checkTamper();
     checkUps();
     checkRules(first);
+    {  // a sensor check that cannot collect enough valid readings ends as failed after 60 s
+      StateLock l;
+      sc::Result res;
+      if (check_.tick(millis(), res)) reportCheck(res);
+    }
     sys::crumb(sys::CR_CONTROL, "aux");
     auxTick();
     first = false;

@@ -392,6 +392,8 @@ def _session_progress(device, items):
             if cur is None or cur.get("sid") != p["sid"]:
                 continue  # a session we have no state for yet: the next state message brings it
             cur["kwh"] = _f(p["kwh"])
+            if p.get("kwh_t") is not None:  # the meter's own tared value (its limit), docs/protocol.md §13.5
+                cur["kwh_t"] = _f(p["kwh_t"])
             s = Session.query.filter_by(device_fk=device.id, gen=device.pair_gen, sid=p["sid"]).first()
             if s is not None and s.ended_at is None:
                 s.kwh_used = cur["kwh"]

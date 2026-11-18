@@ -268,3 +268,24 @@ def test_independent_session_kwh_is_tared_per_channel(app, admin):
     assert ch[0]["kwh"] == 0.5 and ch[0]["kwh_tared"] == 0.5
     assert ch[1]["kwh_tared"] == pytest.approx(0.5 - 0.02, abs=1e-3)      # 20 W for about 1 h
     assert m["kwh_tared"] == pytest.approx(0.98, abs=1e-3)
+
+
+def test_independent_meter_kwh_t_is_used_when_the_meter_sends_it(app, admin):
+    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00004", "fw": "1.1.0", "proto": 1,
+                                         "caps": dict(CAPS, channels=2, relays=2)})
+    assert r.status_code == 200
+    t0 = now() - 3600
+    with app.app_context():
+        d = Device.query.filter_by(device_id="CAL00004").one()
+        pk = d.id
+        d.cfg = dict(d.cfg, mode="independent")
+        d.calib = {"1": {"tare": {"a": 0.1, "w": 20.0, "at": 1}}}
+        ingest.handle(FakeConn(), d, {"t": "state", "mode": "independent", "relay": [{"i": 0, "on": True}, {"i": 1, "on": True}],
+                                      "sessions": [{"ch": 0, "sid": 1, "kwh": 0.5, "status": "active", "start": t0, "max": 0},
+                                                   {"ch": 1, "sid": 2, "kwh": 0.5, "status": "active", "start": t0, "max": 0, "kwh_t": 0.4}]})
+        ingest.handle(FakeConn(), d, {"t": "tel", "items": [{"seq": 50, "ts": now(), "tv": 1, "ch": [], "ss": [
+            {"ch": 0, "sid": 1, "kwh": 0.6}, {"ch": 1, "sid": 2, "kwh": 0.6, "kwh_t": 0.45}]}]})
+        db.session.commit()
+    ch = {c["i"]: c for c in admin.get(f"/meters/{pk}/live").get_json()["channels"]}
+    assert ch[1]["kwh"] == 0.6 and ch[1]["kwh_tared"] == 0.45          # the meter's own tared value wins
+    assert ch[0]["kwh"] == 0.6 and ch[0]["kwh_tared"] == 0.6

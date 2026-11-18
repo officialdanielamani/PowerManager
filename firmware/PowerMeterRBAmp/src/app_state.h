@@ -43,6 +43,8 @@ struct ChConfig {
   float kwh_max = 0;      // independent mode; 0 = unlimited
   uint8_t kwh_action = KWH_HOLD;
   SessConfig sess;        // independent mode
+  float zeroA = 0, zeroW = 0;  // sensor offset with no load, subtracted after every read (docs/protocol.md §13.4)
+  float tareA = 0, tareW = 0;  // a connected load that counts as 0: tared values for the limits (§13.5)
 };
 
 struct MeterConfig {
@@ -66,6 +68,7 @@ struct MeterConfig {
   bool summary = false;       // "Core data only": no interval readings, only the session summary
   float temp_max = 0;         // over-temperature: any sensor above this (degC); 0 = off
   uint8_t temp_action = ACT_HOLD;
+  bool tare_limits = true;    // the limits (max current, kWh) use the tared values
   ChConfig ch[MC_MAX_CH];
 };
 
@@ -82,6 +85,7 @@ struct SessionState {  // one session slot: [0] in shared mode, [ch] in independ
   bool over = false;      // kWh limit passed with KWH_WARN (warned once, power stays on)
   bool ended = false;     // session_end already sent
   uint8_t stopReason = STOP_NONE;  // why status is SESS_ENDED
+  double tareKwh = 0;     // energy of the channels' tares counted in this session (tared kWh = kWh - tareKwh)
 };
 
 struct ChState {

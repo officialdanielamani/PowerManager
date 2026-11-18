@@ -19,7 +19,8 @@ SerialT Serial;
 static void sendJson(JsonDocument &) {}
 namespace rbamp { uint8_t scan(uint8_t *, uint8_t) { return 0; } bool isRbamp(uint8_t) { return true; }
                   bool changeAddress(uint8_t, uint8_t, String &) { return true; } }
-namespace control { bool anySessionRunning() { return false; } }
+namespace control { bool anySessionRunning() { return false; }
+                    bool startSensorCheck(uint8_t, uint8_t, const char *&) { return true; } }
 namespace i2cbus { bool probe(uint8_t) { return false; } }
 ''' + helpers + '''
 static void handle(JsonObject m) {
@@ -27,6 +28,7 @@ static void handle(JsonObject m) {
   uint32_t ref = m["ref"] | 0;
   const char *err = nullptr;
   bool ok = true;
+  int8_t ch = m["ch"].is<int>() ? (int8_t)m["ch"].as<int>() : (int8_t)-1;
   if (false) {
 ''' + block + '''  }
   (void)ok; (void)err; (void)ref;
@@ -46,3 +48,32 @@ namespace control { void emitEvent(const char *, void (*)(JsonObject, void *) = 
                     void prepareRestart() {} void bumpState() {} }
 namespace sys { void reboot(uint32_t) {} }
 ''' + glue)
+
+# PZEM sketch: the sensor_check command branch of its net.cpp (it has no hardware-profile code)
+pz = open(os.path.join(ROOT, "firmware", "PowerMeterPZEM", "src", "net.cpp"), encoding="utf-8").read()
+a = pz.index('  } else if (!strcmp(c, "sensor_check")) {')
+b = pz.index('  } else if (!strcmp(c, "send_now")) {')
+open(os.path.join(out, "pzem_net_snippet.cpp"), "w", encoding="utf-8").write('''#include "Arduino.h"
+#include <ArduinoJson.h>
+namespace control { bool startSensorCheck(uint8_t, uint8_t, const char *&) { return true; } }
+static void handle(JsonObject m) {
+  const char *c = m["c"] | "";
+  const char *err = nullptr;
+  bool ok = true;
+  if (false) {
+''' + pz[a:b] + '''  }
+  (void)ok; (void)err; (void)c;
+}
+''')
+
+# PZEM parseConfig: the zero / tare lines
+a = pz.index('  // Zero and tare of the measured line')
+b = pz.index('  m.tare_limits = c["tare_limits"] | true;') + len('  m.tare_limits = c["tare_limits"] | true;')
+open(os.path.join(out, "pzem_cfg_snippet.cpp"), "w", encoding="utf-8").write('''#include "Arduino.h"
+#include <ArduinoJson.h>
+struct M { float zero_a = 0, zero_w = 0, tare_a = 0, tare_w = 0; bool tare_limits = true; };
+static bool parse(JsonObject c, M &m, String &err) {
+''' + pz[a:b] + '''
+  return true;
+}
+''')

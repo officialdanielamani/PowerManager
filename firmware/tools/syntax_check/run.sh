@@ -66,7 +66,7 @@ fi
 
 # ---- command code of net.cpp and the profile glue of the .ino, compiled as snippets
 python3 firmware/tools/syntax_check/snippets.py "$W"
-for f in net_snippet glue_snippet; do
+for f in net_snippet glue_snippet pzem_net_snippet pzem_cfg_snippet; do
   if out=$($CXX -I "$ROOT/firmware/PowerMeterRBAmp/src" -I "$ROOT/firmware/PowerMeterRBAmp" "$W/$f.cpp" 2>&1); then
     echo "ok    $f (code extracted from the sketch)"
   else

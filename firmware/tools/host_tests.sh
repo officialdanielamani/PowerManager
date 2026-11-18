@@ -4,8 +4,9 @@
 #   2. AUX relay automation (schedule / event / override) against the real auxrelay.cpp
 #   3. hardware profile (rules, JSON, live / restart / confirm / rollback / crash loop) of hwprofile.cpp
 #   4. ESP32 sources against stubs (syntax / static_asserts of the hardware tables, command code of net.cpp, .ino glue)
-#   5. I2C layer against fakes (relay board unplugged / power loss / plugged in later; stuck bus freed)
-#   6. MQTT link: the firmware's mqttlink.cpp against a real broker and the server's bridge
+#   5. sensor check collector + zero / tare helpers (src/sensorcheck.h, shared by both sketches)
+#   6. I2C layer against fakes (relay board unplugged / power loss / plugged in later; stuck bus freed)
+#   7. MQTT link: the firmware's mqttlink.cpp against a real broker and the server's bridge
 # Needs g++, OpenSSL headers (libssl-dev) and `pip install -r server/requirements-dev.txt`.
 #   firmware/tools/host_tests.sh [path to ArduinoJson/src]
 set -e
@@ -22,5 +23,6 @@ $PY firmware/tools/check_shared.py
 bash firmware/tools/auxrelay_test/run.sh "$AJ"
 bash firmware/tools/hwprofile_test/run.sh "$AJ"
 bash firmware/tools/syntax_check/run.sh "$AJ"
+bash firmware/tools/sensorcheck_test/run.sh
 TAIL=1 bash firmware/tools/i2c_test/run.sh
 $PY firmware/tools/mqttlink_test/run.py "$AJ"

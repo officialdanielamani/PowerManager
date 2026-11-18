@@ -242,3 +242,23 @@ lock). Nothing needs a restart:
 | a device holding SDA low (brownout in the middle of a byte) | every transaction would time out | **bus recovery** (`i2cbus.cpp`): after 3 failures that are not a plain NACK, or when SDA is low on an idle bus (checked every second), the Wire driver stops, SCL is clocked up to 9 times, a STOP is sent and Wire restarts; at most once per 2 s. A device that is simply absent (NACK) never triggers it. `info.i2c_recov` counts the recoveries |
 
 Host tests: `firmware/tools/i2c_test` (the real `relays.cpp` and `i2cbus.cpp` against fake expanders / a fake Wire).
+
+
+## Zero, Tare and the sensor check (both sketches, per channel)
+
+Specification: [protocol.md §13](protocol.md). The server stores a zero and a tare per channel and sends them in the config
+(`ch[i].zero` / `ch[i].tare`, `tare_limits`); the meter keeps them with its config.
+
+- **Zero** is subtracted right after every sensor read (`sc::applyZero` in `src/sensorcheck.h`): `a' = max(0, a - zero.a)`,
+  `w' = max(0, w - zero.w)`, no current = no power. Everything after the read (readings, DRDY frames, session summary, limits,
+  history) sees the corrected values. rbAmp: the energy of a period uses the corrected average power. PZEM: the energy register is
+  the source of truth and is not corrected (only current / power).
+- **Tare** does not change what is recorded. With `tare_limits` the meter compares the **tared** values with its limits: max current
+  (`a - tare.a`) and the session kWh. rbAmp counts the tare's share per session slot (`SessionState.tareKwh`, per channel, summed in
+  Shared mode: `min(power, tare.w) x time`, saved every 5 minutes for sessions that have a tare); the session progress then carries
+  `kwh_t`. PZEM keeps its existing accounting (`tare.w x time`).
+- **Sensor check** (`sensor_check` command, event `sensor_check`): `sc::Check` collects the RAW values of one channel, **one reading per
+  second, for at least 10 readings and 10 s**; a check that cannot collect them within 60 s ends as failed (`why: sensor`). One check
+  at a time (`busy`), only with a working sensor (`no_sensor`), channel must exist (`bad_channel`). The relay and the sessions are not
+  touched. The server judges the result (stability, magnitude) and decides.
+- Host test: `firmware/tools/sensorcheck_test` (collector timing / statistics / timeout, zero and tare maths).

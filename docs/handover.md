@@ -17,14 +17,14 @@ For whoever takes the project over. Read this first, then `architecture.md` and 
 
 | Area | State |
 |---|---|
-| Server logic | Automated tests (`server/tests`, 154 tests) + simulated meters (`server/tools/sim_meter*.py`) |
+| Server logic | Automated tests (`server/tests`, 166 tests) + simulated meters (`server/tools/sim_meter*.py`) |
 | Server UI | Checked by hand / with a headless browser during development; no automated browser tests in the repo |
 | Firmware build | Both sketches and the variants in `firmware/tools/build.sh` compile on Arduino-ESP32 3.3.5 |
 | AUX automation | PC test against the real `auxrelay.cpp` (`firmware/tools/auxrelay_test`) |
 | Hardware profile (rbAmp) | Server: tests (incl. the pages and their access rules), a headless-browser run of the page against the simulator + simulator (`sim_meter_mc.py`). Firmware: PC test of the real `hwprofile.cpp` (rules, JSON, live / restart / confirm / rollback / crash loop, `firmware/tools/hwprofile_test`); the rest of the firmware change was only syntax-checked on a PC, **the ESP32 build has to be run by CI / arduino-cli** |
 | MQTT link | PC test: the firmware's `mqttlink.cpp` + a real broker + the server bridge (`firmware/tools/mqttlink_test`) |
 | Basic metering, relays, sessions on real meters | Used on real hardware by the project owner during development (earlier firmware versions) |
-| **Not yet tried on real hardware** | I2C recovery (relay board re-init, stuck-bus freeing, rbAmp re-probe), hardware profile from the server (I2C scan, rbAmp address, live clamp change, restart + confirm + rollback), 16 MB partition table (boot after a full flash erase, NVS use), MQTT link (also through Cloudflare / TLS), backup Wi-Fi switching, UPS input, battery % event, AUX schedules by date and the newer event sources, changing Wi-Fi from the server, firmware 1.0.0 as a whole after the legacy clean-up |
+| **Not yet tried on real hardware** | Zero & Tare (sensor check, zero on the meter, tare in the limits; rbAmp session tare accounting), I2C recovery (relay board re-init, stuck-bus freeing, rbAmp re-probe), hardware profile from the server (I2C scan, rbAmp address, live clamp change, restart + confirm + rollback), 16 MB partition table (boot after a full flash erase, NVS use), MQTT link (also through Cloudflare / TLS), backup Wi-Fi switching, UPS input, battery % event, AUX schedules by date and the newer event sources, changing Wi-Fi from the server, firmware 1.0.0 as a whole after the legacy clean-up |
 | Mesh | Has its own manual test plan in `mesh.md` |
 
 Treat the "not yet tried" row as the first test list on a bench meter before a field roll-out.
@@ -46,7 +46,7 @@ make docker          # build the server image
   (I2C scan, rbAmp address, restart / confirm / rollback; `--bus` sets which addresses answer).
 - **Test tools kept in the repository** (take them from here if a machine lacks them):
   `firmware/tools/host_tests.sh` (runs the checks below), `firmware/tools/check_shared.py`, `auxrelay_test/`,
-  `i2c_test/` (relay board unplug / power loss / late plug-in, stuck I2C bus; real `relays.cpp` + `i2cbus.cpp`),
+  `sensorcheck_test/` (sensor check collector + zero / tare maths), `i2c_test/` (relay board unplug / power loss / late plug-in, stuck I2C bus; real `relays.cpp` + `i2cbus.cpp`),
   `hwprofile_test/` (profile rules + restart / confirm / rollback, PC build of the real `hwprofile.cpp`),
   `mqttlink_test/`, `syntax_check/` (rbAmp / PZEM sources + every `examples/*.h` against Arduino stubs, the
   `static_assert`s must reject a broken table, net.cpp / .ino snippets; `make syntax-check`),

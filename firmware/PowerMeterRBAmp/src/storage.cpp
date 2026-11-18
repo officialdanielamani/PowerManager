@@ -160,13 +160,13 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 103) return false;  // other layout: use defaults, the server re-sends the config
+  if (b.version != 104) return false;  // other layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 103;
+  b.version = 104;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }
@@ -183,7 +183,7 @@ void loadSession(uint8_t i, SessionState &s) {
   s = SessionState();
   if (pm.getBytesLength(key) == sizeof(b)) {
     pm.getBytes(key, &b, sizeof(b));
-    if (b.version == 1) s = b.s;
+    if (b.version == 2) s = b.s;
   }
   s.startMs = millis();
 }
@@ -191,7 +191,7 @@ void saveSession(uint8_t i, const SessionState &s) {
   char key[6];
   snprintf(key, sizeof(key), "ss%u", i);
   SessBlob b;
-  b.version = 1;
+  b.version = 2;
   b.s = s;
   pm.putBytes(key, &b, sizeof(b));
 }

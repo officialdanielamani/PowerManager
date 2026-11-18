@@ -333,15 +333,18 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   m.volt_min = vmin;
   m.volt_max = vmax;
   m.volt_action = action(v["action"] | "hold");
-  JsonObject ta = c["tare"];
-  float tA = ta["a"] | 0.0f, tW = ta["w"] | 0.0f;
-  if (tA < 0 || tA > 5 || tW < 0 || tW > 500) {
-    err = "tare";
+  // Zero and tare of the measured line = channel 0 (docs/protocol.md §13.3); tare_limits applies to all meters
+  JsonObject c0 = c["ch"][0];
+  float zA = c0["zero"]["a"] | 0.0f, zW = c0["zero"]["w"] | 0.0f, tA = c0["tare"]["a"] | 0.0f, tW = c0["tare"]["w"] | 0.0f;
+  if (zA < 0 || zA > 400 || zW < 0 || zW > 100000 || tA < 0 || tA > 400 || tW < 0 || tW > 100000) {
+    err = "ch.zero_tare";
     return false;
   }
+  m.zero_a = zA;
+  m.zero_w = zW;
   m.tare_a = tA;
   m.tare_w = tW;
-  m.tare_limits = ta["limits"] | true;
+  m.tare_limits = c["tare_limits"] | true;
   JsonObject t = c["tamper"];
   m.tamper_protect = t["protect"] | false;
   m.tamper_action = action(t["action"] | "hold");
@@ -731,6 +734,11 @@ static void handleCommand(JsonObject m) {
     control::renew("manual", false);
   } else if (!strcmp(c, "end")) {
     control::endSession();
+  } else if (!strcmp(c, "sensor_check")) {
+    // Zero & Tare wizard: measure the raw values for >= 10 readings (>= 10 s); the result comes as an event
+    // "sensor_check" (docs/protocol.md §13.1). This meter has one channel (0).
+    int n = m["n"] | 10, chn = m["ch"] | 0;
+    ok = control::startSensorCheck((uint8_t)(chn < 0 ? 0 : chn > 255 ? 255 : chn), (uint8_t)(n < 0 ? 10 : n > 255 ? 255 : n), err);
   } else if (!strcmp(c, "send_now")) {
     control::reportNow();
   } else if (!strcmp(c, "reset_trip")) {

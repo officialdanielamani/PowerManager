@@ -18,6 +18,7 @@ bool resetTrip(const char *src, const char *by);
 void applyConfig(const MeterConfig &c);
 void endSession();               // End session (server): relay off until Renew
 void setDisabled(bool disabled);  // server "disable" / "enable"
+bool startSensorCheck(uint8_t ch, uint8_t readings, const char *&err);  // Zero & Tare wizard (err: bad_channel / no_sensor / busy)
 void reportNow();           // record a reading now and send everything now ("Get Data Now")
 bool takeSendRequest();     // net: true once when it is time to send the buffered items
 

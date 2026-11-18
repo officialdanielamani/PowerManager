@@ -353,6 +353,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   m.sensor_to_s = sto;
   m.sensor_action = action3(se["action"] | "hold");
   m.summary = c["summary"] | false;
+  m.tare_limits = c["tare_limits"] | true;
   JsonObject tp = c["temp"];
   float tmax = tp["max"] | 0.0f;
   if (tmax < 0 || tmax > 125) { err = "temp.max"; return false; }
@@ -370,6 +371,13 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
     cc.kwh_max = k;
     cc.kwh_action = kwhAction(ch["kwh_action"] | "hold");
     if (!parseSess(ch["sess"], cc.sess, err, "ch.sess")) return false;
+    // Zero and tare of this channel (docs/protocol.md §13): amps 0-400, watts 0-100000
+    float za = ch["zero"]["a"] | 0.0f, zw = ch["zero"]["w"] | 0.0f, ta = ch["tare"]["a"] | 0.0f, tw = ch["tare"]["w"] | 0.0f;
+    if (za < 0 || za > 400 || zw < 0 || zw > 100000 || ta < 0 || ta > 400 || tw < 0 || tw > 100000) { err = "ch.zero_tare"; return false; }
+    cc.zeroA = za;
+    cc.zeroW = zw;
+    cc.tareA = ta;
+    cc.tareW = tw;
   }
   const char *aerr = nullptr;  // AUX relays: names + automation (applied with the rest in applyConfig)
   if (!auxrelay::parse(c["aux"].as<JsonArrayConst>(), c["tz_min"] | 0, aerr)) {
@@ -843,6 +851,11 @@ static void handleCommand(JsonObject m) {
     ok = hwp::onProfile(m, err, detail, sizeof(detail), r.state, r.inS);
     cmdAckRes(ref, ok, err, ok ? nullptr : detail, ok ? fillHwProfileRes : nullptr, &r);
     return;
+  } else if (!strcmp(c, "sensor_check")) {
+    // Zero & Tare wizard: measure the raw values of a channel for >= 10 readings (>= 10 s); the result comes as an
+    // event "sensor_check" (docs/protocol.md §13.1).
+    int n = m["n"] | 10;
+    ok = control::startSensorCheck(ch < 0 ? 0 : (uint8_t)ch, (uint8_t)(n < 0 ? 10 : n > 255 ? 255 : n), err);
   } else if (!strcmp(c, "hw_cancel")) {
     ok = hwp::onCancel();
     if (!ok) err = "nothing_pending";

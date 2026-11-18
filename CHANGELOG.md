@@ -4,6 +4,12 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 
 ## Unreleased (1.1.0)
 
+- **Zero & Tare for all meters, per channel** (design: `docs/protocol.md` §13): Meter → *Zero & Tare* page with a sensor check (>= 10
+  readings / 10 s, stable), *Set zero* (sensor offset with no load, subtracted on the meter), *Set tare* (a connected load that counts as 0;
+  tared values in the views, CSV and the meter's limits), Clear. Replaces the single-channel tare of the Configuration form (the
+  old value is migrated to channel 0); multi-channel meters have an independent zero / tare per channel. New: command / event
+  `sensor_check`, `cfg.ch[i].zero / tare`, `cfg.tare_limits`, `kwh_t` in session progress, rbAmp per-channel tare accounting.
+  Calibration (known loads) is designed and held. Test: `firmware/tools/sensorcheck_test`, browser test in `server/tools/e2e`.
 - Relay boards of a hardware profile have a stable `id` (Board A…H): removing Board A leaves Board B as Board B; the
   generator closes the gap for `config.h`, which counts by position.
 - Boards are N16R8: `OUTBOX_SEGMENTS` 100 (about 5000 buffered items, ~800 KB of the 3.8 MB LittleFS), `HW_NAME`

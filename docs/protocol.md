@@ -507,7 +507,7 @@ offline meter are queued like other commands, except that a newer `hw_profile` r
 
 ## 13. Zero, Tare and Calibration (per channel, all meters) — design, firmware / server 1.1.0
 
-Status: Zero and Tare are specified for implementation; **Calibration is designed here and held** (not implemented yet).
+Status: **Zero and Tare are implemented** (server, both firmwares, simulators; PC-tested, not yet tried on real hardware). **Calibration is designed here and held** (not implemented yet).
 Every value belongs to **one channel**: a single-channel meter has channel 0, on a multi-channel meter each channel has its own
 zero / tare (independent of the others, also in Shared session mode).
 
