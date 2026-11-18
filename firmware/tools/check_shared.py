@@ -32,6 +32,36 @@ for sketch, name in ((A, "pzem_config.h"), (B, "rbamp_config.h")):
 if not filecmp.cmp(A.parent / "partitions.csv", B.parent / "partitions.csv", shallow=False):
     print("DIFFERS: partitions.csv  (PowerMeterPZEM vs PowerMeterRBAmp)")
     bad.append("partitions.csv")
+# The Arduino upload hard-codes boot_app0 at 0xe000 and the app at 0x10000 (platform.txt of the ESP32 core): a table that moves
+# them flashes fine but never boots ("No bootable app partitions in the partition table").
+def check_partitions(path):
+    rows = {}
+    for line in path.read_text().splitlines():
+        line = line.split("#")[0].strip()
+        if not line:
+            continue
+        name, typ, sub, off, size = [x.strip() for x in line.split(",")][:5]
+        rows[name] = (typ, sub, int(off, 0), int(size, 0))
+    errs = []
+    want = {"nvs": 0x9000, "otadata": 0xE000, "app0": 0x10000}
+    for name, off in want.items():
+        if name not in rows or rows[name][2] != off:
+            errs.append(f"{name} must be at {off:#x} (Arduino upload offsets)")
+    spans = sorted((o, o + sz, n) for n, (t, st, o, sz) in rows.items())
+    for (a0, a1, an), (b0, b1, bn) in zip(spans, spans[1:]):
+        if a1 > b0:
+            errs.append(f"{an} overlaps {bn}")
+    for n, (t, st, o, sz) in rows.items():
+        if t == "app" and (o % 0x10000 or sz % 0x1000):
+            errs.append(f"{n}: app partitions start on a 64 KB boundary")
+    if spans and spans[-1][1] > 16 * 1024 * 1024:
+        errs.append("table is larger than 16 MB flash")
+    return errs
+
+for sk in ("PowerMeterPZEM", "PowerMeterRBAmp"):
+    for e in check_partitions(A.parent.parent / sk / "partitions.csv"):
+        print(f"PARTITIONS {sk}: {e}")
+        bad.append("partitions.csv")
 print("shared files identical" if not bad else f"{len(bad)} shared file(s) differ")
 print("differ on purpose (check by hand): " + ", ".join(DIFFERENT))
 sys.exit(1 if bad else 0)

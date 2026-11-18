@@ -14,6 +14,7 @@
 uint32_t g_ms = 0;
 SerialT Serial;
 std::map<std::string, std::string> g_nvs;
+bool g_nvsFull = false;
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); failures++; } } while (0)
@@ -220,6 +221,32 @@ int main() {
   inv["profile"]["boards"][1] = 0x50;
   CHECK(!call(inv, e, det, res, inS) && !strcmp(e, "invalid") && strstr(det, "twice"));
   printf("cancel + invalid ok\n");
+
+  // ---------------- NVS full: nothing is claimed that cannot be kept
+  events.clear(); restarts = 0;
+  g_nvsFull = true;
+  JsonDocument full1 = newProfileDoc(8, "reboot", 10);
+  CHECK(!call(full1, e, det, res, inS) && !strcmp(e, "storage") && hwp::state() == hwp::ST_ACTIVE && !hwp::rebootPending());
+  hwp::Profile before = hwp::active();
+  JsonDocument lf;
+  lf["ver"] = 9; lf["mode"] = "live";
+  hwp::toJson(hwp::active(), lf["profile"].to<JsonObject>());
+  lf["profile"]["ch"][0]["a"] = 5;
+  CHECK(!call(lf, e, det, res, inS) && !strcmp(e, "storage") && hwp::active().ch[0].clamp == before.ch[0].clamp && hwp::active().ver == 3);
+  g_nvsFull = false;
+  // a trial profile that cannot be stored at the confirmation is not claimed: rollback
+  JsonDocument tr = newProfileDoc(10, "reboot", 10);
+  CHECK(call(tr, e, det, res, inS));
+  g_ms += 11000; hwp::tick();
+  boot(); CHECK(hwp::state() == hwp::ST_TRIAL);
+  events.clear(); restarts = 0;
+  g_nvsFull = true;
+  g_ms += 1500; hwp::tick();
+  CHECK(restarts == 1 && hwp::state() == hwp::ST_TRIAL);   // asked for a restart, not "active"
+  g_nvsFull = false;
+  boot();
+  CHECK(hwp::state() == hwp::ST_ACTIVE && hwp::active().ver == 3);  // the trial profile is gone (rolled back)
+  printf("NVS full ok\n");
 
   // ---------------- hello.hwp
   JsonDocument h;

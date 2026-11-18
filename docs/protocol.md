@@ -468,7 +468,9 @@ offline meter are queued like other commands, except that a newer `hw_profile` r
 
 - NVS keys (namespace `pm`): `hw_act` (the confirmed server profile; it also *is* the rollback copy, because it is only
   replaced at confirmation), `hw_try` (trial / pending profile), `hw_boots` (unconfirmed starts with the trial profile),
-  `hw_note` (a rollback to report after the restart). Profiles are stored as JSON (below 1 KB).
+  `hw_note` (a rollback to report after the restart). Profiles are stored as JSON (below 1.2 KB). NVS is the usual 20 KB:
+  when it does not take a profile, `hw_profile` is answered `err: "storage"` (nothing changes), and a trial profile that cannot
+  be stored at the confirmation is rolled back (`reason: "storage"`).
 - A live clamp change is stored straight into `hw_act` and applied to the modules at once; `caps.ratings` /
   `amp_rating` on the server are refreshed with the next `hello`.
 - Factory reset and a `FW_TYPE` change clear all of them (back to the default profile). The server keeps its

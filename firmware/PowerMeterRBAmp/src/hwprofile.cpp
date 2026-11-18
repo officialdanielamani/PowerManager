@@ -226,7 +226,8 @@ static bool load(const char *key, Profile &p) {
   return ok;
 }
 
-static void save(const char *key, const Profile &p) {
+// false when NVS did not take it (the NVS partition is only 20 KB in the Arduino layout: it can be full)
+static bool save(const char *key, const Profile &p) {
   JsonDocument doc;
   doc["ver"] = p.ver;
   toJson(p, doc.as<JsonObject>());
@@ -234,8 +235,9 @@ static void save(const char *key, const Profile &p) {
   size_t len = serializeJson(doc, buf, sizeof(buf));
   Preferences pr;
   pr.begin("pm", false);
-  pr.putBytes(key, buf, len);
+  size_t written = pr.putBytes(key, buf, len);
   pr.end();
+  return len > 0 && written == len;
 }
 
 static void drop(const char *key) {
@@ -374,9 +376,15 @@ bool onProfile(JsonObjectConst msg, const char *&err, char *detail, size_t dn, c
       snprintf(detail, dn, "more than the clamp models changed");
       return false;
     }
+    Profile keep = cur;
     for (uint8_t i = 0; i < p.nCh; i++) cur.ch[i].clamp = p.ch[i].clamp;
     cur.ver = p.ver;
-    save(K_ACT, cur);
+    if (!save(K_ACT, cur)) {
+      cur = keep;  // not stored: it would be lost at the next restart
+      err = "storage";
+      snprintf(detail, dn, "could not store the profile (NVS full)");
+      return false;
+    }
     if (st == ST_DEFAULT) st = ST_ACTIVE;
     if (hk.applyClamps) hk.applyClamps();
     resState = "live";
@@ -386,7 +394,11 @@ bool onProfile(JsonObjectConst msg, const char *&err, char *detail, size_t dn, c
   int delay = msg["delay_s"] | HWP_DELAY_DEFAULT;
   if (delay < HWP_DELAY_MIN) delay = HWP_DELAY_MIN;
   if (delay > HWP_DELAY_MAX) delay = HWP_DELAY_MAX;
-  save(K_TRY, p);  // a newer profile simply replaces a pending one
+  if (!save(K_TRY, p)) {  // a newer profile simply replaces a pending one
+    err = "storage";
+    snprintf(detail, dn, "could not store the profile (NVS full)");
+    return false;
+  }
   trial = p;
   st = ST_PENDING;
   dueMs = nowMs() + (uint32_t)delay * 1000UL;
@@ -450,7 +462,14 @@ void tick() {
   lastProbeMs = now;
   int missing;
   if (allPartsAnswer(missing)) {  // confirmed: the trial profile becomes the active one
-    save(K_ACT, cur);
+    if (!save(K_ACT, cur)) {       // cannot be kept: do not claim it is active, go back to the previous profile
+      Serial.printf("[hwp] profile v%u could not be stored: rolling back\n", (unsigned)cur.ver);
+      putNote(cur.ver, "storage", -1);
+      drop(K_TRY);
+      setBoots(0);
+      if (hk.restart) hk.restart();
+      return;
+    }
     drop(K_TRY);
     setBoots(0);
     st = ST_ACTIVE;

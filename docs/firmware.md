@@ -178,17 +178,25 @@ Everything else is built into the ESP32 core: WiFi, WebServer, DNSServer, ESPmDN
 
 | Partition | Offset | Size | Use |
 |---|---|---|---|
-| nvs | 0x9000 | 0x10000 (64 KB) | settings, kWh counters, pairing, hardware profiles (active / trial / previous) |
-| otadata | 0x19000 | 0x2000 | OTA slot selection |
-| app0 (ota_0) | 0x20000 | 0x600000 (6 MB) | firmware |
-| app1 (ota_1) | 0x620000 | 0x600000 (6 MB) | OTA slot, same size |
-| spiffs (LittleFS) | 0xC20000 | 0x3D0000 (about 3.8 MB) | offline buffer (outbox) |
+| nvs | 0x9000 | 0x5000 (20 KB) | settings, kWh counters, pairing, hardware profile (`hw_act` / `hw_try`) |
+| otadata | 0xe000 | 0x2000 | OTA slot selection |
+| app0 (ota_0) | 0x10000 | 0x600000 (6 MB) | firmware |
+| app1 (ota_1) | 0x610000 | 0x600000 (6 MB) | OTA slot, same size |
+| spiffs (LittleFS) | 0xC10000 | 0x3E0000 (about 3.9 MB) | offline buffer (outbox) |
 | coredump | 0xFF0000 | 0x10000 | crash dumps |
 
 The table ends exactly at 16 MB. The app uses about 1.3 MB of its 6 MB slot, so there is room for growth and OTA.
-Switching an existing meter to this table needs one USB flash; the LittleFS partition moves and is formatted
-(buffered readings are lost, nothing else). Whether the NVS contents survive the larger partition is to be checked
-on a bench meter before a field roll-out; plan to re-pair if they do not. `OUTBOX_SEGMENTS` can then be raised.
+
+**Do not move `nvs` / `otadata` / `app0`.** The Arduino upload writes `boot_app0` at **0xe000** and the sketch at **0x10000**
+(hard-coded in the ESP32 core's `platform.txt`, not taken from the partition table). A table with the app anywhere else flashes
+without an error and then never boots: `invalid magic byte (nothing flashed here?)`, `No bootable app partitions in the partition
+table`; the app lands inside the NVS area. `firmware/tools/check_shared.py` checks this. The consequence is that NVS stays at the
+usual 20 KB (4 usable pages, one blob up to about 4 KB). Settings use roughly half of it; the hardware profile is under 1.2 KB per
+copy, and `hwprofile.cpp` refuses (`err: "storage"`) or rolls back instead of claiming a profile it could not store.
+
+Switching an existing meter to this table (or recovering a meter that does not boot): **erase the whole flash once** (Arduino IDE:
+Tools > *Erase All Flash Before Sketch Upload* > Enabled, upload, then set it back to Disabled; or `esptool erase_flash`). The meter
+then has to be paired again. The LittleFS partition moves and is formatted (buffered readings are lost).
 
 Reference core: Arduino-ESP32 **3.3.5** (used on the hardware). Also compiles on 3.3.12 and 2.0.17. Libraries: ArduinoJson 7.4.2, WebSockets 2.7.3. The only API that differs between the cores is the RGB LED call (`rgbLedWrite` on 3.x, `neopixelWrite` on 2.0.x), handled in `led.cpp`, plus the ESP-NOW receive-callback signature (handled in `mesh.cpp`).
 

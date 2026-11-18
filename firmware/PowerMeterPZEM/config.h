@@ -150,10 +150,10 @@
 #define MESH_BATCH_MAX 8                               // telemetry items per message on the mesh
 
 // ---- outbox (offline buffer)
-// Stored in the LittleFS ("spiffs") partition of partitions.csv (16 MB flash, ~3.8 MB for this):
+// Stored in the LittleFS ("spiffs") partition of partitions.csv (16 MB flash, ~3.9 MB for this):
 // choose Tools > Flash Size > 16MB and Tools > Partition Scheme > "Custom".
 #define OUTBOX_SEGMENT_ITEMS 50   // items per segment file (~8 KB)
-#define OUTBOX_SEGMENTS 100       // max segments -> keeps the newest ~5000 items (~800 KB of the 3.8 MB LittleFS)
+#define OUTBOX_SEGMENTS 100       // max segments -> keeps the newest ~5000 items (~800 KB of the 3.9 MB LittleFS)
 #define OUTBOX_RAM_ITEMS 120       // readings wait in RAM until acknowledged; flash only when offline
 #define OUTBOX_RAM_MAX_AGE_MS 30000  // ...or still unsent after this long
 #define OUTBOX_BATCH_MAX 50       // items per "tel" message

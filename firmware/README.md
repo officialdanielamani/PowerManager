@@ -33,7 +33,7 @@ Example configurations: [`examples/`](examples/). The server needs firmware 1.0.
 | USB CDC On Boot | Enabled (serial log over the USB-C port) |
 | Flash Size | 16MB (128Mb) |
 | PSRAM | OPI PSRAM (N16R8 module) |
-| Partition Scheme | **Custom**: uses `partitions.csv` in the sketch folder (6 MB app + 6 MB OTA slot, 64 KB NVS, 3.8 MB LittleFS) |
+| Partition Scheme | **Custom**: uses `partitions.csv` in the sketch folder (6 MB app + 6 MB OTA slot, 20 KB NVS, 3.9 MB LittleFS). The offsets of `nvs` / `otadata` / `app0` must not change: the Arduino upload writes at 0xe000 / 0x10000. First flash or switch from another table: *Erase All Flash Before Sketch Upload* once |
 
 Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h` (or make it with the server's **Firmware → Generate config.h**), then Upload.
 

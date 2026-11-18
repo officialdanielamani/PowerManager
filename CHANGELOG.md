@@ -11,6 +11,9 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 - Test tools in the repository: `firmware/tools/hwprofile_test`, `firmware/tools/syntax_check` (ESP32 sources against
   stubs), `server/tools/e2e` (browser test against a real server + simulated meter), `make syntax-check`, `make e2e`; CI runs
   the browser test as its own job (`e2e` in `ci.yml`).
+- **Fix:** an earlier `partitions.csv` of this branch moved the app to 0x20000 and did not boot with the Arduino upload
+  (`No bootable app partitions`): the table is back to the standard head, `check_shared.py` guards it. `hwprofile.cpp`
+  checks that NVS took the profile (`err: "storage"` / rollback).
 - I2C fault handling: relay board pin directions are written with every state write (MCP23017 / XL9535 boards that lose power or are
   plugged in later work again by themselves), a stuck bus is freed (`i2cbus.cpp`: SCL clocking + STOP + restart, `info.i2c_recov`),
   an rbAmp module that is silent for 5 s is probed again. Test: `firmware/tools/i2c_test`.
@@ -20,8 +23,8 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
   `config.h` files must be regenerated (Firmware → Generate config.h) or edited: `{1, 2, SCT_30A, 2}` becomes
   `{1, 2, SCT_30A, 1, 2}` when relay 2 is output 2 of the first relay board. AUX relays keep their number across boards.
 
-- Boards are now ESP32-S3 **N16R8** (16 MB flash, octal PSRAM): custom `partitions.csv` in both sketches (64 KB NVS,
-  two 6 MB app slots for OTA, 3.8 MB LittleFS). Build scripts, CI and README use `FlashSize=16M,PSRAM=opi,PartitionScheme=custom`.
+- Boards are now ESP32-S3 **N16R8** (16 MB flash, octal PSRAM): custom `partitions.csv` in both sketches (standard
+  20 KB NVS / otadata 0xe000 / app 0x10000 as the Arduino upload requires, two 6 MB app slots for OTA, 3.9 MB LittleFS). Build scripts, CI and README use `FlashSize=16M,PSRAM=opi,PartitionScheme=custom`.
   **One USB flash is needed** to change the partition table of an existing meter (readings in the offline buffer are lost).
 - Server: hardware profile of rbAmp meters (rbAmp addresses, relay boards, channel table with clamp models) with
   live clamp change, delayed reboot, rollback, I2C scan and rbAmp address commands (`docs/protocol.md` §12,
