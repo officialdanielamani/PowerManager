@@ -6,7 +6,7 @@
 #     rbAmp also with firmware/examples/*.h as config.h
 #   - a CHANNELS table that uses a relay output twice must FAIL to compile
 #   - the hw_profile / i2c_scan / rbamp_addr command code of net.cpp and the profile glue of PowerMeterRBAmp.ino
-# What it cannot do: link, or compile control.cpp / net.cpp / web.cpp as a whole (Wi-Fi, FreeRTOS, ...). The real
+# What it cannot do: link, or compile net.cpp / web.cpp / mesh.cpp / mqttlink.cpp (Wi-Fi, WebSockets ...). The real
 # build is firmware/tools/build.sh (arduino-cli, run by CI).
 #   firmware/tools/syntax_check/run.sh [path to ArduinoJson/src]
 set -e
@@ -37,8 +37,8 @@ check() {  # check <label> <include dir with config.h and src/> <source files...
 }
 
 # ---- default config.h of both sketches
-check "rbAmp config.h" firmware/PowerMeterRBAmp rbamp.cpp relays.cpp i2cbus.cpp
-check "PZEM config.h" firmware/PowerMeterPZEM relays.cpp i2cbus.cpp
+check "rbAmp config.h" firmware/PowerMeterRBAmp rbamp.cpp relays.cpp i2cbus.cpp control.cpp app_state.cpp storage.cpp battery.cpp temp.cpp ups.cpp auxrelay.cpp
+check "PZEM config.h" firmware/PowerMeterPZEM relays.cpp i2cbus.cpp control.cpp app_state.cpp storage.cpp battery.cpp temp.cpp ups.cpp auxrelay.cpp sensor_pzem.cpp
 
 # ---- every example config as the rbAmp config.h
 for ex in firmware/examples/config_rbamp_*.h; do
