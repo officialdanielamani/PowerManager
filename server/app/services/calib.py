@@ -14,7 +14,7 @@ CHECK_MAX_AGE_S = 600          # an older check is not used any more
 STABLE_A = (0.03, 0.03)        # readings are stable when max - min <= max(abs, rel * mean)
 STABLE_W = (3.0, 0.05)
 ZERO_MAX_A, ZERO_MAX_W = 1.0, 100.0   # a zero is small: more means a load is still connected
-TARE_MIN_A = 0.01              # a tare needs something to measure
+TARE_MIN_A = 0.05              # a tare needs something to measure
 KINDS = ("zero", "tare")
 
 
@@ -142,7 +142,7 @@ def evaluate(device, ch, kind):
         za, zw = values(device, ch, "zero")
         a, w = max(0.0, mean_a - za), max(0.0, mean_w - zw)
         if a < TARE_MIN_A:
-            out["reasons"].append("No load was measured: connect the load that should count as 0, then check again.")
+            out["reasons"].append(f"The load is too small ({a:.3f} A): a tare needs at least {TARE_MIN_A:g} A above the zero. Connect the load that should count as 0, then check again.")
         out["a"], out["w"] = round(a, 4), round(w, 2)
     out["ok"] = not out["reasons"]
     return out

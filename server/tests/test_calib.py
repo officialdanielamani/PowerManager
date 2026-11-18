@@ -75,7 +75,7 @@ def test_rules(single, online):
     bad("zero", "A load seems to be connected", a=(3.2, 3.19, 3.21), w=(700.0, 699.0, 701.0))
     bad("zero", "Only 7 readings", n=7)
     bad("zero", "took 6 s", secs=6)
-    bad("tare", "No load was measured", a=(0.002, 0.001, 0.003), w=(0.2, 0.1, 0.3))
+    bad("tare", "too small", a=(0.002, 0.001, 0.003), w=(0.2, 0.1, 0.3))
     # a zero check is not a tare check
     run_check(single, 0, "zero")
     ev = calib.evaluate(single, 0, "tare")

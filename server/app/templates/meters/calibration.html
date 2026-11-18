@@ -6,11 +6,19 @@
 <div class="text-body-secondary small mb-3">{{ d.device_id }}{% if d.info %} · {{ d.info }}{% endif %}</div>
 {% set active = 'calibration' %}{% include "meters/_tabs.html" %}
 
+<ul class="nav nav-pills mb-3 small">
+  <li class="nav-item"><a class="nav-link" href="{{ url_for('meters.configure', pk=d.id) }}">Settings</a></li>
+  <li class="nav-item"><a class="nav-link active" href="{{ url_for('meters.calibration', pk=d.id) }}">Zero &amp; Tare</a></li>
+  <li class="nav-item"><span class="nav-link disabled" title="Not implemented yet">Calibration <span class="badge text-bg-secondary">soon</span></span></li>
+</ul>
 <div class="card mb-3" style="max-width:1000px"><div class="card-body small">
   <p class="mb-2"><strong>Zero</strong>: the sensor's offset with <strong>no load</strong>. Disconnect the load, run the check, then set it: the meter subtracts it from
     every reading (current, power, energy, limits, history).</p>
   <p class="mb-2"><strong>Tare</strong>: a load that is <strong>connected</strong> and should count as 0 (a charger, a fixture). Connect it, run the check, then set it:
     values are shown without it, and the meter's limits use the tared values (<em>Configuration → Use tared values for limits</em>).</p>
+  <p class="mb-2"><strong>Minimum to set:</strong> a <strong>zero</strong> needs no load (the sensor reads at most {{ limits.zero_max_a|round(2) }} A and {{ limits.zero_max_w|round|int }} W).
+    A <strong>tare</strong> needs a load of at least <strong>{{ limits.tare_min_a }} A</strong> above the zero (about {{ (limits.tare_min_a * 230)|round|int }} W at 230 V), and it must be steady.
+    A clamp reads small currents poorly: below roughly 0.1 A the reading is mostly noise, so a tare that small is not accurate.</p>
   <p class="mb-0 text-body-secondary">The <strong>sensor check</strong> takes at least {{ limits.min_secs }} s ({{ limits.min_readings }} readings) and must be stable.
     {% if d.is_mc %}Every channel has its own zero and tare.{% endif %} <span id="online" class="badge ms-1"></span></p>
 </div></div>

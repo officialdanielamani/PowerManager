@@ -538,7 +538,7 @@ statistics; the server decides what to do with them. Command (server → meter):
 A check is **acceptable** when `n ≥ 10` and `secs ≥ 10` and the readings are **stable**: for current `max − min ≤ max(0.03 A,
 3 % of the mean)`, for power `max − min ≤ max(3 W, 5 % of the mean)`. Additionally:
 - **Zero**: the mean must be small: `a ≤ 1.0 A` and `w ≤ 100 W` — otherwise "a load is still connected".
-- **Tare**: the load must be measurable: `a − zero.a ≥ 0.01 A`, and not above the sensor rating.
+- **Tare**: the load must be measurable: `a − zero.a ≥ 0.05 A` (below about 0.1 A a clamp mostly reads noise), and not above the sensor rating.
 The page shows the numbers and why a check failed; **Set zero / Set tare** is only offered for an acceptable check.
 
 ### 13.3 Stored values and config

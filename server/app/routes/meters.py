@@ -79,7 +79,7 @@ def calibration(pk):
     device = _device(pk)
     return render_template("meters/calibration.html", d=device, online=hub.is_online(device.id), view=calib_svc.view(device),
                            limits={"min_readings": calib_svc.MIN_READINGS, "min_secs": calib_svc.MIN_SECS,
-                                   "zero_max_a": calib_svc.ZERO_MAX_A, "zero_max_w": calib_svc.ZERO_MAX_W})
+                                   "zero_max_a": calib_svc.ZERO_MAX_A, "tare_min_a": calib_svc.TARE_MIN_A, "zero_max_w": calib_svc.ZERO_MAX_W})
 
 
 @bp.get("/<int:pk>/calibration/status")
