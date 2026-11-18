@@ -4,7 +4,7 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 
 ## Unreleased (1.1.0)
 
-- **Zero & Tare for all meters, per channel** (design: `docs/protocol.md` §13): Meter → *Zero & Tare* page with a sensor check (>= 10
+- **Zero & Tare for all meters, per channel** (design: `docs/protocol.md` §13): Configuration → *Tune* tab (between Channels and AUX relays; Calibration greyed out; tare minimum depends on the clamp range) with a sensor check (>= 10
   readings / 10 s, stable), *Set zero* (sensor offset with no load, subtracted on the meter), *Set tare* (a connected load that counts as 0;
   tared values in the views, CSV and the meter's limits), Clear. Replaces the single-channel tare of the Configuration form (the
   old value is migrated to channel 0); multi-channel meters have an independent zero / tare per channel. New: command / event

@@ -538,7 +538,7 @@ statistics; the server decides what to do with them. Command (server → meter):
 A check is **acceptable** when `n ≥ 10` and `secs ≥ 10` and the readings are **stable**: for current `max − min ≤ max(0.03 A,
 3 % of the mean)`, for power `max − min ≤ max(3 W, 5 % of the mean)`. Additionally:
 - **Zero**: the mean must be small: `a ≤ 1.0 A` and `w ≤ 100 W` — otherwise "a load is still connected".
-- **Tare**: the load must be measurable: `a − zero.a ≥ 0.05 A` (below about 0.1 A a clamp mostly reads noise), and not above the sensor rating.
+- **Tare**: the load must be measurable: `a − zero.a ≥` a minimum that depends on the clamp rating: 0.05 A up to 30 A, 0.15 A up to 50 A, 0.3 A up to 100 A, 0.5 A above (bigger clamps are noisier at small currents), and not above the sensor rating.
 The page shows the numbers and why a check failed; **Set zero / Set tare** is only offered for an acceptable check.
 
 ### 13.3 Stored values and config
@@ -566,7 +566,7 @@ the channels in Shared mode). Session progress items carry `kwh_t` when a tare i
 
 ### 13.6 Server pages
 
-Meter → **Zero & Tare** (all meters; one block per channel on multi-channel meters): current zero / tare with date and user;
+Meter → Configuration → **Tune** (all meters; one block per channel on multi-channel meters): current zero / tare with date and user;
 **[Check sensor]** for Zero and for Tare (progress "7 / 10 readings", then the numbers and OK / not stable / load still connected),
 **[Set zero]** / **[Set tare]**, **[Clear]**. The *Tare* fields of the old Configure form (single-channel) are replaced; the
 *Use tared values for limits* option stays in Configure. Display: the *Raw | Tared* switch and the tared columns exist for every

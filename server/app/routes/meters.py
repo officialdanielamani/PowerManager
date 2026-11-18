@@ -76,10 +76,13 @@ def pairing_status(code):
 @bp.get("/<int:pk>/calibration")
 @staff_required
 def calibration(pk):
-    device = _device(pk)
-    return render_template("meters/calibration.html", d=device, online=hub.is_online(device.id), view=calib_svc.view(device),
-                           limits={"min_readings": calib_svc.MIN_READINGS, "min_secs": calib_svc.MIN_SECS,
-                                   "zero_max_a": calib_svc.ZERO_MAX_A, "tare_min_a": calib_svc.TARE_MIN_A, "zero_max_w": calib_svc.ZERO_MAX_W})
+    """Old address of the Zero & Tare page: it is the Tune tab of the configuration now."""
+    return redirect(url_for("meters.configure", pk=_device(pk).id) + "#tune")
+
+
+def _calib_limits():
+    return {"min_readings": calib_svc.MIN_READINGS, "min_secs": calib_svc.MIN_SECS,
+            "zero_max_a": calib_svc.ZERO_MAX_A, "zero_max_w": calib_svc.ZERO_MAX_W}
 
 
 @bp.get("/<int:pk>/calibration/status")
@@ -304,6 +307,7 @@ def configure(pk):
                            n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
+                           calib_view=calib_svc.view(device), calib_online=hub.is_online(device.id), calib_limits=_calib_limits(),
                            form=request.form if errors else None)
 
 

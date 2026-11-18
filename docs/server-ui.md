@@ -46,7 +46,7 @@ Shows a **Synced / Pending sync** badge.
 |---------|--------|
 | General | Device ID (read-only), Nick Name, Info, Send data every [10 s – 1 h] |
 | Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · **[Disable / Unsync / Remove]** (dialog explaining each option, "I understand" tick, Device ID typed for Remove) |
-| Zero & Tare | a separate page, see *Meter → Zero & Tare* below. This form only has **Use tared values for limits** (max current and kWh limit on the meter) |
+| Tune | between *Channels* and *AUX relays*: Zero, Tare (and Calibration, greyed out for now) per channel, see *Configuration → Tune* below. Also has **Use tared values for limits** (max current and kWh limit on the meter) |
 | Data clean-up | [ ] Automatically delete data if session more than [120] days ago · [ ] Automatically delete Historical Events more than [120] days ago |
 | Set Limit | In this order: **Max kWh per session** + *When the kWh limit is reached*: ( ) Session run as usual · (•) Off relay, but session continue (default) · ( ) End session — **Session time limit** (none / duration D-H-M / daily HH:MM), Auto renew, Relay off when offline — **Max Amp** (0 = off; latched until Reset Trip) — **Operating Voltage Range** Min–Max V + *If out of range* (same 3 choices) — **Tamper Protection** [ ] enable + *If tamper detected* (same 3 choices) — **Sensor Timeout**: if the sensor does not respond or errors for [10] s (0 = off) + the same 3 choices (default: Off relay, but session continue) |
 | Link this meter to users | Checkbox per view-only user (server-only, never sent to the meter) |
@@ -306,9 +306,9 @@ meter uses now, so a re-flash keeps changes made here. `config.h` counts relay b
 gap left by a removed board is closed in the generated file (the page says so).
 
 
-## Meter → Zero & Tare (all meters, per channel)
+## Configuration → Tune (all meters, per channel)
 
-Admin, and a manager for their own meters; a tab next to *Configuration*. One block per channel on a multi-channel meter (each channel
+Admin, and a manager for their own meters; the *Tune* tab of the configuration page (the old `/calibration` address redirects there). One block per channel: header `CHx – name · clamp rating · now A`, then the rows **Zero**, **Tare** and **Calibration** (not available yet). One block per channel on a multi-channel meter (each channel
 has its own zero and tare); the specification is [protocol.md §13](protocol.md).
 
 - **Zero** (sensor offset with *no load*): disconnect the load, **[Check sensor]**, read the result, **[Set zero]**. The meter then subtracts

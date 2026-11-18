@@ -180,9 +180,10 @@ def test_old_single_channel_tare_is_migrated(app):
 def test_pages_and_access(app, admin, online):
     with app.app_context():  # (no context kept open around the requests: they would share one stale session)
         pk = _meter("Dryer A", "AAAA1111")
-    html = admin.get(f"/meters/{pk}/calibration").get_data(as_text=True)
-    assert "Zero &amp; Tare" in html and "Check sensor" in html and "at least 10 s" in html
-    assert "Zero &amp; Tare" in admin.get(f"/meters/{pk}/configure").get_data(as_text=True)
+    assert admin.get(f"/meters/{pk}/calibration").headers["Location"].endswith(f"/meters/{pk}/configure#tune")  # old address
+    html = admin.get(f"/meters/{pk}/configure").get_data(as_text=True)
+    assert 'data-tab="tune"' in html and "Check sensor" in html and "Calibration" in html and "not available yet" in html
+    assert html.index('data-tab="tune"') < html.index('data-tab="aux"') if 'data-tab="aux"' in html else True
     assert b"tareNow" not in admin.get(f"/meters/{pk}/configure").data
     r = admin.post(f"/meters/{pk}/calibration/check", json={"ch": 0, "kind": "zero"})
     assert r.get_json()["ok"] and online[-1]["c"] == "sensor_check" and online[-1]["n"] == 10

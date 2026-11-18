@@ -141,8 +141,8 @@ def evaluate(device, ch, kind):
     else:
         za, zw = values(device, ch, "zero")
         a, w = max(0.0, mean_a - za), max(0.0, mean_w - zw)
-        if a < TARE_MIN_A:
-            out["reasons"].append(f"The load is too small ({a:.3f} A): a tare needs at least {TARE_MIN_A:g} A above the zero. Connect the load that should count as 0, then check again.")
+        if a < tare_min(device, ch):
+            out["reasons"].append(f"The load is too small ({a:.3f} A): a tare needs at least {tare_min(device, ch):g} A above the zero. Connect the load that should count as 0, then check again.")
         out["a"], out["w"] = round(a, 4), round(w, 2)
     out["ok"] = not out["reasons"]
     return out
@@ -194,6 +194,31 @@ def clear(device, ch, what, user=None):
     return True
 
 
+def _live(device, ch):
+    lr = device.last_reading or {}
+    if device.is_mc:
+        for c in lr.get("ch") or []:
+            if c.get("i") == ch:
+                return c.get("a")
+        return None
+    return lr.get("a")
+
+
+def clamp_rating(device, ch):
+    """Rated current of the clamp / sensor of channel `ch` (A)."""
+    r = ((device.caps or {}).get("ratings") or [])
+    try:
+        return float(r[ch]) if ch < len(r) and r[ch] else float((device.caps or {}).get("amp_rating", 100))
+    except (TypeError, ValueError):
+        return 100.0
+
+
+def tare_min(device, ch):
+    """The smallest load a tare can use: a bigger clamp is noisier at small currents (0-30 A, 30-50 A, 50-100 A, above)."""
+    r = clamp_rating(device, ch)
+    return 0.05 if r <= 30 else 0.15 if r <= 50 else 0.3 if r <= 100 else 0.5
+
+
 def view(device):
     """Per-channel state for the Zero & Tare page."""
     out = []
@@ -201,6 +226,7 @@ def view(device):
         c = get(device, i)
         chk = (device.last_check or {}).get(str(i)) or {}
         out.append({"ch": i, "name": device.channel_name(i) if device.is_mc else "Measured line",
+                    "n_ch": channel_count(device), "rating": clamp_rating(device, i), "tare_min": tare_min(device, i), "live_a": _live(device, i),
                     "zero": c.get("zero"), "tare": c.get("tare"), "by": c.get("by"),
                     "check": chk or None, "eval": evaluate(device, i, chk.get("kind") or "zero") if chk else None})
     return out

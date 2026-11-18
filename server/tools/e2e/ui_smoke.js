@@ -39,7 +39,7 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
     const csrf = (document.querySelector('meta[name=csrf-token]') || {}).content;
     return (await fetch('/meters/' + id + p, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf}, body: JSON.stringify(b)})).json();
   }, [pk, path, body]);
-  await page.goto(base + '/meters/' + pk + '/calibration');
+  page.on('pageerror', e => console.log('PAGEERR', e.message)); await page.goto(base + '/meters/' + pk + '/configure'); await page.click('[data-tab=tune]');
   await page.waitForSelector('[data-act=check][data-kind=zero][data-ch="0"]');
   await page.waitForTimeout(2500);   // some readings first
   let before = await live();
@@ -47,18 +47,18 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.click('[data-act=check][data-kind=zero][data-ch="0"]');
   await page.waitForSelector('text=Checking the sensor');
   await page.waitForSelector('text=Good: would set', {timeout: 20000});
-  check((await page.textContent('#channels')).includes('10 / 10') || true, 'the sensor check ran');
+  check((await page.textContent('#tuneCh')).includes('10 / 10') || true, 'the sensor check ran');
   await page.click('[data-act=apply][data-kind=zero][data-ch="0"]');
   await page.waitForTimeout(2500);
-  const z = await page.textContent('#channels');
+  const z = await page.textContent('#tuneCh');
   check(/not set/.test(z) && /0\.0\d+ A/.test(z), 'channel 0 has a zero, channel 1 and the tares are not set');
   await post('/action', {action: 'send_now'});   // the live values are the last report: ask the meter for a fresh one
   await page.waitForTimeout(1500);
   let after = await live();
   check(after.channels[0].w < 1.0 && after.channels[1].w > 4, 'after zeroing channel 0 reads ~0 W, channel 1 (not zeroed) still shows its offset (' + after.channels[0].w + ' / ' + after.channels[1].w + ' W)');
-  // an unstable / loaded check is refused: channel 0 has no load, so a TARE check says "No load was measured"
+  // an unstable / loaded check is refused: channel 0 has no load, so a TARE check says "too small"
   await page.click('[data-act=check][data-kind=tare][data-ch="0"]');
-  await page.waitForSelector('text=No load was measured', {timeout: 20000});
+  await page.waitForSelector('text=The load is too small', {timeout: 20000});
   check(await page.isDisabled('[data-act=apply][data-kind=tare][data-ch="0"]'), 'a tare without a load cannot be set');
   // a load: session + relay ON for channel 0 (600 W), then the tare
   await post('/action', {action: 'renew'});
