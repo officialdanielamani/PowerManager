@@ -1,6 +1,5 @@
 #pragma once
 #include "WiFiClient.h"
-#include "WiFiClientSecure.h"
 struct HTTPClient {
   void setTimeout(uint16_t) {}
   void setConnectTimeout(uint16_t) {}

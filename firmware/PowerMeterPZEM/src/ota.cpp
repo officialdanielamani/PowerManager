@@ -3,6 +3,8 @@
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
