@@ -24,6 +24,7 @@ void tryWifi(const String &ssid, const String &pass);
 String wifiTestStatus();
 
 String serverHost();
+bool serverParams(String &host, uint16_t &port, bool &tls, bool &insecure);  // the paired server (false: none / mesh leaf)
 String linkMode();      // "wifi", "mesh" (leaf via a gateway), "searching" (leaf, no gateway) or "none"
 String meshGateway();   // gateway id while a mesh leaf
 uint8_t meshLeaves();   // leaves relayed while a gateway

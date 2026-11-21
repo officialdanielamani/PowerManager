@@ -13,12 +13,15 @@
 #include "battery.h"
 #include "ups.h"
 #include "certs.h"
+#include "ota.h"
 #include "control.h"
 #include "led.h"
 #include "mesh.h"
 #include "mqttlink.h"
 #include "outbox.h"
 #include "rbamp.h"
+#include "hwprofile.h"
+#include "i2cbus.h"
 #include "relays.h"
 #include "storage.h"
 #include "system.h"
@@ -69,6 +72,14 @@ static bool mdnsStarted = false;
 
 String apSsid() { return "Power_" + store::deviceId(); }
 String serverHost() { return srv.host; }
+bool serverParams(String &host, uint16_t &port, bool &tls, bool &insecure) {
+  if (leafMode || !srv.host.length()) return false;
+  host = srv.host;
+  port = srv.port;
+  tls = srv.tls;
+  insecure = srv.insecure;
+  return true;
+}
 String linkMode() {
   if (leafMode) return mesh::leafLinked() ? "mesh" : "searching";
   return WiFi.status() == WL_CONNECTED ? "wifi" : "none";
@@ -351,6 +362,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   m.sensor_to_s = sto;
   m.sensor_action = action3(se["action"] | "hold");
   m.summary = c["summary"] | false;
+  m.tare_limits = c["tare_limits"] | true;
   JsonObject tp = c["temp"];
   float tmax = tp["max"] | 0.0f;
   if (tmax < 0 || tmax > 125) { err = "temp.max"; return false; }
@@ -368,6 +380,13 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
     cc.kwh_max = k;
     cc.kwh_action = kwhAction(ch["kwh_action"] | "hold");
     if (!parseSess(ch["sess"], cc.sess, err, "ch.sess")) return false;
+    // Zero and tare of this channel (docs/protocol.md §13): amps 0-400, watts 0-100000
+    float za = ch["zero"]["a"] | 0.0f, zw = ch["zero"]["w"] | 0.0f, ta = ch["tare"]["a"] | 0.0f, tw = ch["tare"]["w"] | 0.0f;
+    if (za < 0 || za > 400 || zw < 0 || zw > 100000 || ta < 0 || ta > 400 || tw < 0 || tw > 100000) { err = "ch.zero_tare"; return false; }
+    cc.zeroA = za;
+    cc.zeroW = zw;
+    cc.tareA = ta;
+    cc.tareW = tw;
   }
   const char *aerr = nullptr;  // AUX relays: names + automation (applied with the rest in applyConfig)
   if (!auxrelay::parse(c["aux"].as<JsonArrayConst>(), c["tz_min"] | 0, aerr)) {
@@ -426,6 +445,9 @@ static void fillCaps(JsonObject caps) {
   caps["voltage"] = g.hasVoltage;
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
+  ota::capsJson(caps["ota"].to<JsonObject>());  // firmware update over the air (docs/protocol.md §14)
+  caps["hw_cfg"] = 1;               // hardware profile can be sent by the server (docs/protocol.md §12)
+  caps["hw_limits"].to<JsonObject>()["gpio"] = hw::RELAY_GPIO_COUNT;
   if (temp::hasHumidity()) caps["hum"] = true;
   caps["rtc"] = (bool)HAS_DS3231;
   caps["tamper"] = (bool)TAMPER_ENABLE;
@@ -610,6 +632,9 @@ static void sendHello() {
   JsonDocument doc;
   doc["t"] = "hello";
   doc["fw"] = FW_VERSION;
+  doc["fw_type"] = FW_TYPE;
+  doc["hw"] = HW_NAME;
+  ota::stateJson(doc["ota"].to<JsonObject>());
   doc["proto"] = PROTO_VERSION;
   doc["boot"] = store::bootCount();
   doc["up"] = millis() / 1000;
@@ -622,6 +647,7 @@ static void sendHello() {
   JsonObject caps = doc["caps"].to<JsonObject>();
   fillCaps(caps);
   control::stateJson(doc["state"].to<JsonObject>());
+  hwp::stateJson(doc["hwp"].to<JsonObject>());  // hardware profile in use (docs/protocol.md §12)
   sendJson(doc);
   lastStateVer = control::stateVersion();
 }
@@ -695,6 +721,7 @@ static void sendInfo() {
   if (rtc >= 0) doc["rtc"] = (uint32_t)rtc;  // DS3231 fitted: its own time (0 = not readable)
   doc["stack"] = sys::stackReport();
   doc["relay_sw"] = control::relaySwitches();
+  doc["i2c_recov"] = i2cbus::recoveries();  // times a stuck I2C bus had to be freed since start
   doc["reset"] = String(sys::resetReason()) + (sys::safeMode ? " - SAFE MODE (mesh + DS3231 off)" : "");
   if (battery::enabled()) {
     float v = battery::volts();
@@ -711,6 +738,38 @@ static void cmdAck(uint32_t ref, bool ok, const char *err) {
   doc["ok"] = ok;
   if (err) doc["err"] = err;
   sendJson(doc);
+}
+
+// Answer to a hardware profile command: `fill` adds the "res" object.
+static void cmdAckRes(uint32_t ref, bool ok, const char *err, const char *detail, void (*fill)(JsonObject, void *), void *ctx) {
+  JsonDocument doc;
+  doc["t"] = "cmd_ack";
+  doc["ref"] = ref;
+  doc["ok"] = ok;
+  if (err) doc["err"] = err;
+  if (detail && detail[0]) doc["detail"] = detail;
+  if (fill) fill(doc["res"].to<JsonObject>(), ctx);
+  sendJson(doc);
+}
+
+struct HwRes {
+  const char *state;
+  int inS;
+  uint8_t *found;
+  uint8_t n;
+};
+static void fillHwProfileRes(JsonObject o, void *p) {
+  HwRes *r = (HwRes *)p;
+  o["state"] = r->state;
+  if (r->inS) o["in_s"] = r->inS;
+}
+static void fillScanRes(JsonObject o, void *p) {
+  HwRes *r = (HwRes *)p;
+  JsonArray all = o["found"].to<JsonArray>(), rb = o["rbamp"].to<JsonArray>();
+  for (uint8_t i = 0; i < r->n; i++) {
+    all.add(r->found[i]);
+    if (r->found[i] >= 0x50 && r->found[i] <= 0x57 && rbamp::isRbamp(r->found[i])) rb.add(r->found[i]);
+  }
 }
 
 static void goOnline() {
@@ -799,6 +858,51 @@ static void handleCommand(JsonObject m) {
       tryWifi(ssid, pass);
       return;
     }
+  } else if (!strcmp(c, "hw_profile") && ota::busy()) {
+    ok = false;
+    err = "busy";
+  } else if (!strcmp(c, "hw_profile")) {
+    char detail[64];
+    HwRes r = {"", 0, nullptr, 0};
+    ok = hwp::onProfile(m, err, detail, sizeof(detail), r.state, r.inS);
+    cmdAckRes(ref, ok, err, ok ? nullptr : detail, ok ? fillHwProfileRes : nullptr, &r);
+    return;
+  } else if (!strcmp(c, "sensor_check")) {
+    // Zero & Tare wizard: measure the raw values of a channel for >= 10 readings (>= 10 s); the result comes as an
+    // event "sensor_check" (docs/protocol.md §13.1).
+    int n = m["n"] | 10;
+    ok = control::startSensorCheck(ch < 0 ? 0 : (uint8_t)ch, (uint8_t)(n < 0 ? 10 : n > 255 ? 255 : n), err);
+  } else if (!strcmp(c, "ota")) {
+    ok = ota::onCommand(m, err);  // docs/protocol.md §14.3
+  } else if (!strcmp(c, "hw_cancel")) {
+    ok = hwp::onCancel();
+    if (!ok) err = "nothing_pending";
+  } else if (!strcmp(c, "i2c_scan")) {
+    uint8_t found[40];
+    HwRes r = {"", 0, found, 0};
+    r.n = rbamp::scan(found, sizeof(found));
+    cmdAckRes(ref, true, nullptr, nullptr, fillScanRes, &r);
+    return;
+  } else if (!strcmp(c, "rbamp_addr")) {
+    int from = m["from"] | -1, to = m["to"] | -1;
+    if (from < 0x50 || from > 0x57 || to < 0x50 || to > 0x57 || from == to) {
+      ok = false;
+      err = "bad_address";
+    } else if (control::anySessionRunning()) {
+      ok = false;
+      err = "busy";  // the module restarts: not while a session runs
+    } else if (!rbamp::isRbamp(from)) {
+      ok = false;
+      err = "no_reply";
+    } else if (i2cbus::probe(to)) {
+      ok = false;
+      err = "addr_in_use";
+    } else {
+      Serial.printf("[net] rbAmp address 0x%02X -> 0x%02X (server)\n", from, to);
+      String msg;
+      ok = rbamp::changeAddress(from, to, msg) && rbamp::isRbamp(to);
+      if (!ok) err = "no_reply";
+    }
   } else if (!strcmp(c, "remove")) {
     cmdAck(ref, true, nullptr);
     if (!leafMode) ws.loop();
@@ -821,6 +925,7 @@ static void handleMessage(const char *payload, size_t len) {
 
   if (!strcmp(t, "welcome")) {
     helloDone = true;
+    ota::confirm();  // a freshly installed firmware is good once the server answers
     linkTrySinceMs = 0;  // connected: the MQTT fallback timer starts again at the next loss
     goOnline();
     Serial.println("[net] online");

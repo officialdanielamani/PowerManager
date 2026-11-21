@@ -12,9 +12,9 @@ MODES = {"manual": "Manual (ON / OFF buttons)", "schedule": "Schedule", "event":
 SOURCES = {"temp": "Temperature", "hum": "Humidity", "amp": "Current (A)", "watt": "Power (W)",
            "kwh": "kWh balance", "session": "Session", "tamper": "Tamper", "trip": "Over-current trip",
            "volt": "Voltage protection", "wifi": "No Wi-Fi", "server": "No server / internet",
-           "ups": "UPS power (mains failed)", "bat": "Battery %"}
+           "ups": "UPS power (mains failed)", "bat": "Battery %", "reboot": "Wait for reboot (hardware change)"}
 UNITS = {"temp": "°C", "hum": "%RH", "amp": "A", "watt": "W", "kwh": "kWh", "bat": "%"}
-FLAGS = ("tamper", "trip", "volt", "wifi", "server", "ups")  # on / off conditions ("active" or "not active")
+FLAGS = ("tamper", "trip", "volt", "wifi", "server", "ups", "reboot")  # on / off conditions ("active" or "not active")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 SCHED_MAX = 14
 TOTAL = 255  # amp / watt of all channels together
@@ -34,7 +34,7 @@ def sources(device):
         return dict(SOURCES)
     caps = device.caps or {}
     need = {"temp": temp_count(device), "hum": temp_count(device) and caps.get("hum"), "tamper": caps.get("tamper"),
-            "volt": caps.get("voltage") is not False, "ups": caps.get("ups"), "bat": caps.get("battery")}
+            "volt": caps.get("voltage") is not False, "ups": caps.get("ups"), "bat": caps.get("battery"), "reboot": caps.get("hw_cfg")}
     return {k: label for k, label in SOURCES.items() if need.get(k, True)}
 
 

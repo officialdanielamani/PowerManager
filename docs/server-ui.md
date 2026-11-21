@@ -46,7 +46,7 @@ Shows a **Synced / Pending sync** badge.
 |---------|--------|
 | General | Device ID (read-only), Nick Name, Info, Send data every [10 s – 1 h] |
 | Actions | [Renew Now] · [Set to Default] (resets config only, keeps name/info/history) · **[Disable / Unsync / Remove]** (dialog explaining each option, "I understand" tick, Device ID typed for Remove) |
-| Tare (self-consumption) | Current [A] + Power [W] offsets, **[Tare now]** (fills both from the latest reading; relay must be OFF, reading < 2 min old), Clear. Server-only; limits on the meter keep using raw values |
+| Tune | between *Channels* and *AUX relays*: Zero, Tare (and Calibration, greyed out for now) per channel, see *Configuration → Tune* below. Also has **Use tared values for limits** (max current and kWh limit on the meter) |
 | Data clean-up | [ ] Automatically delete data if session more than [120] days ago · [ ] Automatically delete Historical Events more than [120] days ago |
 | Set Limit | In this order: **Max kWh per session** + *When the kWh limit is reached*: ( ) Session run as usual · (•) Off relay, but session continue (default) · ( ) End session — **Session time limit** (none / duration D-H-M / daily HH:MM), Auto renew, Relay off when offline — **Max Amp** (0 = off; latched until Reset Trip) — **Operating Voltage Range** Min–Max V + *If out of range* (same 3 choices) — **Tamper Protection** [ ] enable + *If tamper detected* (same 3 choices) — **Sensor Timeout**: if the sensor does not respond or errors for [10] s (0 = off) + the same 3 choices (default: Off relay, but session continue) |
 | Link this meter to users | Checkbox per view-only user (server-only, never sent to the meter) |
@@ -74,7 +74,7 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 
 ### Meter Info (view-only; admin and viewers)
 - Device ID, Nick Name, Info, kWh per session, next session reset (display TZ), **session cost** (if a price is set), **session started, time elapsed, time left** (live, ticks every second; "Session ended" once a limit ended it), auto renew yes/no, last online, firmware.
-- **[Raw | Tared]** switch in *Latest data* (only when the meter has a tare; remembered per browser): latest data, session kWh/balance/cost, history chart + stats and the Sessions table switch between raw and tared values. Dashboard cards show tared values when a tare is set.
+- **[Raw | Tared]** switch in *Latest data* (only when the meter has a tare on any channel; multi-channel meters: each channel is tared with its own tare, the whole-meter numbers use their sum; remembered per browser): latest data, session kWh/balance/cost, history chart + stats and the Sessions table switch between raw and tared values. Dashboard cards show tared values when a tare is set.
 - **[Get meter info]** (admin) in the *Meter* card: asks the meter for IP, Wi-Fi, MAC, battery voltage + % (if enabled), free heap, PSRAM, firmware, hardware name, `HW_INFO`, chip, uptime; shown in a dialog.
 - Historical Events (admin): checkboxes + **Delete selected**.
 - **[Get Data Now]** in *Latest data* (admin and viewers): asks the meter for a reading now and waits up to 15 s for it (rate limited to once per 5 s per meter).
@@ -272,3 +272,72 @@ meters: **Tare**), **AUX relays** (when the meter has them), **Data**, **Users**
 bar at the bottom saves every tab at once; Connection has its own *Send to meter* buttons. The page remembers the
 last tab, and a field the browser refuses opens its tab. A meter on firmware older than 1.0.0 shows a warning
 that it must be updated.
+
+
+## Firmware → Update Device I/O (hardware profile of an rbAmp meter)
+
+Admin, and a manager for their own meters (a viewer gets 403). Reached from the Firmware page, next to **Generate
+config.h**. Needs a multi-channel meter with firmware 1.1.0 or newer (`caps.hw_cfg`); older meters show a hint.
+Protocol, rollback and rules: [protocol.md §12](protocol.md).
+
+1. **Select meter**: the multi-channel meters the user manages.
+2. **Status line**: Online / Offline and the profile state: *Compiled default* (nothing sent yet), *Waiting* (queued, e.g. offline),
+   *Restart pending* with a countdown and **Cancel restart**, *Checking* (restarted, confirming), *Active* (v N), *Rolled back*
+   (with the reason, e.g. `no_reply 0x51`), *Rejected* (the meter refused it). The page polls every 2.5 s.
+3. **rbAmp boards**: one address (0x50–0x57) per module, board 1 first. **Relay boards**: type (MCP23017, XL9535 / TCA9535,
+   PCF8574 / PCF8574A, ESP32 pins), address, outputs used, active high; the relay numbers of each row are shown.
+   Relay boards are shown as **Board A [2C]**, **Board B [8C]** … (the number is the outputs used). The letter belongs
+   to the board: **removing Board A leaves Board B as Board B** (its channels keep their relay); a new board takes the
+   first free letter.
+   **Channels**: rbAmp board, input 1–7, clamp (5 … 100 A or *Keep*), and the relay as **[Board A] [relay 2]** (or none);
+   outputs no channel uses become AUX relays (listed under the table as "Board B relay 3").
+4. **Scan Address**: the meter lists every I2C address that answers; rbAmp modules are confirmed, other addresses are labelled by
+   range. The rows above then show *found / not found* badges. Needs the meter online.
+5. **Update Clamp Model**: enabled when only clamp models differ from what the meter uses; applied at once, no restart.
+   **Save & Apply**: enabled when anything else changed; restarts the meter after the delay (default 60 s, 10–600). Running
+   sessions end (reason `hw_change`), relays go OFF. If a part does not answer, the meter rolls back by itself.
+   A change in progress blocks both buttons. Errors (the rules of the protocol) are listed above the buttons; an AUX relay
+   that the new profile removes must be cleared first.
+6. **Give an rbAmp module a new address** (after a scan): connect only that module, pick its current and a free address, **Set
+   address**. Refused while a session runs or if the new address is used.
+
+**Generate config.h** has *Start from the hardware of a meter*: fills the rbAmp boards, relay boards and channels with what the
+meter uses now, so a re-flash keeps changes made here. `config.h` counts relay boards by position (A, B, C … in order), so a
+gap left by a removed board is closed in the generated file (the page says so).
+
+
+## Configuration → Tune (all meters, per channel)
+
+Admin, and a manager for their own meters; the *Tune* tab of the configuration page (the old `/calibration` address redirects there). One block per channel: header `CHx – name · clamp rating · now A`, then the rows **Zero**, **Tare** and **Calibration** (not available yet). One block per channel on a multi-channel meter (each channel
+has its own zero and tare); the specification is [protocol.md §13](protocol.md).
+
+- **Zero** (sensor offset with *no load*): disconnect the load, **[Check sensor]**, read the result, **[Set zero]**. The meter then subtracts
+  the offset from every reading, so the history, energy and limits are already corrected.
+- **Tare** (a *connected* load that should count as 0): connect it, **[Check sensor]**, **[Set tare]**. The tare is the measured load minus
+  the zero. Tared values are shown with the *Raw | Tared* switch, in the history, CSV (extra `…_tared` columns) and cost, and the meter
+  uses them for its limits when *Use tared values for limits* is on.
+- **[Check sensor]** needs the meter online. It takes **at least 10 s (10 readings)**; the page shows "7 / 10 readings", then mean / min /
+  max of current, power and voltage and either *Good: would set …* or why not: not stable, too few readings, a load seems to be connected
+  (zero needs ≤ 1 A and ≤ 100 W), no load measured (tare), or the check is older than 10 minutes. **Set** is only enabled for a good check of
+  the same kind. **[Clear]** removes the value. Every change raises the config version and is sent to the meter at once.
+- Events *zero_set*, *tare_set* and *calibration_cleared* are recorded in the meter's event list. Calibration (known loads) is designed in
+  protocol.md §13.7 and not implemented yet.
+
+## Firmware list, Flash (OTA) and USB flash
+
+*Firmware* page: **List of firmware** (checkbox, title, info, type, version, size, by, [Flash] [Info] [Edit]). Admin: **Add New Firmware**
+(title, info, description, version, zip), Edit (text; optionally a new zip of the same firmware type), *Delete selected* (bulk). Manager: Info and
+Flash only. The zip is the Arduino IDE export (`*.ino.bin`, bootloader, partitions, `boot_app0`, `flash_args`); the server reads type, version
+and hardware from the tag inside the image and refuses a file without it. Needs `client_max_body_size` of about 80 MB on a reverse proxy.
+
+**Flash** has two ways:
+- **Over the air**: *Search & select meter*, then *Firmware Info* and *Meter Info* side by side (type, version, hardware, free update space,
+  partition layout). Red verdicts block (offline, other type, other layout, too big, a firmware without OTA support = flash once by USB);
+  warnings (older version, running session, relays off) need the check box. *Upload the Firmware to Meter* starts it; the page shows
+  downloading / checking / restarting / done, or failed / rolled back (the meter went back to its old version).
+- **By USB (browser)**: Connect (port picker) → chip, MAC and flash size are read and checked → *Update* (keeps the settings) or *Erase all
+  flash first* (type the device ID of the meter, or the chip MAC of a new board) → Flash with a progress bar and log. Works in Chrome / Edge /
+  Opera on a computer over **https://** or `localhost`; otherwise the tab says why it is off. If the board does not enter download mode:
+  hold BOOT, press RESET.
+
+Notification **Meter restart** (on by default): hardware profile restart pending, firmware update restarting / updated / failed / rolled back.

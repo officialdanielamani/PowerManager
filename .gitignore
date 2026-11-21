@@ -20,3 +20,4 @@ server/.env
 firmware/build/
 firmware/tools/.cache/
 server/instance-dev/
+server/tools/e2e/*.png

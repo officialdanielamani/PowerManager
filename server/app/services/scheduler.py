@@ -45,7 +45,7 @@ def repush_local_time():
         if uses_local_time(d.cfg):
             d.cfg_ver_wanted += 1
             db.session.commit()
-            hub.send(d.id, {"t": "cfg", **devconfig.to_device(d.cfg, d.cfg_ver_wanted)})
+            hub.send(d.id, {"t": "cfg", **devconfig.to_device(d.cfg, d.cfg_ver_wanted, d.calib)})
 
 
 def check_tz_offset():

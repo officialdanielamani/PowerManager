@@ -1,6 +1,6 @@
 # PowerMeterRBAmp — multi-channel AC meter firmware (ESP32-S3)
 
-A separate firmware for the multi-channel AC meter: **ESP32-S3 Super Mini + one or more rbAmp BASIC
+A separate firmware for the multi-channel AC meter: **ESP32-S3 N16R8 + one or more rbAmp BASIC
 modules (SCT-013 clamps, I²C) + DS3231 + tamper limit switch + I²C relay board(s)**, optionally DS18B20
 temperature sensors. Everything else (Wi-Fi setup,
 pairing, the meter's own page, mesh, offline buffer, safe mode) works like the single-channel firmware
@@ -9,8 +9,8 @@ in `../PowerMeterPZEM`. Design and protocol: [`../../docs/multichannel.md`](../.
 ## 1. Arduino IDE
 
 Same as `../PowerMeterPZEM` (board package **esp32 by Espressif Systems 3.3.5**, ArduinoJson, WebSockets
-by Markus Sattler; **ESP32S3 Dev Module**, USB CDC On Boot Enabled, Flash 4 MB, Partition Scheme
-*Minimal SPIFFS*). Open `PowerMeterRBAmp/PowerMeterRBAmp.ino`.
+by Markus Sattler; **ESP32S3 Dev Module**, USB CDC On Boot Enabled, Flash 16 MB, PSRAM OPI, Partition Scheme
+*Custom*, uses the `partitions.csv` next to the sketch). Open `PowerMeterRBAmp/PowerMeterRBAmp.ino`.
 
 ## 2. Wiring (default pins, see `config.h`)
 
@@ -39,22 +39,22 @@ Everything about the hardware is in a few tables at the top:
 
 ```c
 #define RBAMP_BOARDS { 0x50, 0x51 }                       // board 1, board 2 (I2C addresses)
-#define RELAY_BOARDS { {RELAY_XL9535, 0x20, 8, 1} }       // driver, address, relays, active high
+#define RELAY_BOARDS { {RELAY_XL9535, 0x20, 8, 1} }       // relay board A: driver, address, relays, active high
 #define CHANNELS { \
-  /* board  input  clamp     relay */ \
-  {  1,     1,     SCT_100A, 1 },   /* CH1 */ \
-  {  1,     2,     SCT_30A,  2 },   /* CH2 */ \
-  {  2,     1,     SCT_20A,  3 },   /* CH3: second module, its input 1 */ \
+  /* board  input  clamp     relay board  output */ \
+  {  1,     1,     SCT_100A, 1,           1 },   /* CH1: relay board A, output 1 */ \
+  {  1,     2,     SCT_30A,  1,           2 },   /* CH2 */ \
+  {  2,     1,     SCT_20A,  1,           3 },   /* CH3: second module, its input 1 */ \
 }
 ```
 
 | Setting | Meaning |
 |---|---|
 | `RBAMP_BOARDS` | I²C address of every rbAmp module (1 to 8). Board 1 = first entry |
-| `RELAY_BOARDS` | every relay board / pin group: `RELAY_MCP23017` (16 push-pull outputs, recommended for SSRs), `RELAY_XL9535` (up to 16 outputs), `RELAY_PCF8574` (up to 8) or `RELAY_GPIO` (pins in `RELAY_GPIO_PINS`), address, outputs used (from output 0), active high (XL9535: 1; PCF8574 with low-side SSRs: usually 0). Relays are numbered across the entries |
-| `CHANNELS` | one line per channel, in order CH1, CH2 … (up to 16): rbAmp board, its current input (1–7), clamp model, relay (0 = none) |
+| `RELAY_BOARDS` | every relay board / pin group: `RELAY_MCP23017` (16 push-pull outputs, recommended for SSRs), `RELAY_XL9535` (up to 16 outputs), `RELAY_PCF8574` (up to 8) or `RELAY_GPIO` (pins in `RELAY_GPIO_PINS`), address, outputs used (from output 0), active high (XL9535: 1; PCF8574 with low-side SSRs: usually 0). The entries are relay board A, B, C … in order (a profile sent from the server keeps its own letters; the generator renumbers a gap) |
+| `CHANNELS` | one line per channel, in order CH1, CH2 … (up to 16): rbAmp board, its current input (1–7), clamp model, relay board (A = 1, B = 2 …) and output on it (both 0 = no relay) |
 | clamp models | `SCT_5A`, `SCT_10A`, `SCT_20A`, `SCT_30A`, `SCT_50A`, `SCT_60A`, `SCT_100A`, or `SCT_KEEP` (CT-series modules with factory-paired clamps) |
-| AUX relays | relays no channel uses: manual ON / OFF from the server, not metered |
+| AUX relays | outputs no channel uses: manual ON / OFF from the server, not metered (numbered across all relay boards, board A first) |
 | `HAS_DS3231`, `TAMPER_ENABLE`, `TEMP_DS18B20`, `TEMP_SHT`, `BATTERY_ENABLE`, `MESH_ENABLE` | optional parts; 0 = left out of the firmware completely (smaller binary) |
 | `SHT_SENSORS` | SHT20 / SHT3x / SHT4x sensors on the I²C bus: `{ {SHT_4X, 0x44} }` (temperature + humidity) |
 | `PIN_TEMP`, `TEMP_MAX_SENSORS`, `TEMP_READ_MS` | DS18B20 pin, how many DS18B20s, read interval. Numbering: the SHTs first, then the DS18B20s by serial number |

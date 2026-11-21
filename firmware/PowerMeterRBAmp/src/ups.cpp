@@ -3,12 +3,12 @@
 namespace ups {
 
 static bool state = false;
-static uint32_t changeSince = 0;
 
 bool enabled() { return UPS_ENABLE != 0; }
 bool active() { return state; }
 
 #if UPS_ENABLE
+static uint32_t changeSince = 0;
 static bool read() { return digitalRead(PIN_UPS) == UPS_ACTIVE_LEVEL; }
 
 void begin() {

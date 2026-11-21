@@ -91,7 +91,7 @@
   </div>
   <div class="col-12 col-lg-7">
     <div class="card h-100"><div class="card-header fw-semibold d-flex align-items-center gap-2">Latest data <span class="ms-auto small text-body-secondary fw-normal" data-field="reading_at">{{ m.reading_at }}</span>
-      {% if m.tare %}<div class="btn-group btn-group-sm" role="group" id="tareToggle" title="Tare: own consumption {{ '%g'|format(d.tare_a) }} A / {{ '%g'|format(d.tare_w) }} W">
+      {% if m.tare %}<div class="btn-group btn-group-sm" role="group" id="tareToggle" title="Tare: {{ '%g'|format(m.tare.a) }} A / {{ '%g'|format(m.tare.w) }} W">
         <button type="button" class="btn btn-outline-secondary" data-view="raw">Raw</button><button type="button" class="btn btn-outline-secondary" data-view="tared">Tared</button></div>{% endif %}
       {% if not d.removed_at %}<button class="btn btn-sm btn-outline-primary" id="btnGetData" title="Ask the meter for a reading now. While this page is open a fresh reading is also requested automatically every minute; every reading is kept in Historical data."><i class="bi bi-arrow-clockwise me-1"></i>Get Data Now</button>{% endif %}</div>
       <div class="card-body" id="latest">

@@ -45,7 +45,8 @@
 <ul class="nav nav-pills flex-nowrap overflow-auto mb-3 pb-1" id="cfgTabs">
   <li class="nav-item"><button type="button" class="nav-link text-nowrap active" data-tab="general"><i class="bi bi-sliders me-1"></i>General</button></li>
   <li class="nav-item"><button type="button" class="nav-link text-nowrap" data-tab="limits"><i class="bi bi-shield-check me-1"></i>Limits &amp; protection</button></li>
-  <li class="nav-item"><button type="button" class="nav-link text-nowrap" data-tab="channels"><i class="bi bi-diagram-3 me-1"></i>{{ 'Channels' if d.is_mc else 'Tare' }}</button></li>
+  {% if d.is_mc %}<li class="nav-item"><button type="button" class="nav-link text-nowrap" data-tab="channels"><i class="bi bi-diagram-3 me-1"></i>Channels</button></li>{% endif %}
+  <li class="nav-item"><button type="button" class="nav-link text-nowrap" data-tab="tune"><i class="bi bi-bullseye me-1"></i>Tune</button></li>
   {% if aux_cfg %}<li class="nav-item"><button type="button" class="nav-link text-nowrap" data-tab="aux"><i class="bi bi-toggles me-1"></i>AUX relays</button></li>{% endif %}
   <li class="nav-item"><button type="button" class="nav-link text-nowrap" data-tab="data"><i class="bi bi-database me-1"></i>Data</button></li>
   <li class="nav-item"><button type="button" class="nav-link text-nowrap" data-tab="users"><i class="bi bi-people me-1"></i>Users</button></li>
@@ -271,23 +272,20 @@
       {% endfor %}
     </div></div>
   </div>
-  {% else %}
-  <div class="col-12" data-pane="channels">
-    <div class="card"><div class="card-body">
-      <p class="small text-body-secondary mb-2">If the meter's own power supply (ESP32, SSR) is on the measured line, the power sensor also measures it.
-        These offsets are subtracted when showing <strong>Tared</strong> values (Info page switch, dashboard, CSV extra columns) and, if ticked below, by the meter for its limits. Raw readings are always stored.</p>
-      <div class="d-flex flex-wrap gap-2 align-items-center">
-        <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Current</span><input class="form-control" type="number" step="0.001" min="0" max="5" name="tare_a" id="tare_a" value="{{ val('tare_a', cfg.get('tare_a', d.tare_a)) }}"><span class="input-group-text">A</span></div>
-        <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Power</span><input class="form-control" type="number" step="0.1" min="0" max="500" name="tare_w" id="tare_w" value="{{ val('tare_w', cfg.get('tare_w', d.tare_w)) }}"><span class="input-group-text">W</span></div>
-        <button type="button" class="btn btn-sm btn-outline-primary" id="tareNow" title="Fill from the latest reading (relay must be OFF)"><i class="bi bi-bullseye me-1"></i>Tare now</button>
-        <button type="button" class="btn btn-sm btn-link" onclick="document.getElementById('tare_a').value=0;document.getElementById('tare_w').value=0">Clear</button>
-      </div>
+  {% endif %}
+  <div class="col-12" data-pane="tune" style="max-width:1000px">
+    <div class="card"><div class="card-body small">
+      <p class="mb-2"><strong>Zero</strong>: the sensor's offset with <strong>no load</strong>. Disconnect the load, run the check, then set it: the meter subtracts it from every reading.
+        <strong>Tare</strong>: a load that is <strong>connected</strong> and should count as 0 (a charger, a fixture). Connect it, run the check, then set it: values are shown without it.
+        <strong>Calibration</strong> (known loads) is not available yet.</p>
+      <p class="mb-2 text-body-secondary">The sensor check takes at least <span id="tuneSecs"></span> s (<span id="tuneReads"></span> readings) and must be stable. A zero needs the sensor to read at most {{ calib_limits.zero_max_a|round(2) }} A and {{ calib_limits.zero_max_w|round|int }} W.
+        A tare needs a minimum load that depends on the clamp (a bigger clamp is noisier at small currents): clamp up to 30 A: 0.05 A, 30-50 A: 0.15 A, 50-100 A: 0.3 A, above: 0.5 A.
+        {% if d.is_mc %}Every channel has its own zero and tare.{% endif %} <span id="tuneOnline" class="badge ms-1"></span></p>
+      <div id="tuneCh"></div>
       <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="tare_limits" id="tare_limits" {{ chk('tare_limits', cfg.get('tare_limits', true)) }}>
-        <label class="form-check-label" for="tare_limits">Use tared values for limits (kWh limit and max current, on the meter)</label></div>
-      <div class="form-text">Tare now: turn the relay OFF, wait for a fresh reading (or use Get Data Now), then press it. 0 = no tare. Voltage is never tared.</div>
+        <label class="form-check-label" for="tare_limits">Use tared values for limits (max current and kWh limit, on the meter). Saved with the Save button.</label></div>
     </div></div>
   </div>
-  {% endif %}
 
   <div class="col-12" data-pane="data" style="max-width:900px">
     <div class="card"><div class="card-body">
@@ -322,7 +320,7 @@
       {% set ev = a.get('event') or {} %}
       <div class="border rounded p-2 mb-2 pm-aux" data-aux="{{ j }}">
         <div class="d-flex flex-wrap gap-2 align-items-center">
-          <span class="fw-semibold" style="min-width:110px">AUX{{ j + 1 }}{% if aux_relays.get(j) %} <span class="fw-normal small text-body-secondary">· relay {{ aux_relays.get(j) }}</span>{% endif %}</span>
+          <span class="fw-semibold" style="min-width:110px">AUX{{ j + 1 }}{% if aux_relays.get(j) %} <span class="fw-normal small text-body-secondary">· {{ aux_relays.get(j) }}</span>{% endif %}</span>
           <input class="form-control form-control-sm" style="max-width:200px" name="aux_name_{{ j }}" maxlength="20" placeholder="Name, e.g. Desk Lamp" value="{{ val('aux_name_' ~ j, a.get('name', '')) }}">
           <select class="form-select form-select-sm pm-aux-mode" style="max-width:220px" name="aux_mode_{{ j }}">
             {% for k, label in aux_modes.items() %}<option value="{{ k }}" {{ 'selected' if mode == k }}>{{ label }}</option>{% endfor %}
@@ -508,6 +506,77 @@
 <script>
 (function () {
   var actionUrl = "{{ url_for('meters.action', pk=d.id) }}", infoUrl = "{{ url_for('meters.info', pk=d.id) }}";
+  // ---- Tune: zero / tare per channel (docs/protocol.md §13); calibration is greyed out until it exists
+  (function () {
+    var BASE = "{{ url_for('meters.calibration', pk=d.id) }}";
+    var LIM = {{ calib_limits|tojson }};
+    var state = {{ {'channels': calib_view, 'online': calib_online, 'server_time': 0}|tojson }};
+    var $ = function (id) { return document.getElementById(id); };
+    function fmtA(v) { return v == null ? '–' : (+v).toFixed(3) + ' A'; }
+    function fmtW(v) { return v == null ? '–' : (+v).toFixed(1) + ' W'; }
+    function when(t) { return t ? new Date(t * 1000).toLocaleString() : ''; }
+    $('tuneSecs').textContent = LIM.min_secs; $('tuneReads').textContent = LIM.min_readings;
+    function stat(name, tri, f) {
+      return tri ? '<tr><td>' + name + '</td><td>' + f(tri[0]) + '</td><td>' + f(tri[1]) + '</td><td>' + f(tri[2]) + '</td></tr>' : '';
+    }
+    function btn(cls, act, c, kind, icon, text, off) {
+      return '<button type="button" class="btn btn-sm ' + cls + '" data-act="' + act + '" data-ch="' + c.ch + '" data-kind="' + kind + '"' + (off ? ' disabled' : '') + '><i class="bi ' + icon + ' me-1"></i>' + text + '</button>';
+    }
+    function block(c, kind) {
+      var cur = c[kind], chk = c.check || {}, mine = chk.kind === kind;
+      var ev = c.eval && mine ? c.eval : null;
+      var label = kind === 'zero' ? 'Zero' : 'Tare';
+      var html = '<div class="border rounded p-2 mb-2"><div class="d-flex flex-wrap align-items-center gap-2">' +
+        '<span class="fw-semibold" style="min-width:3.5em">' + label + '</span>' +
+        (cur ? '<span class="badge text-bg-success">' + fmtA(cur.a) + ' · ' + fmtW(cur.w) + '</span><span class="text-body-secondary">' + (cur.at ? when(cur.at) : '') + (c.by ? ' · ' + PM.esc(c.by) : '') + '</span>'
+             : '<span class="badge text-bg-secondary">not set</span>') +
+        (kind === 'tare' ? '<span class="text-body-secondary">min ' + c.tare_min + ' A</span>' : '') +
+        '<span class="ms-auto d-flex gap-2">' + btn('btn-outline-primary', 'check', c, kind, 'bi-activity', 'Check sensor', false) +
+        btn('btn-primary', 'apply', c, kind, 'bi-check2', 'Set ' + kind, !(ev && ev.ok)) + btn('btn-outline-danger', 'clear', c, kind, 'bi-x-lg', 'Clear', !cur) + '</span></div>';
+      if (mine && chk.state === 'running') {
+        var secs = Math.max(0, Math.round((state.server_time || Date.now() / 1000) - chk.at));
+        html += '<div class="mt-2"><span class="spinner-border spinner-border-sm me-1"></span>Checking the sensor… <strong>' + Math.min(secs, LIM.min_readings) + ' / ' + LIM.min_readings + '</strong> readings (at least ' + LIM.min_secs + ' s). ' +
+          (kind === 'zero' ? 'Keep the load disconnected.' : 'Keep the load connected and steady.') + '</div>';
+      } else if (mine && (chk.state === 'done' || chk.state === 'failed') && ev) {
+        var s = ev.stats;
+        html += '<div class="mt-2">';
+        if (s) html += '<table class="table table-sm mb-1" style="max-width:420px"><thead><tr><th></th><th>mean</th><th>min</th><th>max</th></tr></thead><tbody>' +
+          stat('Current', s.a, fmtA) + stat('Power', s.w, fmtW) + stat('Voltage', s.v, function (v) { return (+v).toFixed(1) + ' V'; }) +
+          '</tbody></table><div class="text-body-secondary">' + s.n + ' readings in ' + s.secs + ' s · ' + when(chk.at) + '</div>';
+        if (ev.ok) html += '<div class="text-success mt-1"><i class="bi bi-check-circle me-1"></i>Good: would set <strong>' + fmtA(ev.a) + ' · ' + fmtW(ev.w) + '</strong>' + (kind === 'tare' ? ' (without the zero)' : '') + '. Press <em>Set ' + kind + '</em>.</div>';
+        else ev.reasons.forEach(function (r) { html += '<div class="text-danger mt-1"><i class="bi bi-x-circle me-1"></i>' + PM.esc(r) + '</div>'; });
+        html += '</div>';
+      }
+      return html + '</div>';
+    }
+    function calibRow() {
+      return '<div class="border rounded p-2 mb-2 opacity-50"><div class="d-flex flex-wrap align-items-center gap-2"><span class="fw-semibold" style="min-width:3.5em">Calibration</span>' +
+        '<span class="badge text-bg-secondary">not available yet</span><span class="ms-auto"><button type="button" class="btn btn-sm btn-outline-secondary" disabled>Calibrate</button></span></div></div>';
+    }
+    function render() {
+      $('tuneOnline').className = 'badge ' + (state.online ? 'text-bg-success' : 'text-bg-secondary');
+      $('tuneOnline').textContent = state.online ? 'Online' : 'Offline';
+      $('tuneCh').innerHTML = state.channels.map(function (c) {
+        return '<div class="card mb-3"><div class="card-header fw-semibold">' + (c.n_ch > 1 ? 'CH' + (c.ch + 1) + ' – ' : '') + PM.esc(c.name) +
+          ' <span class="fw-normal text-body-secondary">· clamp ' + (+c.rating).toString() + ' A · now ' + fmtA(c.live_a) + '</span></div><div class="card-body pb-1">' +
+          block(c, 'zero') + block(c, 'tare') + calibRow() + '</div></div>';
+      }).join('');
+    }
+    render();
+    var busy = false;
+    PM.poll(BASE + '/status', 1000, function (s) { if (!busy && !document.querySelector('[data-pane="tune"]').classList.contains('d-none')) { state = s; render(); } });
+    $('tuneCh').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-act]');
+      if (!b || b.disabled) return;
+      var body = {ch: +b.dataset.ch, kind: b.dataset.kind, what: b.dataset.kind};
+      if (b.dataset.act === 'clear' && !confirm('Clear the ' + b.dataset.kind + ' of this channel?')) return;
+      busy = true;
+      PM.post(BASE + '/' + b.dataset.act, body).then(function (r) {
+        if (r.ok) PM.toast(b.dataset.act === 'check' ? 'Sensor check started' : b.dataset.act === 'apply' ? 'Saved: sent to the meter' : 'Cleared', 'success');
+        else PM.toast((r.errors || [r.error || 'Failed']).join(' '), 'danger');
+      }).finally(function () { busy = false; });
+    });
+  })();
   // Tabs: one group of settings at a time (everything is still saved together).
   var tabBtns = document.querySelectorAll('#cfgTabs [data-tab]'), tabKey = 'pmCfgTab{{ d.id }}';
   function showTab(name) {
@@ -622,14 +691,6 @@
   }
   document.querySelectorAll('input[name=drdy]').forEach(function (r) { r.addEventListener('change', syncDm); });
   syncDm();
-  var tn = document.getElementById('tareNow');
-  if (tn) tn.addEventListener('click', function () {
-    PM.post(actionUrl, {action: 'tare_now'}).then(function (r) {
-      if (!r.ok) return PM.toast(r.message || r.error, 'warning');
-      document.getElementById('tare_a').value = r.a; document.getElementById('tare_w').value = r.w;
-      PM.toast(r.message, 'info');
-    });
-  });
   var tp = document.getElementById('tamper_protect'), to = document.getElementById('tamperOpts');  // (tare: only single-channel meters)
   function syncTamper() { to.querySelectorAll('input').forEach(function (r) { r.disabled = !tp.checked; }); to.style.opacity = tp.checked ? 1 : .5; }
   tp.addEventListener('change', syncTamper); syncTamper();

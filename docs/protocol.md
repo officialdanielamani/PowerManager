@@ -40,7 +40,7 @@ Manual entry on the device uses the same four fields: **Server address**, **Port
   "code": "K7P29QXM",
   "device_id": "MTR23H4R",
   "fw": "0.1.0",
-  "hw": "esp32s3-supermini",
+  "hw": "esp32s3-n16r8",
   "proto": 1,
   "caps": {
     "kind": "ac",
@@ -107,7 +107,7 @@ Other close codes: `1001` = server is shutting down (reconnect with backoff), `4
 | `state` | After any relay/session change, and in response to `get_state` | see 2.6 |
 | `cfg_ack` | After applying a config | `ver`, `ok`, `err?` |
 | `cmd_ack` | After a command | `ref` (copied from the `cmd`), `ok`, `err?` (`quota_exceeded`, `session_expired`, `tripped`, `unknown_cmd`) |
-| `info` | Reply to `get_info` | `ip`, `ssid`, `rssi`, `mac`, `heap`, `heap_min`, `psram`, `psram_free`, `fw`, `hw`, `hw_info` (config.h `HW_INFO`), `chip`, `flash`, `core`, `uptime`, `boot`, `outbox`, `time_src`, `stack` (free stack per task), `reset` (last reset reason, SAFE MODE), `clock` (meter clock, epoch; 0 = not set), `rtc` (DS3231 time; only with a DS3231, 0 = not readable), `sensor` / `kind` (AC/DC Power Sensor), `bat_v` + `bat_pct` when `BATTERY_ENABLE` is on, `temp_sensors` (serial number and value of each DS18B20) with `TEMP_ENABLE`; multi-channel: `clamps`, `sensor_boards`, `relay_board` |
+| `info` | Reply to `get_info` | `i2c_recov` (times a stuck I2C bus was freed since start), `ip`, `ssid`, `rssi`, `mac`, `heap`, `heap_min`, `psram`, `psram_free`, `fw`, `hw`, `hw_info` (config.h `HW_INFO`), `chip`, `flash`, `core`, `uptime`, `boot`, `outbox`, `time_src`, `stack` (free stack per task), `reset` (last reset reason, SAFE MODE), `clock` (meter clock, epoch; 0 = not set), `rtc` (DS3231 time; only with a DS3231, 0 = not readable), `sensor` / `kind` (AC/DC Power Sensor), `bat_v` + `bat_pct` when `BATTERY_ENABLE` is on, `temp_sensors` (serial number and value of each DS18B20) with `TEMP_ENABLE`; multi-channel: `clamps`, `sensor_boards`, `relay_board` |
 | `ping` | Every 30 s | – (server replies `pong`) |
 
 ### 2.3 Server → Device
@@ -353,7 +353,7 @@ Config `aux[i]`:
 
 - `sched`: up to 14 entries `{"on", "start", "end"}` (minutes of the local day) with either `"days"` (bit 0 = Monday
   … bit 6 = Sunday) or `"date": [year, month, day]` (year 0 = every year). First match wins.
-- `event.src`: `temp`, `hum`, `amp`, `watt`, `kwh`, `session`, and new `tamper`, `trip`, `volt`, `wifi`, `server`.
+- `event.src`: `temp`, `hum`, `amp`, `watt`, `kwh`, `session`, and new `tamper`, `trip`, `volt`, `wifi`, `server`, and (from 1.1.0, §12) `reboot` = "Wait for Reboot": active during the countdown of a hardware profile change.
   The new ones are on / off conditions: `"active": true|false` (`wifi` / `server` are active while the link is
   missing). `event.idx`: channel / sensor, `255` = all channels together (amp, watt), `254` = any channel (amp,
   watt, kwh, session, trip).
@@ -379,6 +379,314 @@ Config `aux[i]`:
 
 ## 11. Supported firmware
 
-The server works with meter firmware **1.0.0 or newer** (both sketches). Older firmware is not supported: the
+The server works with meter firmware **1.1.0 or newer** (both sketches; the hardware profile of §12 uses relay board +
+output for a channel's relay, which older firmware does not know). Older firmware is not supported: the
 meter's Configuration page and the Firmware page show that it must be updated. What a meter can do is taken from
 `hello.caps` (parts switched on in its `config.h`), not from its version number.
+
+## 12. Hardware profile (`hello.caps.hw_cfg`) — design, firmware / server 1.1.0
+
+Status: **implemented** on the server (`services/hwprofile.py`, `tools/sim_meter_mc.py`) and in the rbAmp firmware (`src/hwprofile.cpp`; PC-tested, not yet tried on real hardware). Only the rbAmp sketch (`PowerMeterRBAmp`) takes part; the PZEM
+sketch keeps its compile-time layout until a later version.
+
+What the wiring looks like (rbAmp modules, relay boards, which input / clamp / relay each channel uses) can be
+changed from the server without recompiling. The compiled tables of `config.h` (`RBAMP_BOARDS`, `RELAY_BOARDS`,
+`CHANNELS`) become the **default profile**. Pins, enable flags and the maximums (`MC_MAX_CH`, 8 rbAmp boards,
+32 relays, 8 relay-table entries) stay compile-time. A channel's relay is a relay board (by its stable `id`, shown as a letter) and an output on it
+("Board A relay 2"), not a number across all boards; the meter derives the relay number across boards (lowest
+`id` first) that AUX relays, `state.relay` and the AUX events keep using. `config.h` counts its relay boards by
+position (first entry = Board A): the generator renumbers a profile with a gap: they follow the hardware design.
+
+### 12.1 Profile document
+
+```json
+{"ver": 7,
+ "boards": [80, 81],
+ "relays": [{"id": 2, "drv": "mcp23017", "addr": 33, "n": 8, "hi": 1}],
+ "ch": [{"b": 1, "i": 1, "a": 10, "rb": 2, "ro": 1},
+        {"b": 1, "i": 2, "a": 10, "rb": 2, "ro": 2},
+        {"b": 2, "i": 1, "a": 30, "rb": 2, "ro": 3}]}
+```
+
+The example has only **Board B** (`id` 2): Board A was removed and Board B stayed Board B.
+
+| Field | Meaning | Rules (same on server and meter) |
+|---|---|---|
+| `ver` | Profile version, raised by the server on every change | integer ≥ 1 |
+| `boards` | I²C address of each rbAmp module, board 1 first | 1–8 entries, each 0x50–0x57, no duplicates |
+| `relays[]` | One entry per relay board (at most 8). `id` 1–8 = the board's letter (1 = Board A … 8 = Board H); it is **kept**: removing Board A leaves Board B as Board B, a new board takes the lowest free id. The list is in ascending `id` order (the server sorts it); relay numbers across boards (AUX relays) follow that order | `id`: unique, 1–8; `drv`: `mcp23017` / `xl9535` (≤ 16), `pcf8574` (≤ 8), `gpio` (≤ pins listed in `RELAY_GPIO_PINS`); `addr`: 0x20–0x27 (`pcf8574` also 0x38–0x3F, `gpio`: 0); `hi`: 1 = active high; at most 32 relays in total; no two entries on the same address |
+| `ch[]` | One entry per measured channel, CH1 first | 1–`MC_MAX_CH` entries; `b` = board number (1..number of boards), `i` = input 1..7, `a` = clamp model in amps (`0` keep, 5, 10, 20, 30, 50, 60, 100), `rb` = the `id` of a relay board (1 = Board A, 2 = Board B …; 0 = no relay; it must exist in `relays`), `ro` = output on that board (1..its `n`; 0 when `rb` is 0); no two channels on the same `b`+`i`, no (`rb`, `ro`) used twice |
+
+These are the rules of the `static_assert`s in `hwmap.h` / `relaymap.h`, moved to run time. They are written once
+(firmware: one validator function that the PC tests also run; server: `services/validation.py`). Relays that no
+channel uses are AUX relays as before.
+
+### 12.2 Capability and state
+
+- `hello.caps.hw_cfg` = profile format version (`1`). The server offers **Update Device I/O** only when it is present.
+- `hello.hwp` = `{"ver": 7, "state": "active", "profile": {…}}` (the profile in use, format 12.1, without `ver`). `state` ∈ `default` (compiled tables, nothing sent yet), `active`
+  (a server profile in use), `trial` (booted with a new profile, not confirmed yet), `pending` (stored, reboot
+  countdown running).
+
+### 12.3 Commands (server → meter)
+
+| `c` | Params | Behaviour |
+|---|---|---|
+| `hw_profile` | `ver`, `profile`, `mode`, `delay_s` | `mode: "live"` = only clamp models differ from the active profile: written to the modules at once, no reboot. `mode: "reboot"` = anything else: store as the **trial** profile and restart after `delay_s` (default 60, 10–600). The meter checks the mode against its own active profile and rejects a wrong one with `err: "mode"`. It validates the profile again (`err: "invalid"`, `detail`). Replaced by a newer `hw_profile` while a countdown runs |
+| `hw_cancel` | – | Cancel a running countdown; the stored trial profile is dropped |
+| `i2c_scan` | – | Probe addresses 0x08–0x77 and answer with `res: {"found": [32, 80, ...], "rbamp": [80]}` in `cmd_ack`. Addresses that identify as rbAmp (`HW_VARIANT` register) are listed in `rbamp`. The control loop waits for the bus meanwhile (the existing I²C lock) |
+| `rbamp_addr` | `from`, `to` | Change one module's address (two-phase commit as `rbamp addr` on serial). Preconditions checked by the meter: `from` answers and identifies as rbAmp, `to` (0x50–0x57) does not answer, no session is running (`err: "busy"`). Afterwards the meter re-probes `to` and answers `res: {"ok": true}` or `err: "no_reply"` |
+
+All are answered with `cmd_ack` (extra fields `res` = result object, `detail` = short text for an error); `hw_profile` adds `res: {"state": "live"|"pending", "in_s": 60}`. Commands for an
+offline meter are queued like other commands, except that a newer `hw_profile` replaces an older queued one and
+`i2c_scan` / `rbamp_addr` are dropped (they need someone watching).
+
+### 12.4 Reboot sequence (`mode: "reboot"`)
+
+1. `cmd_ack` (`state: pending`, `in_s`), event `hw_reboot_pending {ver, in_s}`. While the countdown runs, state
+   `hwp.state = "pending"` and the AUX event source **`reboot`** ("Wait for Reboot", `active` true) is on, so a
+   relay can be linked to it as a warning. The countdown survives nothing: a power cut before zero drops it and
+   the old profile stays active.
+2. At zero: every running session ends with reason `hw_change`, kWh counters and state are saved, relays go OFF,
+   the meter restarts. Relays are OFF after every start anyway, so the warning relay ends with the countdown.
+3. The meter boots with the trial profile and runs the **confirm check** (below).
+
+### 12.5 Confirm check and rollback
+
+- A trial profile becomes `active` only when **every** listed rbAmp (`boards`) and relay board (`relays`, I²C
+  drivers) answers within `HW_CONFIRM_MS` (60 s, config.h option) of the start. The server link is **not**
+  needed, so a Wi-Fi problem never causes a rollback.
+- Success: event `hw_active {ver}`, `hwp.state = "active"`, the previous profile is kept as the rollback copy.
+- Failure: the previous profile is restored and the meter restarts once more. Event `hw_rollback {ver, reason,
+  addr?}` (`reason`: `no_reply` with the missing address, `invalid`, `reset`). A reset or crash before the
+  confirmation counts as well: after the trial profile has started **twice** without being confirmed, the third start rolls it back (`reason: "reset"`), so there is no boot loop.
+- If the previous profile itself is the compiled default, rollback = back to the default.
+- The server marks the profile **Rolled back** and sends a *Meter status* notification with the reason. The wanted
+  profile is not re-sent automatically; the user has to change it and save again.
+
+### 12.6 Storage and defaults
+
+- NVS keys (namespace `pm`): `hw_act` (the confirmed server profile; it also *is* the rollback copy, because it is only
+  replaced at confirmation), `hw_try` (trial / pending profile), `hw_boots` (unconfirmed starts with the trial profile),
+  `hw_note` (a rollback to report after the restart). Profiles are stored as JSON (below 1.2 KB). NVS is the usual 20 KB:
+  when it does not take a profile, `hw_profile` is answered `err: "storage"` (nothing changes), and a trial profile that cannot
+  be stored at the confirmation is rolled back (`reason: "storage"`).
+- A live clamp change is stored straight into `hw_act` and applied to the modules at once; `caps.ratings` /
+  `amp_rating` on the server are refreshed with the next `hello`.
+- Factory reset and a `FW_TYPE` change clear all of them (back to the default profile). The server keeps its
+  profile and re-sends it when `hello.hwp.state` is `default` and the server's profile is newer than `ver` 0.
+- `hello` reports `hwp` (with the profile in use, so the server can pre-fill its page); `info` lists it too.
+- `hello.caps.hw_limits` (optional) = limits of this build the server cannot know, e.g. `{"gpio": 2}` (relay pins in `RELAY_GPIO_PINS`).
+- A new channel count that arrives in `hello` together with `hwp.state` `trial` / `active` / `pending` (or `default` right after a rollback) is **not** treated as other hardware: the meter is not archived (see multichannel.md, "Changing the hardware on a meter").
+
+### 12.7 Effects on data
+
+- kWh counters, limits and history belong to the **channel number**, not to the physical input: moving a clamp
+  to another input keeps its counter.
+- Channels above the new count are removed on the meter; the server **archives** them (history stays, they are
+  hidden from the live view and from AUX / viewer links).
+- Relays removed by a new profile that an AUX schedule / event still uses: the server refuses to save
+  (validation names the AUX entry), the meter drops such entries if it receives them anyway.
+- Config (`cfg`) for channels that did not exist before arrives after the first start with the new profile; until
+  then they use the defaults.
+
+### 12.8 Server side
+
+- One profile per meter, stored as JSON on the device record, with `hw_ver` (wanted) and `hw_ack` (state last
+  reported: `default` / `active` / `trial` / `pending` / `rolled_back`, reason). Column added in
+  `migrations.py`.
+- Pages (admin, and a manager for their own meters): Firmware → **Update Device I/O** → select an online meter that
+  has `caps.hw_cfg`. Sections: rbAmp boards, relay boards, channel table (clamp dropdown), with **[Scan Address]**,
+  **[Update Clamp Model]** (live mode only) and **[Save & Apply]** (reboot mode, with the countdown and **Cancel**).
+  The rbAmp address change is a wizard ("connect only this module"), the expander addresses are chosen in a
+  dropdown and checked against the scan (found / not found).
+- **Generate config.h** can start from a meter's stored profile ("Start from the current profile of …"), so a
+  later re-flash keeps the changes. It writes `RBAMP_BOARDS`, `RELAY_BOARDS`, `CHANNELS` as before.
+- Meter configuration, history and notifications are unchanged; the new events (`hw_reboot_pending`,
+  `hw_active`, `hw_rollback`) appear in the meter's event list and as *Meter status* notifications.
+
+## 13. Zero, Tare and Calibration (per channel, all meters) — design, firmware / server 1.1.0
+
+Status: **Zero and Tare are implemented** (server, both firmwares, simulators; PC-tested, not yet tried on real hardware). **Calibration is designed here and held** (not implemented yet).
+Every value belongs to **one channel**: a single-channel meter has channel 0, on a multi-channel meter each channel has its own
+zero / tare (independent of the others, also in Shared session mode).
+
+| | What it is | How it is made | Where it acts |
+|---|---|---|---|
+| **Zero** | the sensor's offset with **no load** (clamp / shunt noise floor, ADC offset) | sensor check with the load disconnected | **on the meter**, right after every sensor read: all readings, limits, energy and history are already corrected |
+| **Tare** | a **load that is connected and should count as 0** (a charger, a fixture, the meter's own supply) | sensor check with that load connected | server views (display, history, CSV, cost) and the **meter's limits** (max current, session kWh) |
+| **Calibration** *(held)* | gain / linearity of the sensor against a reference meter | zero + 1 to 3 known loads | on the meter (correction curve) |
+
+### 13.1 Sensor check (meter)
+
+A sensor check measures the **raw** values of one channel (before zero and tare, so repeating it never compounds) and returns
+statistics; the server decides what to do with them. Command (server → meter):
+
+`{"t":"cmd","c":"sensor_check","ref":9,"ch":0,"n":10}` — `ch` channel (default 0), `n` readings to collect (10–60, default 10).
+
+- The meter acknowledges at once (`cmd_ack`; `err`: `bad_channel`, `busy` = a check is already running, `no_sensor` = the sensor is
+  not answering) and collects **n valid readings, at most one per second, so a check takes at least 10 s** (n readings = n seconds).
+  A failed read does not count and is not retried faster; the check ends with `ok: false, why: "sensor"` after 60 s without enough
+  valid readings. Only one check runs at a time; a restart or a new profile cancels it.
+- The result is an **event** (it arrives seconds later and must not be lost offline):
+  `{"e":"sensor_check","ch":0,"n":10,"secs":10,"a":[mean,min,max],"w":[mean,min,max],"v":[mean,min,max],"ok":true}`
+  (`ok: false` with `why`: `sensor`, `cancelled`). Values are the raw sensor values (A, W, V).
+- The relay and sessions are **not** touched by a check: the user connects / disconnects the load; the meter just measures.
+
+### 13.2 What the server checks (it owns the thresholds, so they can change without a firmware update)
+
+A check is **acceptable** when `n ≥ 10` and `secs ≥ 10` and the readings are **stable**: for current `max − min ≤ max(0.03 A,
+3 % of the mean)`, for power `max − min ≤ max(3 W, 5 % of the mean)`. Additionally:
+- **Zero**: the mean must be small: `a ≤ 1.0 A` and `w ≤ 100 W` — otherwise "a load is still connected".
+- **Tare**: the load must be measurable: `a − zero.a ≥` a minimum that depends on the clamp rating: 0.05 A up to 30 A, 0.15 A up to 50 A, 0.3 A up to 100 A, 0.5 A above (bigger clamps are noisier at small currents), and not above the sensor rating.
+The page shows the numbers and why a check failed; **Set zero / Set tare** is only offered for an acceptable check.
+
+### 13.3 Stored values and config
+
+The server keeps `Device.calib` = `{"<ch>": {"zero": {"a", "w", "at"}, "tare": {"a", "w", "at"}, "by": "<user>"}}` (`at` = epoch). It is
+sent in the config, per channel: `cfg.ch[i].zero = {"a": 0.012, "w": 1.6}` and `cfg.ch[i].tare = {"a": 0.4, "w": 85}` (absent or
+zeros = none), plus `cfg.tare_limits` (bool, default true) for **all** meters. Setting or clearing a value raises `cfg_ver`; the meter
+stores them with its config. The earlier single-channel `cfg.tare {a, w, limits}` is gone (firmware 1.1.0 and newer only).
+Changing the hardware profile keeps the values of channels that keep their number; channels that no longer exist lose theirs.
+
+### 13.4 Zero on the meter
+
+After every read of channel *c*: `a' = max(0, a − zero.a)`, `w' = max(0, w − zero.w)`; with `a' == 0` also `w' = 0`. Power factor,
+voltage and frequency are not changed. rbAmp: the energy of a period is computed from the corrected average power, so the noise
+floor is not accumulated. PZEM: the energy register is the source of truth (D8) and cannot be corrected; only current / power are.
+
+### 13.5 Tare on the meter and on the server
+
+Tare does not change what the meter measures or records: raw (zero-corrected) values stay raw in the history; tared values are
+computed when displayed or exported (as the single-channel tare did before), **per channel**:
+`a_t = max(0, a' − tare.a)`, `w_t = max(0, w' − tare.w)`, `kWh_t = max(0, kWh − tare.w × time)`; voltage is never tared.
+With `cfg.tare_limits` the meter uses the tared values for its limits, **per channel**: max current (`a_t > amp_max`) and the session
+kWh limit (`kWh_t`, accumulated as `Σ tare.w × dt` over the readings of the session: per channel in Independent mode, summed over
+the channels in Shared mode). Session progress items carry `kwh_t` when a tare is set (`s.kwh_t`, `ss[].kwh_t`).
+
+### 13.6 Server pages
+
+Meter → Configuration → **Tune** (all meters; one block per channel on multi-channel meters): current zero / tare with date and user;
+**[Check sensor]** for Zero and for Tare (progress "7 / 10 readings", then the numbers and OK / not stable / load still connected),
+**[Set zero]** / **[Set tare]**, **[Clear]**. The *Tare* fields of the old Configure form (single-channel) are replaced; the
+*Use tared values for limits* option stays in Configure. Display: the *Raw | Tared* switch and the tared columns exist for every
+meter that has a tare on any channel.
+
+### 13.7 Calibration (held) — design
+
+**Goal:** correct the gain / non-linearity of one channel with a few known loads, from the server, erasable.
+1. **Zero point** — the channel's zero (13.4), measured with no load.
+2. **Points 1..3** — the user connects a **known load** and enters its true value from a reference meter, **A or W** (per point);
+   the page starts a sensor check (13.1, ≥ 10 stable readings) and stores `(measured, true)`. Points must be increasing, at least 10 %
+   apart; unstable checks are refused.
+3. **Correction curve** — piecewise linear through `(0, 0)`, `(m1, t1)`, `(m2, t2)`, `(m3, t3)`; above the last point the last
+   segment's gain continues. Current and power are corrected from their own points (A points correct current, W points power).
+4. **Meter:** `cfg.ch[i].cal = {"a": [[m,t],…], "w": [[m,t],…]}` applied **after** zero and before tare / limits; stored with the config.
+5. **Erase** = remove the points (the meter goes back to the default, uncorrected values); zero and tare are separate and stay.
+6. **Run from the server** as a wizard (*Zero → known load 1 → 2 → 3 → Review → Apply*) with the measured vs true table and the
+   resulting gain per segment (a gain outside 0.8–1.25 is refused as "wrong reference or wiring").
+Calibration changes the values that sessions, kWh limits and costs are based on, so it is built after zero / tare have been proven
+on a real meter.
+
+## 14. Firmware update over the air (OTA) and USB flash — firmware / server 1.1.0
+
+Status: **implemented** (server + both sketches); tested with the PC tests and the simulated meter, **not yet on real hardware**. The first OTA-capable firmware has to be
+flashed over USB once; after that, updates go from the server. Transport for now: **HTTP(S) only** (the meter downloads the file).
+
+### 14.1 What the administrator uploads
+The zip made by the Arduino IDE (*Export compiled binary*, zipped by the user). Only **one file** is used, `<sketch>.ino.bin` (the
+app image); the bootloader, partitions, `boot_app0` and `merged.bin` are only for USB flashing and are ignored by OTA.
+
+On upload the server:
+- finds the app image: `*.ino.bin` that is not `*.bootloader.bin`, `*.partitions.bin` or `*.merged.bin`; stores that file and its
+  SHA-256, **and** the files for a USB flash (14.8: `flash_args`, `*.bootloader.bin`, `*.partitions.bin`, `boot_app0.bin`, `partitions.csv`; `merged.bin` only as a fallback) — not the `.elf` / `.map`; limits the zip and file sizes and rejects odd paths (zip-slip);
+- reads the **firmware tag** inside the image. Every firmware contains a constant string `PMFWTAG|<type>|<version>|<hw>|` (placed
+  in the code with `used` so the linker keeps it; the Arduino build does not carry the sketch name, so the tag is the reliable way).
+  `<type>` is a free text id (`rbamp`, `pzem`, later `logger-pzem`, `smart-relay` ... the server has **no fixed list**: it shows
+  whatever the tag says). No tag → refused ("not a PowerManager firmware");
+- compares `partitions.csv` of the zip with the layout of the meters (it is also reported in the hello, 14.3): a different layout
+  cannot be changed by OTA and is refused with "needs a USB flash";
+- checks the size against the OTA slot.
+
+### 14.2 Server data and pages
+`Firmware` row: id, title (short), info (short), description, version (pre-filled from the tag; warn when edited to something
+else), **type** (from the tag), size, sha256, file name, partitions hash, uploaded_at, uploaded_by.
+- List: checkbox (bulk delete for now), title, info, **type**, version, size, by, [Flash] [Info] [Edit] [Delete]. Delete is refused
+  while the firmware is being flashed. Edit changes the text fields; replacing the zip is optional.
+- Add / Edit / Delete: admin only. Info and Flash: admin, and a manager for **their own meters** (managers cannot add firmware yet).
+- Info (read only): title, info, description, version, type, size, updated date / time, updated by.
+- Flash: *search and select a meter* → the meter's information (as *Get meter info*) next to the firmware information, side by
+  side: type, version (running → new), hardware, flash size, partition layout, free OTA space, channels. A verdict on top:
+  **blocked** (type differs from `hello.fw_type`, layout differs, too big, meter firmware without `caps.ota`: "needs one USB
+  flash first", meter offline) or **warning** (downgrade, a session is running). The text says: keep the internet connection
+  stable, unplug the appliances (the relays switch off), wait for the reboot. A check box confirms the warnings; **[Upload the
+  Firmware to Meter]** is greyed out when the meter is offline or blocked. Progress is shown on the same page.
+
+### 14.3 Meter
+`hello` carries `fw_type` (`FW_TYPE`), `hw` (`HW_NAME`), `caps.ota` = `{"slot": <bytes of the spare app slot>, "layout": "<CRC-32 of the
+partition table: type, subtype, offset, size of every entry, 8 hex digits>", "tag": "PMFWTAG|…"}` and `ota` = `{"state": "ok" | "trial" |
+"rolled_back", "ver", "why"?, "tried"?}`. A firmware without `caps.ota` cannot be updated over the air (one USB flash first).
+
+Command (server → meter): `{"t":"cmd","c":"ota","path":"/api/v1/ota/<token>","size":N,"sha256":"…","ver":"1.3.0","type":"rbamp-mc"}`. The meter
+builds the address from the server it is paired with (scheme, host, port; so a reverse proxy works) and refuses with an ack error
+`busy`, `wrong_type`, `too_big`, `bad_request`, `no_server` (not paired / mesh leaf), `no_wifi`. Otherwise it **ends its sessions
+(reason `restart`), saves, switches the relays off**, and a task downloads the image (HTTP / HTTPS, streaming, `Update`) into the spare
+slot while it computes the SHA-256 and scans the stream for the firmware tag. It checks size, SHA-256 and that the tag type equals
+its own `FW_TYPE`, then switches the boot slot and restarts. Events: `ota_progress` {state: downloading | verifying | rebooting, pct,
+ver} (downloading every 10 %), `ota_failed` {why: size, sha256, wrong_type, timeout, flash_write, http_<code>, net_<code> ...}, `ota_ok`
+{ver} after the confirmation. A failed download changes nothing (the sessions stay ended). The token is valid about 10 minutes and for
+3 downloads. The hardware profile command is refused (`busy`) while an update runs.
+
+Rollback is done by the app (the prebuilt Arduino bootloader has no rollback support): before the restart the meter stores in NVS
+(namespace `ota`) `prev` (slot it came from) and `try` (the new version); every boot of a `try` firmware counts (`boots`). The new
+firmware is **confirmed** when the server answers its hello (`welcome`) within `OTA_CONFIRM_MS` (config.h, default 120 s); then
+`try` is cleared and it sends `ota_ok`. When the time runs out, or the firmware boots more than 3 times unconfirmed (crash loop), it sets
+the boot slot back to `prev`, notes `rb` / `rbver` and restarts; the old firmware reports `ota.state = "rolled_back"` in its next hello.
+Settings and sessions (NVS) are kept.
+
+### 14.4 Sessions
+When the OTA starts the sessions of the meter are **ended** (the server sends the stop for every running session first;
+end reason "restart"); nothing resumes by itself afterwards. The administrator is warned before (the check box).
+
+### 14.5 Notifications: reboot pending
+New notification type `reboot_pending` ("Meter restart pending (hardware change / firmware update)"), on by default for the users
+who get meter status: sent when a restart is announced and when it is done (or rolled back / failed):
+- hardware profile with `mode: reboot` (the 60 s delay of §12.4, event `hw_reboot_pending`): "Meter X restarts in 60 s: hardware change";
+- OTA: "Meter X is updated to 1.3.0 and restarts" then "updated" / "rolled back to 1.2.0" / "failed: reason".
+The AUX source *reboot* (§12) also stays active for the OTA restart.
+
+### 14.6 Bulk update (planned, not now)
+Select several meters of the **same type** and one firmware; the server sends them one after another (not in parallel; the next
+starts when the previous is confirmed or failed) and shows a table of results. The per-meter flow above stays the building block.
+
+### 14.8 USB flash from the browser (Web Serial, like esptool.spacehuhn.com)
+The Flash page has two ways, chosen at the top: **Over the air** (14.2, the meter must be online) and **By USB (browser)**. The USB
+way does **not** need the meter to be online, paired or even running: it writes the flash through the serial port of the browser.
+It is also the way to flash the **first** OTA-capable firmware, to change the partition layout, and to recover a meter that does not boot,
+without the Arduino IDE.
+
+- **Browser:** needs Web Serial: Chrome, Edge, Opera on a computer (not Firefox, not Safari, not iOS). The page needs a **secure
+  context**: `https://` or `http://localhost`. Both are supported: the normal setup is HTTPS from the reverse proxy (to be tested there)
+  and `http://localhost` works on the server PC. On plain `http://` on the LAN the browser hides Web Serial, so the page shows that
+  reason ("open the server over HTTPS") instead of a dead button. Without support the USB option is greyed out with the reason.
+- **Tool:** Espressif's `esptool-js`, stored in `static/vendor` (works without internet, like the other vendor files).
+- **Steps shown on the page:** connect the USB cable → *Connect* (browser port picker) → the page reads the chip (type, MAC, flash
+  size) and checks it against the firmware (ESP32-S3, flash size at least the layout's) → options → *Flash* → progress bar and log →
+  the board resets. If the board does not enter download mode by itself: hold BOOT, press and release RESET.
+- **What is written** (offsets from the zip's `flash_args`; for an ESP32-S3: bootloader `0x0`, partitions `0x8000`, boot_app0
+  `0xe000`, app `0x10000`); `merged.bin` at `0x0` only when `flash_args` is missing. Options:
+  - **Update** (default): all files above, the settings area (NVS) is kept; pairing and Wi-Fi stay.
+  - **Erase all flash first**: needed once when the layout changed (as for the 16 MB layout); the settings are lost and the meter is
+    paired again. **Admin and manager** may use it, behind a typed confirmation like *Remove meter*: a red warning (settings, Wi-Fi and
+    pairing are lost, the meter must be paired again) and the user must **type the device ID** of the meter to enable the button. The
+    device ID is that of the meter chosen on the page (optional, offered for the manager's own meters); for a board that is not a
+    paired meter yet, the text to type is the **chip MAC** shown after *Connect*.
+- **Server side:** the browser downloads the files from an authenticated endpoint (admin, and a manager as for OTA); the server never
+  talks to the board. At the end the page may report `usb_flash` (firmware id, chip MAC, who) to the server for the audit log; a flash
+  that was cancelled halfway leaves the board in download mode, and can simply be flashed again.
+- **The layout check of 14.1 does not apply** to USB (the partition table is written too); the type / hardware tag is still compared
+  and a mismatch is a warning (a USB flash can put any firmware on a board).
+- **Notifications:** none (nobody is told about a USB flash, there is no meter connection); the audit log entry is the record.
+
+### 14.7 Open points
+The USB way (14.8) needs HTTPS (reverse proxy) or `localhost`: to be tested behind the reverse proxy. `MAX_CONTENT_LENGTH` is 80 MB (a reverse proxy must allow uploads of that size, e.g. nginx `client_max_body_size`); the files live in the instance folder (`instance/firmware/<id>/`); a signature on the image (more than SHA-256) is a later option.

@@ -5,6 +5,7 @@
 
 #include "../config.h"
 #include "outbox.h"
+#include "sensorcheck.h"
 #include "storage.h"
 #include "system.h"
 #include "auxrelay.h"
@@ -232,7 +233,7 @@ void renew(const char *reason, bool autoRenew) {
 
 static const char *stopReasonName(uint8_t why) {
   return why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : why == STOP_SENSOR ? "sensor"
-       : why == STOP_MANUAL ? "stopped" : why == STOP_TEMP ? "temp" : "disabled";
+       : why == STOP_MANUAL ? "stopped" : why == STOP_TEMP ? "temp" : why == STOP_OTA ? "restart" : "disabled";
 }
 
 // Voltage / tamper / sensor protection with action "end": end the session now (relay off until renewed).
@@ -252,6 +253,16 @@ static const char *ACTION_NAME[] = {"run", "hold", "end"};
 void endSession() {
   StateLock l;
   stopSession(STOP_MANUAL);
+}
+
+// Planned restart (firmware update, docs/protocol.md §14): the session ends (event session_end, reason "restart"), relays off.
+void prepareRestart(bool ota) {
+  (void)ota;
+  {
+    StateLock l;
+    stopSession(STOP_OTA);
+  }
+  relays::write(0);
 }
 
 void setDisabled(bool disabled) {
@@ -477,11 +488,65 @@ static void checkSensor(bool ok, uint8_t err) {
   bump();
 }
 
+// ---- sensor check for Zero & Tare (docs/protocol.md §13.1): raw values, once per second, at least 10 s
+static sc::Check check_;
+
+static void addStat(JsonObject o, const char *key, const sc::Stat &s, int dec) {
+  JsonArray a = o[key].to<JsonArray>();
+  a.add(serialized(String(s.mean, dec)));
+  a.add(serialized(String(s.mn, dec)));
+  a.add(serialized(String(s.mx, dec)));
+}
+static void reportCheck(sc::Result &r) {
+  // caller holds StateLock
+  emitEvent("sensor_check", [](JsonObject o, void *p) {
+    sc::Result *x = (sc::Result *)p;
+    o["ch"] = x->ch;
+    o["n"] = x->n;
+    o["secs"] = x->secs;
+    o["ok"] = x->ok;
+    if (x->why) o["why"] = x->why;
+    addStat(o, "a", x->a, 4);
+    addStat(o, "w", x->w, 2);
+    addStat(o, "v", x->v, 1);
+  }, &r);
+}
+
+bool startSensorCheck(uint8_t ch, uint8_t readings, const char *&err) {
+  StateLock l;
+  err = nullptr;
+  if (ch != 0) {
+    err = "bad_channel";
+    return false;
+  }
+  if (!g.reading.ok) {
+    err = "no_sensor";
+    return false;
+  }
+  if (check_.active()) {
+    err = "busy";
+    return false;
+  }
+  check_.start(0, readings, millis());
+  Serial.printf("[check] sensor check started (%u readings, at least %u s)\n", readings < 10 ? 10 : readings, readings < 10 ? 10 : readings);
+  return true;
+}
+
 static void readSensor() {
   Reading r;
   bool ok = sensor_->read(0, r);
   uint8_t err = sensor_->lastError();
   StateLock l;
+  if (ok) {  // the check sees the RAW values; the zero is subtracted right after (energy register: untouched, it is the truth)
+    if (check_.active()) {
+      sc::Result res;
+      if (check_.feed(r.a, r.w, r.v, millis(), res)) reportCheck(res);
+    }
+    sc::Offsets zo;
+    zo.zeroA = g.cfg.zero_a;
+    zo.zeroW = g.cfg.zero_w;
+    sc::applyZero(r.a, r.w, zo);
+  }
   g.lastReadErr = ok ? (uint8_t)SENS_OK : (err ? err : (uint8_t)SENS_NO_REPLY);
   checkSensor(ok, g.lastReadErr);
   if (ok) {
@@ -856,6 +921,11 @@ void task(void *) {
     checkTamper();
     checkUps();
     checkRules(first);
+    {  // a sensor check that cannot collect enough valid readings ends as failed after 60 s
+      StateLock l;
+      sc::Result res;
+      if (check_.tick(millis(), res)) reportCheck(res);
+    }
     sys::crumb(sys::CR_CONTROL, "aux");
     auxTick();
     first = false;

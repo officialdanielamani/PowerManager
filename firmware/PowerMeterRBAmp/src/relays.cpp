@@ -12,7 +12,7 @@ static bool lastOk = false;
 static const char *driverName(uint8_t d) {
   return d == RELAY_MCP23017 ? "MCP23017" : d == RELAY_XL9535 ? "XL9535" : d == RELAY_PCF8574 ? "PCF8574" : "GPIO";
 }
-static bool boardOk[hw::RELAY_BOARD_COUNT] = {false};
+static bool boardOk[HWP_MAX_RELAY_BOARDS] = {false};
 
 // Output pattern of one board from its slice of the relay mask (16 bits: XL9535 port 0 + port 1).
 static uint16_t pattern(const hw::RelayBoard &b, uint16_t on) {
@@ -37,18 +37,22 @@ static bool writeBoard(uint8_t i, uint16_t p) {
     for (uint8_t k = 0; k < b.relays; k++) digitalWrite(hw::GPIO_PIN[first + k], (p >> k) & 1 ? HIGH : LOW);
     return true;
   }
+  // XL9535 / MCP23017: the output state AND the direction (output) are sent every time, state first (no glitch). A
+  // board that lost power, or was plugged in after the start, comes back as inputs: without the direction
+  // registers its relays would never switch again until the meter restarts.
   if (b.driver == RELAY_XL9535) {
-    if (!i2cbus::writeReg(b.address, 0x02, (uint8_t)p)) return false;               // port 0 = relays 1..8
-    return b.relays <= 8 || i2cbus::writeReg(b.address, 0x03, (uint8_t)(p >> 8));  // port 1 = 9..16
+    return i2cbus::writeReg(b.address, 0x02, (uint8_t)p) && i2cbus::writeReg(b.address, 0x03, (uint8_t)(p >> 8)) &&  // output ports 0 / 1
+           i2cbus::writeReg(b.address, 0x06, 0x00) && i2cbus::writeReg(b.address, 0x07, 0x00);                         // configuration: all outputs
   }
-  if (b.driver == RELAY_MCP23017) {  // output latches OLATA (GPA = 1..8) / OLATB (GPB = 9..16), IOCON.BANK = 0
-    if (!i2cbus::writeReg(b.address, 0x14, (uint8_t)p)) return false;
-    return b.relays <= 8 || i2cbus::writeReg(b.address, 0x15, (uint8_t)(p >> 8));
+  if (b.driver == RELAY_MCP23017) {  // OLATA / OLATB (GPA = 1..8, GPB = 9..16), then IODIRA / IODIRB, IOCON.BANK = 0
+    return i2cbus::writeReg(b.address, 0x14, (uint8_t)p) && i2cbus::writeReg(b.address, 0x15, (uint8_t)(p >> 8)) &&
+           i2cbus::writeReg(b.address, 0x00, 0x00) && i2cbus::writeReg(b.address, 0x01, 0x00);
   }
   uint8_t v = (uint8_t)p;
   return i2cbus::writeRaw(b.address, &v, 1);  // PCF8574: the byte is the output state
 }
 
+// Writes every board (state + direction), also while one does not answer: it is tried again on every call.
 bool write(uint32_t onMask) {
   bool all = true;
   uint8_t first = 0;  // first relay (0-based) of the board

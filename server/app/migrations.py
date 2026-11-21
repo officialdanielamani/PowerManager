@@ -26,7 +26,31 @@ def _add_column(table, ddl):
         log.info("Migration: added %s.%s", table, name)
 
 
+def _migrate_tare():
+    """The single-channel tare used to live in the config (tare_a / tare_w): it becomes the tare of channel 0."""
+    import json
+    cols = _columns("device")
+    if cols is None or "calib" not in cols:
+        return
+    for pk, cfg, calib in db.session.execute(text("SELECT id, cfg, calib FROM device")).fetchall():
+        try:
+            cfg, calib = json.loads(cfg or "{}"), json.loads(calib or "{}")
+        except ValueError:
+            continue
+        a, w = float(cfg.get("tare_a") or 0), float(cfg.get("tare_w") or 0)
+        if (a or w) and "0" not in calib:
+            calib["0"] = {"tare": {"a": a, "w": w, "at": 0}, "by": "migration"}
+            for k in ("tare_a", "tare_w"):
+                cfg.pop(k, None)
+            db.session.execute(text("UPDATE device SET calib = :c, cfg = :g WHERE id = :i"),
+                               {"c": json.dumps(calib), "g": json.dumps(cfg), "i": pk})
+            log.info("Migration: tare of device %s moved to its channel 0", pk)
+
+
 def run():
+    # firmware type / OTA state of the meter (docs/protocol.md §14)
+    _add_column("device", "fw_type VARCHAR(24) NOT NULL DEFAULT ''")
+    _add_column("device", "ota JSON NOT NULL DEFAULT '{}'")
     # v0.1 -> v0.2: viewer links, per-user notifications, login lockout
     _add_column("user", "view_all BOOLEAN NOT NULL DEFAULT 0")
     _add_column("user", "failed_logins INTEGER NOT NULL DEFAULT 0")
@@ -95,6 +119,17 @@ def run():
     _add_column("meter_session", "stats JSON")
     # v0.10: MQTT link (per-meter connection choices)
     _add_column("device", "net JSON NOT NULL DEFAULT '{}'")
+
+    # 1.1: hardware profile sent from the server, command results
+    for ddl in ("hw_profile JSON NOT NULL DEFAULT '{}'", "hw_current JSON NOT NULL DEFAULT '{}'",
+                "hw_ver INTEGER NOT NULL DEFAULT 0", "hw_active_ver INTEGER NOT NULL DEFAULT 0",
+                "hw_state VARCHAR(16) NOT NULL DEFAULT ''", "hw_reason VARCHAR(100)", "hw_due_at INTEGER"):
+        _add_column("device", ddl)
+    _add_column("command", "res JSON")
+    # 1.1: zero / tare per channel, sensor checks
+    _add_column("device", "calib JSON NOT NULL DEFAULT '{}'")
+    _add_column("device", "last_check JSON NOT NULL DEFAULT '{}'")
+    _migrate_tare()
 
     cols = _columns("notification_rule")
     if cols is not None and "user_fk" not in cols:

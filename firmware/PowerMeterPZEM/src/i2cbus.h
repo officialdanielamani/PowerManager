@@ -6,6 +6,8 @@
 namespace i2cbus {
 void begin();  // Wire on PIN_I2C_SDA / PIN_I2C_SCL at I2C_FREQ_HZ
 bool ready();
+void tick();                // every ~50 ms from loop(): frees a stuck bus (SDA held low while nothing is being sent)
+uint32_t recoveries();      // how often the bus had to be freed since start (info)
 SemaphoreHandle_t mutex();
 // Register helpers (take the bus lock themselves).
 bool readRegs(uint8_t addr, uint8_t reg, uint8_t *buf, size_t n);

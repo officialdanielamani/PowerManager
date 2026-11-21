@@ -19,6 +19,15 @@
         </div>
       </div>
 
+      {% if known_meters %}
+      <div class="row g-2 mt-1 g-rbamp"><div class="col-md-10">
+        <label class="form-label small mb-1" for="gFrom">Start from the hardware of a meter</label>
+        <select class="form-select form-select-sm" id="gFrom"><option value="">— the form below —</option>
+          {% for m in known_meters %}<option value="{{ m.id }}">{{ m.name }} ({{ m.device_id }})</option>{% endfor %}</select>
+        <div class="form-text">Fills the rbAmp boards, relay boards and channels with what the meter uses now (including changes sent from
+          <em>Update Device I/O</em>), so a re-flash keeps them. Pins and options stay as below.</div></div></div>
+      {% endif %}
+
       {# ---------------- power sensor #}
       <h2 class="h6 mt-4 border-bottom pb-1">Power sensor</h2>
       <div class="g-rbamp">
@@ -31,10 +40,10 @@
           <div class="col-auto"><input class="form-control form-control-sm" style="width:70px" name="pin_drdy" value="5"></div>
         </div>
         <div class="table-responsive"><table class="table table-sm align-middle mb-1" style="max-width:720px">
-          <thead><tr class="small"><th>Channel</th><th>Board</th><th>Input</th><th>Clamp</th><th>Relay (0 = none)</th><th></th></tr></thead>
+          <thead><tr class="small"><th>Channel</th><th>Board</th><th>Input</th><th>Clamp</th><th>Relay board</th><th>Relay</th><th></th></tr></thead>
           <tbody id="gChannels"></tbody></table></div>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="gAddCh"><i class="bi bi-plus-lg"></i> Channel</button>
-        <span class="small text-body-secondary ms-1">Relays that no channel uses become AUX relays.</span>
+        <span class="small text-body-secondary ms-1">A channel switches one output of a relay board (A, B … as listed below). Outputs that no channel uses become AUX relays.</span>
       </div>
       <div class="g-pzem d-none">
         <div class="row g-2">
@@ -50,7 +59,7 @@
       {# ---------------- relays #}
       <h2 class="h6 mt-4 border-bottom pb-1">Relay boards / outputs</h2>
       <div class="table-responsive"><table class="table table-sm align-middle mb-1" style="max-width:820px">
-        <thead><tr class="small"><th>Relays</th><th>Type</th><th>I2C address</th><th>Outputs used</th><th>Active high</th><th></th></tr></thead>
+        <thead><tr class="small"><th>Relay board</th><th>Type</th><th>I2C address</th><th>Outputs used</th><th>Active high</th><th></th></tr></thead>
         <tbody id="gRelays"></tbody></table></div>
       <button type="button" class="btn btn-sm btn-outline-secondary" id="gAddRelay"><i class="bi bi-plus-lg"></i> Relay board</button>
       <div class="row g-2 mt-1"><div class="col-auto"><label class="form-label small mb-1">GPIO pins of the "ESP32 pins" relays, in order</label>
@@ -138,13 +147,15 @@
     d.innerHTML = '<input class="form-control" value="' + addr + '">' + del;
     $('gBoards').appendChild(d);
   }
-  function addChannel(board, input, clamp, relay) {
+  function addChannel(board, input, clamp, rb, ro) {
     var tr = document.createElement('tr');
+    tr.dataset.rb = rb || 0; tr.dataset.ro = ro || 0;
     tr.innerHTML = '<td class="g-no small"></td>' +
       '<td><input class="form-control form-control-sm g-b" style="width:70px" value="' + board + '"></td>' +
       '<td><input class="form-control form-control-sm g-i" style="width:70px" value="' + input + '"></td>' +
       '<td><select class="form-select form-select-sm g-c" style="width:240px">' + opts(CLAMPS, clamp) + '</select></td>' +
-      '<td><input class="form-control form-control-sm g-r" style="width:80px" value="' + relay + '"></td><td>' + del + '</td>';
+      '<td><select class="form-select form-select-sm g-rb" style="width:150px"></select></td>' +
+      '<td><select class="form-select form-select-sm g-ro" style="width:100px"></select></td><td>' + del + '</td>';
     $('gChannels').appendChild(tr);
   }
   function addRelay(driver, addr, n, high) {
@@ -164,13 +175,28 @@
     $('gSht').appendChild(d);
   }
   function renumber() {
-    var n = 0;
+    var n = 0, idx = 0, sizes = [];
     document.querySelectorAll('#gChannels tr').forEach(function (tr, i) { tr.querySelector('.g-no').textContent = 'CH' + (i + 1); });
     document.querySelectorAll('#gRelays tr').forEach(function (tr) {
       var c = parseInt(tr.querySelector('.g-n').value, 10) || 0, gpio = tr.querySelector('.g-d').value === 'RELAY_GPIO';
-      tr.querySelector('.g-range').textContent = c ? (c === 1 ? 'Relay ' + (n + 1) : 'Relays ' + (n + 1) + '–' + (n + c)) : '';
+      tr.querySelector('.g-range').textContent = 'Board ' + String.fromCharCode(65 + idx) + (c ? ' [' + c + 'C]' : '');
+      idx++;
       tr.querySelector('.g-a').disabled = gpio;
-      n += c;
+      n += c; sizes.push(c);
+    });
+    document.querySelectorAll('#gChannels tr').forEach(function (tr) {   // relay pickers: board A [2C], B [8C] ... + output
+      var rb = +tr.dataset.rb || 0, ro = +tr.dataset.ro || 0;
+      if (rb > sizes.length) { rb = 0; ro = 0; }
+      if (rb && ro > sizes[rb - 1]) ro = 0;
+      var sel = '<option value="0">none</option>';
+      sizes.forEach(function (c, k) { sel += '<option value="' + (k + 1) + '"' + (rb === k + 1 ? ' selected' : '') + '>Board ' + String.fromCharCode(65 + k) + ' [' + c + 'C]</option>'; });
+      var out = '';
+      if (rb) for (var o = 1; o <= sizes[rb - 1]; o++) out += '<option value="' + o + '"' + (ro === o ? ' selected' : '') + '>relay ' + o + '</option>';
+      tr.dataset.rb = rb; tr.dataset.ro = ro;
+      var a = tr.querySelector('.g-rb'), b = tr.querySelector('.g-ro');
+      if (a.innerHTML !== sel) a.innerHTML = sel;
+      if (b.innerHTML !== out) b.innerHTML = out;
+      b.disabled = !rb;
     });
     var m = $('gMeter').value;
     document.querySelectorAll('.g-rbamp').forEach(function (e) { e.classList.toggle('d-none', m !== 'rbamp'); });
@@ -180,19 +206,49 @@
   var form = $('genForm');
   form.addEventListener('click', function (e) {
     var b = e.target.closest('.g-del');
-    if (b) { b.closest('tr, .g-board, .g-sht').remove(); renumber(); }
+    if (b) {
+      var rr = b.closest('#gRelays tr');
+      if (rr) {  // a relay board goes away: channels on it lose their relay, those on later boards move up (A, B, C ...)
+        var gone = Array.prototype.indexOf.call($('gRelays').children, rr) + 1;
+        document.querySelectorAll('#gChannels tr').forEach(function (tr) {
+          var rb = +tr.dataset.rb;
+          if (rb === gone) { tr.dataset.rb = 0; tr.dataset.ro = 0; } else if (rb > gone) tr.dataset.rb = rb - 1;
+        });
+      }
+      b.closest('tr, .g-board, .g-sht').remove(); renumber();
+    }
   });
   form.addEventListener('input', renumber);
-  form.addEventListener('change', renumber);
+  form.addEventListener('change', function (e) {
+    var tr = e.target.closest('#gChannels tr');
+    if (tr && e.target.classList.contains('g-rb')) { tr.dataset.rb = e.target.value; tr.dataset.ro = 1; }
+    else if (tr && e.target.classList.contains('g-ro')) tr.dataset.ro = e.target.value;
+    renumber();
+  });
   $('gAddBoard').addEventListener('click', function () { addBoard('0x5' + Math.min(document.querySelectorAll('.g-board').length, 7)); });
   $('gAddCh').addEventListener('click', function () {
     var rows = document.querySelectorAll('#gChannels tr'), last = rows[rows.length - 1];
     var b = last ? last.querySelector('.g-b').value : 1, i = last ? (parseInt(last.querySelector('.g-i').value, 10) || 0) + 1 : 1;
-    var r = last ? (parseInt(last.querySelector('.g-r').value, 10) || 0) : 0;
-    addChannel(b, i, last ? last.querySelector('.g-c').value : 'SCT_30A', r ? r + 1 : 0); renumber();
+    var rb = last ? +last.dataset.rb : 0, ro = last ? +last.dataset.ro + 1 : 0;
+    addChannel(b, i, last ? last.querySelector('.g-c').value : 'SCT_30A', rb, rb ? ro : 0); renumber();
+    var tr = $('gChannels').lastElementChild, sz = parseInt(document.querySelectorAll('#gRelays .g-n')[rb - 1] && document.querySelectorAll('#gRelays .g-n')[rb - 1].value, 10) || 0;
+    if (rb && ro > sz) { tr.dataset.rb = 0; tr.dataset.ro = 0; renumber(); }
   });
   $('gAddRelay').addEventListener('click', function () { addRelay('RELAY_MCP23017', '0x2' + Math.min(document.querySelectorAll('#gRelays tr').length, 7), 8, true); renumber(); });
   $('gAddSht').addEventListener('click', function () { addSht('SHT_3X', '0x44'); });
+  if ($('gFrom')) $('gFrom').addEventListener('change', function () {
+    var pk = this.value; if (!pk) return;
+    fetch("{{ url_for('main.firmware_config_page') }}/from-meter/" + pk, {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (p) {
+      if (!p.ok) { PM.toast(p.error || 'Not available', 'warning'); return; }
+      $('gMeter').value = 'rbamp';
+      $('gBoards').innerHTML = ''; $('gChannels').innerHTML = ''; $('gRelays').innerHTML = '';
+      p.boards.forEach(addBoard);
+      p.relays.forEach(function (r) { addRelay(r.driver, r.addr, r.n, r.high); });
+      p.channels.forEach(function (c) { addChannel(c.board, c.input, c.clamp, c.relay_board, c.relay_out); });
+      lastMeter = 'rbamp'; renumber(); PM.toast('Filled from ' + p.name, 'success');
+      if (p.renumbered) PM.toast('config.h counts relay boards A, B, C … by position: a gap left by a removed board is closed', 'info');
+    });
+  });
   var lastMeter = null;
   $('gMeter').addEventListener('change', function () {  // sensible relays for the chosen meter
     var m = $('gMeter').value, pz = m !== 'rbamp';
@@ -203,7 +259,7 @@
     else { addRelay('RELAY_XL9535', '0x20', 2, true); form.gpio_pins.value = ''; form.pin_temp.value = '6'; }
     renumber();
   });
-  addBoard('0x50'); addChannel(1, 1, 'SCT_30A', 1); addChannel(1, 2, 'SCT_30A', 2);
+  addBoard('0x50'); addChannel(1, 1, 'SCT_30A', 1, 1); addChannel(1, 2, 'SCT_30A', 1, 2);
   $('gMeter').dispatchEvent(new Event('change'));
 
   function collect() {
@@ -213,7 +269,7 @@
     });
     o.boards = Array.prototype.map.call(document.querySelectorAll('.g-board input'), function (i) { return i.value; });
     o.channels = Array.prototype.map.call(document.querySelectorAll('#gChannels tr'), function (tr) {
-      return {board: tr.querySelector('.g-b').value, input: tr.querySelector('.g-i').value, clamp: tr.querySelector('.g-c').value, relay: tr.querySelector('.g-r').value};
+      return {board: tr.querySelector('.g-b').value, input: tr.querySelector('.g-i').value, clamp: tr.querySelector('.g-c').value, relay_board: tr.querySelector('.g-rb').value, relay_out: tr.querySelector('.g-ro').value || '0'};
     });
     o.relays = Array.prototype.map.call(document.querySelectorAll('#gRelays tr'), function (tr) {
       return {driver: tr.querySelector('.g-d').value, addr: tr.querySelector('.g-a').value, n: tr.querySelector('.g-n').value, high: tr.querySelector('.g-h').checked};

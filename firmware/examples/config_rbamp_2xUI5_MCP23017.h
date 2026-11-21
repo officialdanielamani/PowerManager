@@ -9,8 +9,8 @@
 #pragma once
 
 // ================================================================ [1] BOARD INFO
-#define FW_VERSION "1.0.0"
-#define HW_NAME "esp32s3-supermini"
+#define FW_VERSION "1.1.0"
+#define HW_NAME "esp32s3-n16r8"
 #define PROTO_VERSION 1
 #define METER_KIND "ac"
 #define SENSOR_NAME "AC Power Sensor"
@@ -33,12 +33,13 @@
                                     // 0 = random password made on first boot (printed on serial)
 
 // ================================================================ [3] PIN OUT (check your board)
+// ESP32-S3 N16R8 (16 MB flash, octal PSRAM): GPIO 26-32 (flash) and 35-37 (PSRAM) are used internally: do not wire them.
 #define PIN_I2C_SDA 8        // shared I2C bus: rbAmp, DS3231, relay board, SHT sensors
 #define PIN_I2C_SCL 9
 #define I2C_FREQ_HZ 50000    // rbAmp recommendation for ESP32 hosts (do not use 400 kHz)
 #define PIN_DRDY 5           // rbAmp DRDY of board 1 (open-drain, internal pull-up; 10 k to 3.3 V for long wires)
                              // -1 = not wired: Normal mode only (the module is read once a second)
-#define PIN_LED 48           // WS2812 RGB LED (onboard on most Super Mini boards)
+#define PIN_LED 48           // WS2812 RGB LED (onboard on many ESP32-S3 dev boards)
 #define PIN_BOOT_BUTTON 0    // hold 10 s = factory reset
 #define PIN_TAMPER 4         // NC switch to GND; open = panel open (internal pull-up)
 #define TAMPER_OPEN_LEVEL HIGH
@@ -73,10 +74,10 @@
 //   RELAY_XL9535   XL9535 / TCA9535 relay board, up to 16 outputs (0x20-0x27, A0-A2 jumpers); active high 1
 //   RELAY_PCF8574  PCF8574 (0x20-0x27) / PCF8574A (0x38-0x3F), up to 8 outputs; with low-side SSRs usually 0
 //   RELAY_GPIO     ESP32 pins listed in RELAY_GPIO_PINS (address 0)
-// "relays used" counts from output 0 (P0): 5 = outputs 0-4. Relays are numbered across the entries:
-// entry 1 = relays 1..n, entry 2 continues with n+1 ... Examples:
-//   { {RELAY_PCF8574, 0x20, 5, 0}, {RELAY_PCF8574, 0x21, 7, 0} }   PCF8574 (0-4) + PCF8574 (0-6) = 12 relays
-//   { {RELAY_XL9535, 0x20, 2, 1}, {RELAY_XL9535, 0x21, 8, 1} }     XL9535 2-relay + 8-relay board = 10 relays
+// "relays used" counts from output 0 (P0): 5 = outputs 0-4. The entries are relay board A, B, C ... in order;
+// CHANNELS below picks a board and one of its outputs. Examples:
+//   { {RELAY_PCF8574, 0x20, 5, 0}, {RELAY_PCF8574, 0x21, 7, 0} }   A: PCF8574 (0-4) + B: PCF8574 (0-6) = 12 relays
+//   { {RELAY_XL9535, 0x20, 2, 1}, {RELAY_XL9535, 0x21, 8, 1} }     A: XL9535 2-relay + B: 8-relay board = 10 relays
 //   { {RELAY_GPIO, 0, 2, 1} } with RELAY_GPIO_PINS { 10, 11 }      two SSRs on GPIO 10 / 11
 //   { {RELAY_MCP23017, 0x20, 16, 1} }                               one MCP23017: 16 outputs (e.g. 10 SSRs + 6 AUX)
 #define RELAY_BOARDS { {RELAY_MCP23017, 0x20, 16, 1} }
@@ -85,28 +86,31 @@
 // ---- channels: what is wired where
 // One line per measured channel, in order: the first line is CH1, the second CH2 ...
 //   board: 1 = first rbAmp in RBAMP_BOARDS      input: current input on that board (1..7)
-//   clamp: SCT_* model of the clamp on it       relay: relay number switching it (0 = no relay)
-// Relays that no channel uses are AUX relays (manual ON / OFF from the server, not metered).
+//   clamp: SCT_* model of the clamp on it
+//   relay board + output: which relay switches it: the relay board (1 = first entry of RELAY_BOARDS = "Board A",
+//                         2 = "Board B" ...) and the output on it (1..its "relays used"). 0, 0 = no relay.
+// Relays that no channel uses are AUX relays (manual ON / OFF from the server, not metered). AUX relays are
+// numbered across all relay boards (board A outputs first).
 // Voltage comes from the first board that has a voltage input (UI* variants).
 #define CHANNELS { \
-  /* board  input  clamp     relay */ \
-  {  1,     1,     SCT_30A,  1 },   /* CH1 */ \
-  {  1,     2,     SCT_30A,  2 },   /* CH2 */ \
-  {  1,     3,     SCT_30A,  3 },   /* CH3 */ \
-  {  1,     4,     SCT_30A,  4 },   /* CH4 */ \
-  {  1,     5,     SCT_30A,  5 },   /* CH5 */ \
-  {  2,     1,     SCT_30A,  6 },   /* CH6 */ \
-  {  2,     2,     SCT_30A,  7 },   /* CH7 */ \
-  {  2,     3,     SCT_30A,  8 },   /* CH8 */ \
-  {  2,     4,     SCT_30A,  9 },   /* CH9 */ \
-  {  2,     5,     SCT_30A,  10 },   /* CH10 */ \
+  /* board  input  clamp     relay board  output */ \
+  {  1,     1,     SCT_30A,  1,           1 },   /* CH1 */ \
+  {  1,     2,     SCT_30A,  1,           2 },   /* CH2 */ \
+  {  1,     3,     SCT_30A,  1,           3 },   /* CH3 */ \
+  {  1,     4,     SCT_30A,  1,           4 },   /* CH4 */ \
+  {  1,     5,     SCT_30A,  1,           5 },   /* CH5 */ \
+  {  2,     1,     SCT_30A,  1,           6 },   /* CH6 */ \
+  {  2,     2,     SCT_30A,  1,           7 },   /* CH7 */ \
+  {  2,     3,     SCT_30A,  1,           8 },   /* CH8 */ \
+  {  2,     4,     SCT_30A,  1,           9 },   /* CH9 */ \
+  {  2,     5,     SCT_30A,  1,           10 },   /* CH10 */ \
 }
-// Example, rbAmp UI5 (0x50) + rbAmp I7 (0x51), 8 channels, two XL9535 8-relay boards (0x20, 0x21):
+// Example, rbAmp UI5 (0x50) + rbAmp I7 (0x51), 8 channels, two XL9535 8-relay boards (A = 0x20, B = 0x21):
 //   #define RBAMP_BOARDS { 0x50, 0x51 }
 //   #define RELAY_BOARDS { {RELAY_XL9535, 0x20, 8, 1}, {RELAY_XL9535, 0x21, 8, 1} }
-//   #define CHANNELS { {1, 1, SCT_100A, 1}, {1, 2, SCT_30A, 2}, {1, 3, SCT_30A, 3}, {1, 4, SCT_30A, 4},
-//                      {1, 5, SCT_30A, 5}, {2, 1, SCT_20A, 9}, {2, 2, SCT_20A, 10}, {2, 3, SCT_20A, 11} }
-//   -> relays 6, 7, 8 and 12..16 are AUX relays.
+//   #define CHANNELS { {1, 1, SCT_100A, 1, 1}, {1, 2, SCT_30A, 1, 2}, {1, 3, SCT_30A, 1, 3}, {1, 4, SCT_30A, 1, 4},
+//                      {1, 5, SCT_30A, 1, 5}, {2, 1, SCT_20A, 2, 1}, {2, 2, SCT_20A, 2, 2}, {2, 3, SCT_20A, 2, 3} }
+//   -> outputs 6, 7, 8 of board A and 4..8 of board B are AUX relays.
 
 // ---- temperature / humidity
 // Numbering: T1, T2 ... = first the SHT sensors (in the order of SHT_SENSORS), then the DS18B20s sorted by
@@ -147,6 +151,8 @@
 #define ENERGY_SAVE_MS 300000     // save the kWh counters to NVS this often (and on session changes)
 #define TRIP_CONFIRM_READS 2      // over-current must be seen this many reads in a row
 #define RELAY_MIN_OFF_MS 2000     // after switching OFF, stay OFF at least this long (OFF is always immediate)
+#define HW_CONFIRM_MS 60000UL     // new hardware profile from the server: every listed part must answer within this
+                                  // time after the restart, else the meter returns to the previous profile
 #define RELAY_CHATTER_SWITCHES 6  // more relay changes than this within 60 s = warning on serial + event
 #define TAMPER_DEBOUNCE_MS 1000   // tamper input must be stable this long to count
 #define UPS_DEBOUNCE_MS 2000      // UPS input must be stable this long to count
@@ -178,10 +184,10 @@
 #define MESH_BATCH_MAX 8                               // telemetry items per message on the mesh
 
 // ---- outbox (offline buffer)
-// Stored in the LittleFS partition: choose Tools > Partition Scheme >
-// "Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)".
+// Stored in the LittleFS ("spiffs") partition of partitions.csv (16 MB flash, ~3.9 MB for this):
+// choose Tools > Flash Size > 16MB and Tools > Partition Scheme > "Custom".
 #define OUTBOX_SEGMENT_ITEMS 50   // items per segment file (~8 KB)
-#define OUTBOX_SEGMENTS 10        // max segments -> keeps the newest ~500 items (min 30 required)
+#define OUTBOX_SEGMENTS 100       // max segments -> keeps the newest ~5000 items (~800 KB of the 3.9 MB LittleFS)
 #define OUTBOX_RAM_ITEMS 200       // readings wait in RAM until acknowledged; flash only when offline
 #define OUTBOX_RAM_BYTES 64000   // ...and at most this much (DRDY: ~90 s of 2-channel windows)
 #define OUTBOX_RAM_MAX_AGE_MS 120000 // ...or still unsent after this long (DRDY send interval up to 90 s)

@@ -50,7 +50,8 @@ static void checkFirmwareType() {
   if (prev.length()) {
     static const char *KEYS[] = {"cfg", "s_sid", "s_start", "s_e0", "s_stat", "s_over", "s_end", "s_stop", "s_tare",
                                  "want", "tripped", "wantm", "tripm", "energy", "nch", "sidc", "started",
-                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6", "auxm"};
+                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6", "auxm",
+                                 "hw_act", "hw_try", "hw_boots", "hw_note"};  // hw_*: hardware profile (hwprofile.cpp)
     for (const char *k : KEYS) pm.remove(k);
     Serial.printf("[store] firmware type changed (%s -> %s): old sessions / kWh / relay state cleared\n",
                   prev.c_str(), FW_TYPE);
@@ -159,13 +160,13 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 103) return false;  // other layout: use defaults, the server re-sends the config
+  if (b.version != 104) return false;  // other layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 103;
+  b.version = 104;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }
@@ -182,7 +183,7 @@ void loadSession(uint8_t i, SessionState &s) {
   s = SessionState();
   if (pm.getBytesLength(key) == sizeof(b)) {
     pm.getBytes(key, &b, sizeof(b));
-    if (b.version == 1) s = b.s;
+    if (b.version == 2) s = b.s;
   }
   s.startMs = millis();
 }
@@ -190,7 +191,7 @@ void saveSession(uint8_t i, const SessionState &s) {
   char key[6];
   snprintf(key, sizeof(key), "ss%u", i);
   SessBlob b;
-  b.version = 1;
+  b.version = 2;
   b.s = s;
   pm.putBytes(key, &b, sizeof(b));
 }

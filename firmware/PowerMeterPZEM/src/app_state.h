@@ -11,7 +11,7 @@ enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, S
 // Voltage / tamper protection: run as usual, relay off while the problem lasts, or end the session.
 enum ProtectAction : uint8_t { ACT_RUN = 0, ACT_HOLD = 1, ACT_END = 2 };
 enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3, STOP_SENSOR = 4, STOP_MANUAL = 5,
-                            STOP_TEMP = 6 };
+                            STOP_TEMP = 6, STOP_OTA = 7 };
 // Sensor problem: no reply at all (sensor, wiring, or no AC: the PZEM is powered from the AC side) or
 // replies that are garbled / fail the CRC (wiring, noise, wrong address).
 enum SensorErr : uint8_t { SENS_OK = 0, SENS_NO_REPLY = 1, SENS_BAD = 2 };
@@ -42,7 +42,9 @@ struct MeterConfig {
   float volt_min = 0;  // operating voltage range; 0 = no limit on that side
   float volt_max = 0;
   uint8_t volt_action = ACT_HOLD;
-  float tare_a = 0;    // own consumption on the measured line (ESP32 + SSR)
+  float zero_a = 0;    // sensor offset with no load, subtracted from current / power after every read (docs/protocol.md §13.4)
+  float zero_w = 0;
+  float tare_a = 0;    // a connected load that counts as 0 (the meter's own supply, a charger ...)
   float tare_w = 0;
   bool tare_limits = true;  // use tared values for the kWh limit and max current
   bool tamper_protect = false;

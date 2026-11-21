@@ -7,8 +7,12 @@ limits, End / Renew per channel. No mesh, offline buffer only in memory.
     python tools/sim_meter_mc.py --state mc1.json pair --server http://localhost:5000 --code K7P29QXM --channels 2
     python tools/sim_meter_mc.py --state mc1.json run --load 600,1200 --energy-x 200
 
+Hardware profile (docs/protocol.md §12): the simulator answers i2c_scan, rbamp_addr, hw_profile and hw_cancel,
+restarts after the delay and rolls back when a listed address does not answer. `--bus 0x50,0x20` sets which
+I2C addresses "answer" (default: the profile's rbAmp and relay boards + 0x68).
+
 Interactive commands while running (type + Enter):
-    load <ch> <W>   trip <ch>   tamper_open   tamper_close   send   quit
+    load <ch> <W>   trip <ch>   tamper_open   tamper_close   send   bus add|del <addr>   quit
 """
 import argparse
 import json
@@ -59,9 +63,33 @@ def cmd_pair(args):
     print(f"Paired as {st['device_id']} ({args.channels} channels). Config v{st['cfg_ver']}")
 
 
-def caps(n):
-    return {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": f"UI{n}", "channels": n, "relays": n,
-            "voltage": True, "drdy": True, "rtc": True, "amp_rating": 34.8, "ratings": [30] * n, "inputs": ["tamper"]}
+def default_profile(n):
+    """What config.h compiled in: one rbAmp at 0x50, one XL9535 relay board at 0x20, channel k on input k, relay k."""
+    return {"boards": [0x50], "relays": [{"id": 1, "drv": "xl9535", "addr": 0x20, "n": n, "hi": 1}],
+            "ch": [{"b": 1, "i": k + 1, "a": 30, "rb": 1, "ro": k + 1} for k in range(n)]}
+
+
+def validate_profile(p):
+    """The server's rules when its code is importable (run from the server folder), else no check."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        from app.services import hwprofile
+    except Exception:  # pragma: no cover - flask etc. not installed
+        return []
+    return hwprofile.validate(p)
+
+
+def caps(n, profile=None):
+    c = {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": f"UI{n}", "channels": n, "relays": n,
+         "voltage": True, "drdy": True, "rtc": True, "amp_rating": 34.8, "ratings": [30] * n, "inputs": ["tamper"],
+         "hw_cfg": 1, "ota": {"slot": 6291456, "layout": "3e58d8a2", "tag": "PMFWTAG|rbamp-mc|1.1.0|esp32s3-n16r8|"}}
+    if profile:
+        chans = profile["ch"]
+        total = sum(r["n"] for r in profile["relays"])
+        used = {(c_["rb"], c_["ro"]) for c_ in chans if c_["rb"]}
+        c.update(channels=len(chans), relays=len(used), aux=total - len(used),
+                 ratings=[c_["a"] or 30 for c_ in chans], variant=f"UI{len(chans)}")
+    return c
 
 
 class MeterMC:
@@ -77,13 +105,40 @@ class MeterMC:
         self.buffer, self.ws, self.running = [], None, True
         loads = [float(x) for x in (args.load or "800").split(",")]
         self.load = (loads * self.n)[:self.n]
+        self.relay_on = [False] * self.n
         self.tamper, self.disabled = False, self.st.get("disabled", False)
         self.relay_on = [False] * self.n
         self.block = [None] * self.n
+        self.hwp = self.st.setdefault("hwp", {"ver": 0, "state": "default", "profile": default_profile(self.n),
+                                              "prev": None})
+        if self.hwp["state"] in ("trial", "pending"):  # the simulator was stopped in the middle of a change
+            self.hwp.update(state="active" if self.hwp["ver"] else "default")
+        self.resize(len(self.hwp["profile"]["ch"]))
+        if args.bus:
+            self.bus = {int(x, 0) for x in args.bus.split(",")}
+        else:
+            pr = self.hwp["profile"]
+            self.bus = {0x68, *pr["boards"], *[r["addr"] for r in pr["relays"] if r["drv"] != "gpio"]}
+        self.countdown = None   # (due epoch, wanted profile message) while a reboot is pending
+        self.checks = {}        # channel -> running sensor check {"n", "vals"}
 
     # ------------------------------------------------------------ helpers
     def log(self, *a):
         print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+    def resize(self, n):
+        """The channel count changed (new hardware profile): keep what exists, add defaults."""
+        old = self.n
+        self.n = n
+        st = self.st
+        st["nch"] = n
+        for key, fill in (("e", 0.0), ("want", True), ("tripped", False)):
+            st[key] = (list(st[key]) + [fill] * n)[:n]
+        st["sess"] = (list(st["sess"]) + [{} for _ in range(n)])[:n]
+        self.load = (list(getattr(self, "load", [800.0])) + [self.load[0] if getattr(self, "load", None) else 800.0] * n)[:n]
+        self.relay_on = (list(getattr(self, "relay_on", [])) + [False] * n)[:n]
+        self.block = (list(getattr(self, "block", [])) + [None] * n)[:n]
+        return old
 
     def cfg(self):
         return self.st.get("cfg") or {}
@@ -209,6 +264,7 @@ class MeterMC:
         last_report = 0
         while self.running:
             with self.lock:
+                self.hw_tick()
                 self.step()
                 every = 1 if self.cfg().get("drdy") else float(self.cfg().get("read_s", 60))
                 if time.time() - last_report >= every * self.args.speed:
@@ -220,8 +276,18 @@ class MeterMC:
         v = random.uniform(228, 234)
         self.reading = []
         for i in range(self.n):
-            w = self.load[i] * random.uniform(0.95, 1.05) if self.relay_on[i] else 0.0
+            w = self.load[i] * random.uniform(0.995, 1.005) if self.relay_on[i] else 0.0
+            w += self.args.offset_w * random.uniform(0.99, 1.01)   # the sensor's offset (what Zeroing finds)
             a = w / v
+            chk = self.checks.get(i)
+            if chk is not None:   # sensor check (docs/protocol.md §13.1): raw values, before the zero
+                chk["vals"].append((a, w, v))
+                if len(chk["vals"]) >= chk["n"]:
+                    self.finish_check(i)
+            z = (self.cfg().get("ch") or [{}] * self.n)[i].get("zero") if i < len(self.cfg().get("ch") or []) else None
+            if z:   # zero: subtracted right after the read, so energy and limits never see the offset
+                a, w = max(0.0, a - z.get("a", 0)), max(0.0, w - z.get("w", 0))
+                a, w = (a, w) if a > 0 else (0.0, 0.0)
             self.st["e"][i] += w / 1000 / 3600 * self.args.energy_x
             self.reading.append({"i": i, "v": round(v, 1), "a": round(a, 3), "w": round(w, 1), "pf": 0.98, "hz": 50,
                                  "e": round(self.st["e"][i], 4)})
@@ -318,6 +384,13 @@ class MeterMC:
         elif t == "cmd":
             self.command(msg)
 
+    def finish_check(self, i):
+        vals, n = self.checks.pop(i)["vals"], None
+        n = len(vals)
+        tri = lambda xs: [round(sum(xs) / len(xs), 4), round(min(xs), 4), round(max(xs), 4)]
+        self.event("sensor_check", ch=i, n=n, secs=n, a=tri([x[0] for x in vals]), w=tri([x[1] for x in vals]),
+                   v=tri([x[2] for x in vals]), ok=True)
+
     def command(self, m):
         c, ch, ok, err = m.get("c"), m.get("ch"), True, None
         with self.lock:
@@ -350,6 +423,41 @@ class MeterMC:
                 if self.disabled:
                     for s in range(self.slots()):
                         self.stop_slot(s, "disabled")
+            elif c == "sensor_check":
+                i = m.get("ch", 0)
+                if not isinstance(i, int) or not 0 <= i < self.n:
+                    ok, err = False, "bad_channel"
+                elif self.checks:
+                    ok, err = False, "busy"   # one check at a time
+                else:
+                    self.checks[i] = {"n": max(10, min(60, int(m.get("n", 10)))), "vals": []}
+            elif c == "ota":
+                ok, err = self.cmd_ota(m)
+            elif c == "i2c_scan":
+                res = {"found": sorted(self.bus), "rbamp": sorted(a for a in self.bus if 0x50 <= a <= 0x57)}
+                self.send({"t": "cmd_ack", "ref": m.get("ref"), "ok": True, "res": res})
+                return
+            elif c == "rbamp_addr":
+                old, new = m.get("from"), m.get("to")
+                busy = any(x.get("sid") and not x.get("ended") for x in self.st["sess"])
+                if busy:
+                    ok, err = False, "busy"
+                elif old not in self.bus or not 0x50 <= (old or 0) <= 0x57:
+                    ok, err = False, "no_reply"
+                elif new in self.bus:
+                    ok, err = False, "addr_in_use"
+                else:
+                    self.bus.discard(old)
+                    self.bus.add(new)
+            elif c == "hw_profile":
+                self.cmd_hw_profile(m)
+                return
+            elif c == "hw_cancel":
+                if self.countdown:
+                    self.hwp["state"] = "default" if self.countdown["was_default"] else "active"
+                    self.countdown = None
+                else:
+                    ok, err = False, "nothing_pending"
             elif c == "get_state":
                 pass
             elif c == "get_info":
@@ -362,6 +470,132 @@ class MeterMC:
             self.step()
         self.send({"t": "cmd_ack", "ref": m.get("ref"), "ok": ok, **({"err": err} if err else {})})
         self.send_state()
+
+    # ------------------------------------------------------------ hardware profile (protocol.md §12)
+    def ack(self, m, ok=True, err=None, **extra):
+        self.send({"t": "cmd_ack", "ref": m.get("ref"), "ok": ok, **({"err": err} if err else {}), **extra})
+
+    def cmd_ota(self, m):
+        """Firmware update over the air (docs/protocol.md §14): download with the token, check, "restart" with the new version."""
+        if getattr(self, "ota_busy", False):
+            return False, "busy"
+        if m.get("type") != self.st.get("fw_type", "rbamp-mc"):
+            return False, "wrong_type"
+        if not m.get("size") or m["size"] > 6291456:
+            return False, "too_big"
+        self.ota_busy = True
+        for s_ in range(self.slots()):  # sessions end, relays off
+            self.stop_slot(s_, "restart")
+        threading.Thread(target=self.ota_run, args=(m,), daemon=True).start()
+        return True, None
+
+    def ota_run(self, m):
+        import hashlib
+        import urllib.request
+        ver = m.get("ver")
+
+        def prog(state, pct):
+            self.event("ota_progress", state=state, pct=pct, ver=ver)
+        try:
+            prog("downloading", 0)
+            data = urllib.request.urlopen(self.st["server"].rstrip("/") + m["path"], timeout=30).read()
+            prog("downloading", 60)
+            if len(data) != m["size"] or hashlib.sha256(data).hexdigest() != m["sha256"]:
+                self.event("ota_failed", state="failed", why="sha256", ver=ver)
+                return
+            prog("verifying", 100)
+            time.sleep(0.5)
+            prog("rebooting", 100)
+            time.sleep(1.5)
+            with self.lock:
+                self.st["fw_prev"], self.st["fw"], self.st["ota_try"] = self.st.get("fw", "1.1.0"), ver, ver
+                self.st["boot"] += 1
+                save_state(self.args.state, self.st)
+            self.reconnect()
+        except Exception as e:  # download failed
+            self.log("OTA ERROR", e)
+            self.event("ota_failed", state="failed", why="net", ver=ver)
+        finally:
+            self.ota_busy = False
+
+    def ota_after_hello(self):
+        """First thing after the hello of a freshly updated firmware: the server answered, so it confirms (or --ota-rollback)."""
+        if not self.st.get("ota_try"):
+            return
+        tried = self.st.pop("ota_try")
+        if getattr(self.args, "ota_rollback", False):
+            self.st["fw"] = self.st.get("fw_prev", "1.1.0")
+            self.st["ota_note"] = {"why": "no_server", "tried": tried}
+            save_state(self.args.state, self.st)
+            self.reconnect()
+            return
+        save_state(self.args.state, self.st)
+        self.event("ota_ok", state="ok", pct=100, ver=tried)
+
+    def cmd_hw_profile(self, m):
+        prof, ver, mode = m.get("profile") or {}, m.get("ver"), m.get("mode")
+        errors = validate_profile(prof)
+        cur = self.hwp["profile"]
+        same_struct = ([prof.get("boards"), prof.get("relays"), [(c["b"], c["i"], c["rb"], c["ro"]) for c in prof.get("ch", [])]] ==
+                       [cur["boards"], cur["relays"], [(c["b"], c["i"], c["rb"], c["ro"]) for c in cur["ch"]]]) if not errors else False
+        if errors:
+            self.ack(m, False, "invalid", detail=errors[0][:60])
+        elif mode == "live" and not same_struct:
+            self.ack(m, False, "mode")
+        elif mode == "live":
+            self.hwp.update(ver=ver, profile=prof, state="active")
+            self.log("HW profile", ver, "applied live (clamp models)")
+            self.ack(m, True, res={"state": "live"})
+        else:
+            delay = float(m.get("delay_s", 60))
+            self.countdown = {"due": time.time() + delay * self.args.speed, "msg": m,
+                              "was_default": self.hwp["state"] == "default"}
+            self.hwp["state"] = "pending"
+            self.ack(m, True, res={"state": "pending", "in_s": int(delay)})
+            self.event("hw_reboot_pending", ver=ver, in_s=int(delay))
+            self.log("HW profile", ver, f"reboot in {delay:g} s")
+
+    def hw_tick(self):
+        """Reboot countdown, then the confirm check of the trial profile."""
+        cd = self.countdown
+        if not cd or time.time() < cd["due"]:
+            return
+        self.countdown = None
+        m = cd["msg"]
+        for s in range(self.slots()):
+            self.stop_slot(s, "hw_change")
+        self.hwp.update(prev_profile=self.hwp["profile"], prev_ver=self.hwp["ver"], prev_default=cd["was_default"],
+                        profile=m["profile"], ver=m["ver"], state="trial")
+        self.resize(len(m["profile"]["ch"]))
+        self.log("RESTART with trial profile", m["ver"])
+        self.reconnect()
+        threading.Thread(target=self.hw_confirm, daemon=True).start()
+
+    def hw_confirm(self):
+        time.sleep(5 * self.args.speed)  # the firmware waits up to HW_CONFIRM_MS for every part to answer
+        with self.lock:
+            pr = self.hwp["profile"]
+            need = list(pr["boards"]) + [r["addr"] for r in pr["relays"] if r["drv"] != "gpio"]
+            missing = [a for a in need if a not in self.bus]
+            if not missing:
+                self.hwp["state"] = "active"
+                self.event("hw_active", ver=self.hwp["ver"])
+                return
+            self.event("hw_rollback", ver=self.hwp["ver"], reason="no_reply", addr=missing[0])
+            self.hwp.update(profile=self.hwp["prev_profile"], ver=self.hwp["prev_ver"],
+                            state="default" if self.hwp.get("prev_default") else "active")
+            self.resize(len(self.hwp["profile"]["ch"]))
+            self.log("ROLLBACK, 0x%02X does not answer" % missing[0])
+        self.reconnect()
+
+    def reconnect(self):
+        """The meter restarted: the server link is closed and opened again (new hello)."""
+        ws = self.ws
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------ network
     def send(self, msg):
@@ -400,10 +634,18 @@ class MeterMC:
                 self.ws = Client.connect(self.ws_url(), headers=headers)
                 self.log("CONNECTED")
                 with self.lock:
-                    self.send({"t": "hello", "fw": "sim-mc-0.7", "proto": 1, "boot": self.st["boot"],
+                    fw = self.st.get("fw", "1.1.0")
+                    ota = {"state": "trial" if self.st.get("ota_try") else "ok", "ver": fw}
+                    if self.st.get("ota_note") and not self.st.get("ota_try"):
+                        ota = dict(ota, state="rolled_back", **self.st.pop("ota_note"))
+                    self.send({"t": "hello", "fw": fw, "fw_type": self.st.get("fw_type", "rbamp-mc"), "hw": "esp32s3-n16r8",
+                               "ota": ota, "proto": 1, "boot": self.st["boot"],
                                "up": int(time.time() - self.boot_t), "tv": 1, "ts": int(time.time()),
-                               "cfg_ver": self.st.get("cfg_ver", 0), "caps": caps(self.n), "state": self.state_msg()})
+                               "cfg_ver": self.st.get("cfg_ver", 0), "caps": caps(self.n, self.hwp["profile"]),
+                               "hwp": {"ver": self.hwp["ver"], "state": self.hwp["state"],
+                                       "profile": self.hwp["profile"]}, "state": self.state_msg()})
                 last_flush = 0
+                threading.Timer(1.5, self.ota_after_hello).start()
                 while self.running:
                     if time.time() - last_flush > 3:
                         last_flush = time.time()
@@ -434,6 +676,9 @@ class MeterMC:
                 self.event(p[0])
             elif p[0] == "send":
                 self.report()
+            elif p[0] == "bus" and len(p) == 3 and p[1] in ("add", "del"):
+                (self.bus.add if p[1] == "add" else self.bus.discard)(int(p[2], 0))
+                self.log("I2C bus:", ", ".join("0x%02X" % a for a in sorted(self.bus)))
             elif p[0] == "quit":
                 self.running = False
 
@@ -467,8 +712,11 @@ def main():
     a.add_argument("--channels", type=int, default=2, choices=range(1, 8))
     b = sub.add_parser("run")
     b.add_argument("--load", default="800", help="W per channel while its relay is ON, e.g. 600,1200")
+    b.add_argument("--bus", help="I2C addresses that answer, e.g. 0x50,0x20 (default: those of the profile)")
     b.add_argument("--duration", type=float, default=0, help="stop after N seconds (0 = forever)")
     b.add_argument("--speed", type=float, default=1.0, help="<1 makes the loop faster")
+    b.add_argument("--ota-rollback", action="store_true", help="a firmware installed over the air does not work: roll back")
+    b.add_argument("--offset-w", type=float, default=0.0, help="sensor offset added to every channel's power (W): what Zeroing finds")
     b.add_argument("--energy-x", type=float, default=1.0, help="multiply energy accumulation (test quotas)")
     args = p.parse_args()
     if args.cmd == "pair":

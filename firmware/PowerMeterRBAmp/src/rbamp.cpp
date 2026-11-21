@@ -33,7 +33,7 @@ struct Board {
   uint32_t lastUptime = 0;
 };
 
-static Board boards[hw::BOARDS];
+static Board boards[HWP_MAX_BOARDS];
 static bool ready = false;   // every board found and the CHANNELS table fits
 static uint8_t err = SENS_NO_REPLY;
 static bool mismatch = false;
@@ -265,12 +265,30 @@ float rating(uint8_t ch) {
 }
 uint8_t lastError() { return err; }
 
+// A module that stays silent for LOST_REPROBE_MS is forgotten: the control task then probes the boards again (every 5 s,
+// begin()), which re-reads the variant, checks the CHANNELS table against it and writes the clamp models again. Without
+// this a module that comes back changed (other variant, replaced, restarted without the uptime check noticing) would
+// only be used as it was at start-up.
+static const uint32_t LOST_REPROBE_MS = 5000;
+static uint32_t lostSinceMs = 0;
+static void noteSilent() {
+  if (!lostSinceMs) {
+    lostSinceMs = millis();
+    return;
+  }
+  if (millis() - lostSinceMs < LOST_REPROBE_MS) return;
+  lostSinceMs = 0;
+  for (uint8_t i = 0; i < hw::BOARDS; i++) boards[i].found = false;
+  ready = false;
+  Serial.println("[rbamp] no answer for 5 s: the module(s) will be probed again");
+}
+
 bool read(Sample &out) {
   if (!ready) {
     err = SENS_NO_REPLY;
     return false;
   }
-  static uint8_t rt[hw::BOARDS][56];  // 0x86..0xBD of each board in one burst = one coherent window
+  static uint8_t rt[HWP_MAX_BOARDS][56];  // 0x86..0xBD of each board in one burst = one coherent window
   int8_t vBoard = -1;
   for (uint8_t i = 0; i < hw::BOARDS; i++) {
     Board &b = boards[i];
@@ -279,6 +297,7 @@ bool read(Sample &out) {
       i2cbus::Lock l;
       if (!i2cbus::readRegs(b.addr, REG_RT, rt[i], sizeof(rt[i]))) {
         err = SENS_NO_REPLY;
+        noteSilent();
         return false;
       }
       i2cbus::readRegs(b.addr, REG_STATUS, &st, 1);
@@ -311,11 +330,13 @@ bool read(Sample &out) {
       if (!windowRead(addr, F_I_RMS, in, out.a[c]) || !windowRead(addr, F_P_REAL, in, out.w[c]) ||
           !windowRead(addr, F_PF, in, out.pf[c])) {
         err = SENS_NO_REPLY;
+        noteSilent();
         return false;
       }
     }
   }
   err = SENS_OK;
+  lostSinceMs = 0;
   return true;
 }
 
@@ -357,6 +378,40 @@ bool periodFinish(float avgW[MC_MAX_CH], bool &valid) {
   }
   valid = true;
   return true;
+}
+
+bool isRbamp(uint8_t addr) {
+  i2cbus::begin();
+  uint8_t pid = 0;
+  return i2cbus::readRegs(addr, REG_PRODUCT_ID, &pid, 1) && pid == 0x01;
+}
+
+uint8_t scan(uint8_t *found, uint8_t max) {
+  i2cbus::begin();
+  uint8_t n = 0;
+  for (uint8_t a = 0x08; a <= 0x77 && n < max; a++)
+    if (i2cbus::probe(a)) found[n++] = a;
+  return n;
+}
+
+// Live clamp change (hardware profile with only the clamp models different): the tables were reloaded; write the
+// models to the modules and read them back.
+void applyClamps() {
+  for (uint8_t i = 0; i < hw::BOARDS; i++) memset(boards[i].want, 0, sizeof(boards[i].want));
+  for (uint8_t c = 0; c < hw::NCH; c++) boards[hw::CHANNEL[c].board - 1].want[hw::CHANNEL[c].input - 1] = hw::CHANNEL[c].clamp;
+  for (uint8_t i = 0; i < hw::BOARDS; i++) {
+    Board &b = boards[i];
+    if (!b.found) continue;
+    setModels(b, i);
+    for (uint8_t in = 0; in < b.inputs; in++) b.applied[in] = readApplied(b, in);
+  }
+  mismatch = false;
+  for (uint8_t c = 0; c < hw::NCH; c++) {
+    const hw::ChannelMap &m = hw::CHANNEL[c];
+    const Board &b = boards[m.board - 1];
+    if (b.found && m.input <= b.inputs && b.cls == 1 && m.clamp && b.applied[m.input - 1] != m.clamp) mismatch = true;
+  }
+  Serial.printf("[rbamp] clamp models changed: %s\n", clampSummary().c_str());
 }
 
 bool changeAddress(uint8_t from, uint8_t to, String &msg) {

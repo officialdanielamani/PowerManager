@@ -13,7 +13,9 @@
 #include "battery.h"
 #include "ups.h"
 #include "certs.h"
+#include "ota.h"
 #include "control.h"
+#include "i2cbus.h"
 #include "led.h"
 #include "mesh.h"
 #include "mqttlink.h"
@@ -69,6 +71,14 @@ static bool mdnsStarted = false;
 
 String apSsid() { return "Power_" + store::deviceId(); }
 String serverHost() { return srv.host; }
+bool serverParams(String &host, uint16_t &port, bool &tls, bool &insecure) {
+  if (leafMode || !srv.host.length()) return false;
+  host = srv.host;
+  port = srv.port;
+  tls = srv.tls;
+  insecure = srv.insecure;
+  return true;
+}
 String linkMode() {
   if (leafMode) return mesh::leafLinked() ? "mesh" : "searching";
   return WiFi.status() == WL_CONNECTED ? "wifi" : "none";
@@ -332,15 +342,18 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   m.volt_min = vmin;
   m.volt_max = vmax;
   m.volt_action = action(v["action"] | "hold");
-  JsonObject ta = c["tare"];
-  float tA = ta["a"] | 0.0f, tW = ta["w"] | 0.0f;
-  if (tA < 0 || tA > 5 || tW < 0 || tW > 500) {
-    err = "tare";
+  // Zero and tare of the measured line = channel 0 (docs/protocol.md §13.3); tare_limits applies to all meters
+  JsonObject c0 = c["ch"][0];
+  float zA = c0["zero"]["a"] | 0.0f, zW = c0["zero"]["w"] | 0.0f, tA = c0["tare"]["a"] | 0.0f, tW = c0["tare"]["w"] | 0.0f;
+  if (zA < 0 || zA > 400 || zW < 0 || zW > 100000 || tA < 0 || tA > 400 || tW < 0 || tW > 100000) {
+    err = "ch.zero_tare";
     return false;
   }
+  m.zero_a = zA;
+  m.zero_w = zW;
   m.tare_a = tA;
   m.tare_w = tW;
-  m.tare_limits = ta["limits"] | true;
+  m.tare_limits = c["tare_limits"] | true;
   JsonObject t = c["tamper"];
   m.tamper_protect = t["protect"] | false;
   m.tamper_action = action(t["action"] | "hold");
@@ -426,6 +439,7 @@ static String pairBody(const PairRequest &r) {
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
+  ota::capsJson(caps["ota"].to<JsonObject>());  // firmware update over the air (docs/protocol.md §14)
   caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
   caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
@@ -586,6 +600,9 @@ static void sendHello() {
   JsonDocument doc;
   doc["t"] = "hello";
   doc["fw"] = FW_VERSION;
+  doc["fw_type"] = FW_TYPE;
+  doc["hw"] = HW_NAME;
+  ota::stateJson(doc["ota"].to<JsonObject>());
   doc["proto"] = PROTO_VERSION;
   doc["boot"] = store::bootCount();
   doc["up"] = millis() / 1000;
@@ -678,6 +695,7 @@ static void sendInfo() {
   if (rtc >= 0) doc["rtc"] = (uint32_t)rtc;  // DS3231 fitted: its own time (0 = not readable)
   doc["stack"] = sys::stackReport();
   doc["relay_sw"] = control::relaySwitches();
+  doc["i2c_recov"] = i2cbus::recoveries();  // times a stuck I2C bus had to be freed since start
   doc["reset"] = String(sys::resetReason()) + (sys::safeMode ? " - SAFE MODE (mesh + DS3231 off)" : "");
   if (battery::enabled()) {
     float v = battery::volts();
@@ -729,6 +747,13 @@ static void handleCommand(JsonObject m) {
     control::renew("manual", false);
   } else if (!strcmp(c, "end")) {
     control::endSession();
+  } else if (!strcmp(c, "ota")) {
+    ok = ota::onCommand(m, err);  // docs/protocol.md §14.3
+  } else if (!strcmp(c, "sensor_check")) {
+    // Zero & Tare wizard: measure the raw values for >= 10 readings (>= 10 s); the result comes as an event
+    // "sensor_check" (docs/protocol.md §13.1). This meter has one channel (0).
+    int n = m["n"] | 10, chn = m["ch"] | 0;
+    ok = control::startSensorCheck((uint8_t)(chn < 0 ? 0 : chn > 255 ? 255 : chn), (uint8_t)(n < 0 ? 10 : n > 255 ? 255 : n), err);
   } else if (!strcmp(c, "send_now")) {
     control::reportNow();
   } else if (!strcmp(c, "reset_trip")) {
@@ -803,6 +828,7 @@ static void handleMessage(const char *payload, size_t len) {
 
   if (!strcmp(t, "welcome")) {
     helloDone = true;
+    ota::confirm();  // a freshly installed firmware is good once the server answers
     linkTrySinceMs = 0;  // connected: the MQTT fallback timer starts again at the next loss
     goOnline();
     Serial.println("[net] online");

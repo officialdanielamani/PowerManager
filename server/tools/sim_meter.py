@@ -88,6 +88,7 @@ class Meter:
         self.leaves = {}        # set on a gateway: device_id -> leaf Meter
         self.dn_last = 0
         self.volt_override = None
+        self.check = None       # running sensor check: {"n", "vals"}
         self.volt_out = False
         self.volt_bad = self.volt_good = 0
         if not self.sess:  # paired: no session until Renew (like the firmware)
@@ -155,7 +156,13 @@ class Meter:
         return self.st.get("e_total", 0.0) - self.sess.get("e0", 0.0)
 
     def tare(self):
-        return self.cfg().get("tare") or {}
+        """Tare of channel 0 (cfg.ch[0].tare) with the meter-wide "limits" switch."""
+        t = dict(self.ch_cfg().get("tare") or {})
+        t["limits"] = self.cfg().get("tare_limits", True)
+        return t
+
+    def zero(self):
+        return self.ch_cfg().get("zero") or {}
 
     def session_kwh_tared(self):
         return max(0.0, self.session_kwh() - self.sess.get("tare_kwh", 0.0))
@@ -210,13 +217,21 @@ class Meter:
         while self.running:
             time.sleep(1 * self.args.speed)
             if self.ac:
-                w = self.load_w * random.uniform(0.95, 1.05) if self.relay_on() else 0.0
-                w += self.args.self_w  # the meter's own supply on the measured line
+                w = self.load_w * random.uniform(0.995, 1.005) if self.relay_on() else 0.0
+                w += self.args.self_w * random.uniform(0.99, 1.01)  # the sensor offset / the meter's own supply on the measured line
                 if self.tare().get("w"):
                     self.sess["tare_kwh"] = self.sess.get("tare_kwh", 0.0) + self.tare()["w"] / 1000 / 3600 * self.args.energy_x
                 dc = self.st.get("dc")
                 v = self.volt_override or (random.uniform(47.5, 48.5) if dc else random.uniform(228, 234))
                 a = w / v if v else 0
+                if self.check is not None:  # sensor check (docs/protocol.md §13.1): raw values, before the zero
+                    self.check["vals"].append((a, w, v))
+                    if len(self.check["vals"]) >= self.check["n"]:
+                        self.finish_check()
+                z = self.zero()  # zero: the sensor offset is subtracted right after the read
+                if z:
+                    a, w = max(0.0, a - z.get("a", 0)), max(0.0, w - z.get("w", 0))
+                    a, w = (a, w) if a > 0 else (0.0, 0.0)
                 # energy: speed factor makes simulated time pass faster for testing quotas
                 self.st["e_total"] = self.st.get("e_total", 0.0) + w / 1000 / 3600 * self.args.energy_x
                 if dc:  # PZEM-017: no power factor / frequency
@@ -423,6 +438,13 @@ class Meter:
             if msg.get("code") == 4403:
                 self.factory_reset()
 
+    def finish_check(self):
+        vals, n = self.check["vals"], self.check["n"]
+        self.check = None
+        tri = lambda xs: [round(sum(xs) / len(xs), 4), round(min(xs), 4), round(max(xs), 4)]
+        self.event("sensor_check", ch=0, n=n, secs=n, a=tri([x[0] for x in vals]), w=tri([x[1] for x in vals]),
+                   v=tri([x[2] for x in vals]), ok=True)
+
     def command(self, msg):
         c, ref = msg.get("c"), msg.get("ref")
         ok, err = True, None
@@ -433,6 +455,13 @@ class Meter:
             else:
                 self.want_on = bool(msg.get("on"))
                 self.event("relay", on=self.want_on, src="server")
+        elif c == "sensor_check":
+            if msg.get("ch", 0) != 0:
+                ok, err = False, "bad_channel"
+            elif self.check is not None:
+                ok, err = False, "busy"
+            else:
+                self.check = {"n": max(10, min(60, int(msg.get("n", 10)))), "vals": []}
         elif c == "renew":
             self.new_session(auto=False, reason="manual")
         elif c == "end":
@@ -607,7 +636,8 @@ def main():
     b.add_argument("--speed", type=float, default=1.0, help="<1 makes loop/report faster")
     b.add_argument("--energy-x", type=float, default=1.0, help="multiply energy accumulation (test quotas)")
     b.add_argument("--buffer", type=int, default=500, help="offline buffer size")
-    b.add_argument("--self-w", type=float, default=0.0, help="the meter's own consumption added to readings (W)")
+    b.add_argument("--self-w", type=float, default=0.0, help="sensor offset / the meter's own consumption added to readings (W): "
+                                                             "what Zeroing finds")
     b.add_argument("--leaves", help="act as mesh gateway for these meters (state files, comma separated)")
     args = p.parse_args()
     if args.cmd == "pair":

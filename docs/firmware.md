@@ -1,4 +1,4 @@
-# Meter Firmware (ESP32-S3 Super Mini)
+# Meter Firmware (ESP32-S3 N16R8)
 
 Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. One source builds the **AC meter** (`METER_DC 0`, PZEM-004T, TTL 9600 8N1, registers 0x0000–0x0009) or the **DC meter** (`METER_DC 1`, PZEM-017, RS485 9600 8N2 via an RS485-TTL module, registers 0x0000–0x0007: V 0.01 V, A 0.01 A, W 0.1 W, Wh; shunt range written to holding register 0x0003 at start-up). Both share one Modbus transport (`sensor_pzem.cpp`); the rest of the firmware is identical. **Readings:** recorded every `read_s` into the offline buffer and sent as a batch every `report_s`; events and *Get Data Now* trigger an immediate send. The folder is laid out so it can move to PlatformIO later without code changes.
 
@@ -6,7 +6,7 @@ Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. One source bu
 
 | Part | Notes |
 |------|-------|
-| ESP32-S3 Super Mini | 4 MB flash. Powered from a **DC UPS**, so it stays up during an AC outage. |
+| ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM) | Powered from a **DC UPS**, so it stays up during an AC outage. GPIO 35–37 are used by the octal PSRAM and must not be wired. |
 | PZEM-004T (v3/v4 protocol, Modbus-RTU over TTL) | Its measurement side is powered from **AC**: when AC is lost it stops answering → this is how "No Voltage" is detected. Energy register keeps its value without power. Power the TTL side from **3.3 V** (or use a divider on its TX) — ESP32 pins are not 5 V tolerant. |
 | Solid-state relay | Rated well above the load, with a heatsink. **Not a protection device** — a breaker is still required. SSRs can fail shorted. |
 | Tamper switch | Normally-closed to GND. Open circuit = panel open (a cut wire also shows as open). |
@@ -30,7 +30,7 @@ Built with **Arduino IDE 2.x** and the **Arduino-ESP32 core 3.x**. One source bu
 
 Avoid: GPIO 0/3/45/46 (strapping), 19/20 (USB), 43/44 (UART0 / serial log).
 
-**Pins are not a problem:** this uses 6 pins plus the onboard LED, and the Super Mini exposes about 15 free GPIOs, so the **DS3231 fits easily**. For future multi-channel meters, **several PZEMs can share the same UART** using different Modbus addresses, so more channels need no extra pins (only extra SSR pins).
+**Pins are not a problem:** this uses 6 pins plus the onboard LED, and the board exposes about 15 free GPIOs, so the **DS3231 fits easily**. For future multi-channel meters, **several PZEMs can share the same UART** using different Modbus addresses, so more channels need no extra pins (only extra SSR pins).
 
 ## 2. Device identity
 
@@ -172,7 +172,31 @@ Only two libraries from the Arduino Library Manager:
 
 Everything else is built into the ESP32 core: WiFi, WebServer, DNSServer, ESPmDNS, HTTPClient, NetworkClientSecure, Preferences (NVS), LittleFS, `rgbLedWrite()` for the WS2812, FreeRTOS. The PZEM Modbus protocol and the optional DS3231 (raw I2C via `Wire`) are implemented in the sketch — no extra libraries.
 
-**Arduino IDE board settings:** Board *ESP32S3 Dev Module* · USB CDC On Boot: *Enabled* · Flash Size: *4MB* · Partition Scheme: **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** (the 128 KB "SPIFFS" partition holds the LittleFS offline buffer; the app uses ~66% of its slot).
+**Arduino IDE board settings:** Board *ESP32S3 Dev Module* · USB CDC On Boot: *Enabled* · Flash Size: *16MB* · PSRAM: *OPI PSRAM* · Partition Scheme: **Custom** (the `partitions.csv` in the sketch folder, see below). The 3.8 MB `spiffs` partition holds the LittleFS offline buffer.
+
+**ESP32-S3 N16R8 (16 MB flash, 8 MB octal PSRAM), custom partition table** (`partitions.csv` in each sketch folder, identical in both, checked by `check_shared.py`):
+
+| Partition | Offset | Size | Use |
+|---|---|---|---|
+| nvs | 0x9000 | 0x5000 (20 KB) | settings, kWh counters, pairing, hardware profile (`hw_act` / `hw_try`) |
+| otadata | 0xe000 | 0x2000 | OTA slot selection |
+| app0 (ota_0) | 0x10000 | 0x600000 (6 MB) | firmware |
+| app1 (ota_1) | 0x610000 | 0x600000 (6 MB) | OTA slot, same size |
+| spiffs (LittleFS) | 0xC10000 | 0x3E0000 (about 3.9 MB) | offline buffer (outbox) |
+| coredump | 0xFF0000 | 0x10000 | crash dumps |
+
+The table ends exactly at 16 MB. The app uses about 1.3 MB of its 6 MB slot, so there is room for growth and OTA.
+
+**Do not move `nvs` / `otadata` / `app0`.** The Arduino upload writes `boot_app0` at **0xe000** and the sketch at **0x10000**
+(hard-coded in the ESP32 core's `platform.txt`, not taken from the partition table). A table with the app anywhere else flashes
+without an error and then never boots: `invalid magic byte (nothing flashed here?)`, `No bootable app partitions in the partition
+table`; the app lands inside the NVS area. `firmware/tools/check_shared.py` checks this. The consequence is that NVS stays at the
+usual 20 KB (4 usable pages, one blob up to about 4 KB). Settings use roughly half of it; the hardware profile is under 1.2 KB per
+copy, and `hwprofile.cpp` refuses (`err: "storage"`) or rolls back instead of claiming a profile it could not store.
+
+Switching an existing meter to this table (or recovering a meter that does not boot): **erase the whole flash once** (Arduino IDE:
+Tools > *Erase All Flash Before Sketch Upload* > Enabled, upload, then set it back to Disabled; or `esptool erase_flash`). The meter
+then has to be paired again. The LittleFS partition moves and is formatted (buffered readings are lost).
 
 Reference core: Arduino-ESP32 **3.3.5** (used on the hardware). Also compiles on 3.3.12 and 2.0.17. Libraries: ArduinoJson 7.4.2, WebSockets 2.7.3. The only API that differs between the cores is the RGB LED call (`rgbLedWrite` on 3.x, `neopixelWrite` on 2.0.x), handled in `led.cpp`, plus the ESP-NOW receive-callback signature (handled in `mesh.cpp`).
 
@@ -202,3 +226,49 @@ The sensor sits behind a small `Sensor` interface (`begin()`, `channels()`, `rea
 
 - The `control` task never touches the network, so a stuck TLS handshake or HTTP call cannot stop limit enforcement.
 - `net` and `web` report a heartbeat; `loop()` restarts the meter if one is stuck (net: 3 min, web: 1 min). Relay state, trip latch and session survive the restart (NVS).
+
+
+## I2C faults: what the meter does when a device goes away
+
+The I2C bus is shared by the rbAmp module(s), the relay board(s), the DS3231 clock and the SHT sensors (`i2cbus.cpp`, one
+lock). Nothing needs a restart:
+
+| Device | What happens when it disconnects / loses power | Recovery |
+|---|---|---|
+| rbAmp module | reads fail: after `sensor.timeout_s` (default 10 s) one `sensor_error` event and the configured action (run / hold / end session); with several modules one missing module fails the whole read | reads continue every cycle, the first good one sends `sensor_ok`. After 5 s of silence the module is forgotten and probed again every 5 s (`rbamp::begin()`): variant, CHANNELS table and clamp models are checked / written again. A restart of the module inside an energy period is detected from its uptime (period discarded, models written again) |
+| relay board (MCP23017 / XL9535) | writes fail: one `relay_error` event; the other boards are still written | the state **and the pin directions** are written every 2 s and on every change, so a board that lost power or was plugged in after the start works again by itself (`relay_ok`). PCF8574: the byte is the state |
+| SHT sensor | no value for that sensor | read again every poll cycle |
+| DS18B20 | not found at start-up: searched for again every minute | — |
+| a device holding SDA low (brownout in the middle of a byte) | every transaction would time out | **bus recovery** (`i2cbus.cpp`): after 3 failures that are not a plain NACK, or when SDA is low on an idle bus (checked every second), the Wire driver stops, SCL is clocked up to 9 times, a STOP is sent and Wire restarts; at most once per 2 s. A device that is simply absent (NACK) never triggers it. `info.i2c_recov` counts the recoveries |
+
+Host tests: `firmware/tools/i2c_test` (the real `relays.cpp` and `i2cbus.cpp` against fake expanders / a fake Wire).
+
+
+## Zero, Tare and the sensor check (both sketches, per channel)
+
+Specification: [protocol.md §13](protocol.md). The server stores a zero and a tare per channel and sends them in the config
+(`ch[i].zero` / `ch[i].tare`, `tare_limits`); the meter keeps them with its config.
+
+- **Zero** is subtracted right after every sensor read (`sc::applyZero` in `src/sensorcheck.h`): `a' = max(0, a - zero.a)`,
+  `w' = max(0, w - zero.w)`, no current = no power. Everything after the read (readings, DRDY frames, session summary, limits,
+  history) sees the corrected values. rbAmp: the energy of a period uses the corrected average power. PZEM: the energy register is
+  the source of truth and is not corrected (only current / power).
+- **Tare** does not change what is recorded. With `tare_limits` the meter compares the **tared** values with its limits: max current
+  (`a - tare.a`) and the session kWh. rbAmp counts the tare's share per session slot (`SessionState.tareKwh`, per channel, summed in
+  Shared mode: `min(power, tare.w) x time`, saved every 5 minutes for sessions that have a tare); the session progress then carries
+  `kwh_t`. PZEM keeps its existing accounting (`tare.w x time`).
+- **Sensor check** (`sensor_check` command, event `sensor_check`): `sc::Check` collects the RAW values of one channel, **one reading per
+  second, for at least 10 readings and 10 s**; a check that cannot collect them within 60 s ends as failed (`why: sensor`). One check
+  at a time (`busy`), only with a working sensor (`no_sensor`), channel must exist (`bad_channel`). The relay and the sessions are not
+  touched. The server judges the result (stability, magnitude) and decides.
+- Host test: `firmware/tools/sensorcheck_test` (collector timing / statistics / timeout, zero and tare maths).
+
+## Over-the-air update and the firmware tag (both sketches)
+
+`src/ota.cpp` / `ota.h` / `otatag.h` are the same in both sketches. The image holds the constant `PMFWTAG|<FW_TYPE>|<FW_VERSION>|<HW_NAME>|` (it is
+sent in `caps.ota.tag`, so the linker keeps it): the server reads type / version / hardware from it when a zip is uploaded and the meter
+checks it again while downloading. The `ota` command (docs/protocol.md §14.3) ends the sessions, switches the relays off and downloads the image
+in a task (12 KB stack) from the paired server; a failure leaves the running firmware untouched. The new firmware is confirmed when the
+server answers its hello (`OTA_CONFIRM_MS`, default 120 s); a firmware that does not get there, or reboots 3 times unconfirmed, switches back to the previous
+slot (NVS namespace `ota`: `prev`, `try`, `boots`, `rb`). The partition table must stay the one of `partitions.csv` (two 6 MB app slots): a changed
+table can only be flashed by USB. `FW_TYPE` of the PZEM sketch is `pzem-ac` / `pzem-dc` (plain string literals, the tag needs them).
