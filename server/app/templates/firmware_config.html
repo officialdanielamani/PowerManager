@@ -220,6 +220,10 @@
   });
   form.addEventListener('input', renumber);
   form.addEventListener('change', function (e) {
+    if (e.target.classList.contains('g-d')) {   // another driver: its number of outputs (the board has 16, not the 4 of the board before)
+      var rr = e.target.closest('tr'), cap = DRIVERS[e.target.value] && DRIVERS[e.target.value][1];
+      if (rr && cap) rr.querySelector('.g-n').value = cap;
+    }
     var tr = e.target.closest('#gChannels tr');
     if (tr && e.target.classList.contains('g-rb')) { tr.dataset.rb = e.target.value; tr.dataset.ro = 1; }
     else if (tr && e.target.classList.contains('g-ro')) tr.dataset.ro = e.target.value;

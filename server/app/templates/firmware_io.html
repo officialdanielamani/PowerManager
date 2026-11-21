@@ -193,7 +193,7 @@
     if (d.board != null) P.boards[+d.board] = num(t.value);
     else if (d.rdrv != null) {
       var r = P.relays[+d.rdrv]; r.drv = t.value; r.addr = r.drv === 'gpio' ? 0 : (addrList(r.drv).indexOf(r.addr) >= 0 ? r.addr : 0x20);
-      r.n = Math.min(num(r.n) || 1, MAXOUT[r.drv]);
+      r.n = MAXOUT[r.drv];   // a new driver: all its outputs (the board has 16, not the 4 of the board before); the field can lower it
     } else if (d.raddr != null) P.relays[+d.raddr].addr = num(t.value);
     else if (d.rn != null) {
       var rr = P.relays[+d.rn]; rr.n = num(t.value) || 0;
