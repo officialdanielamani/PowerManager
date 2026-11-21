@@ -4,6 +4,7 @@ from app.models import Command, Device
 from app.services import auxcfg, devconfig, ingest, settings
 
 from .conftest import FakeConn
+from .test_access import _meter
 from .test_multichannel import CAPS, _pair_mc
 from .test_pairing import _code
 
@@ -44,7 +45,7 @@ def test_schedule_and_event_config(app, admin):
         assert a0["mode"] == "schedule" and a0["sched"] == [{"on": True, "start": 1080, "end": 1439, "days": 127},
                                                              {"on": True, "start": 60, "end": 120, "days": 32}]
         assert a0["override"] is False and a0["else"] == "off"
-        assert a1["event"] == {"src": "temp", "idx": 1, "cmp": "over", "value": 50.0, "on": True}
+        assert a1["events"] == [{"src": "temp", "idx": 1, "cmp": "over", "value": 50.0}] and a1["ev_on"] is True
         assert a2["mode"] == "manual"
         assert auxcfg.describe(d.cfg["aux"][1], d) == "Event: ON while Temperature T2 ≥ 50.0 °C"
         assert "Every day 18:00-23:59" in auxcfg.describe(d.cfg["aux"][0], d)
@@ -122,8 +123,8 @@ def test_aux_dates_any_channel_and_flags(app, admin):
         d = db.session.get(Device, pk)
         a0, a1, a2 = devconfig.to_device(d.cfg, 1)["cfg"]["aux"]
         assert len(a0["sched"]) == 14 and a0["sched"][13] == {"on": True, "start": 1200, "end": 120, "date": [0, 12, 25]}
-        assert a1["event"] == {"src": "watt", "idx": 254, "cmp": "over", "value": 100.0, "on": True}
-        assert a2["event"] == {"src": "server", "idx": 0, "active": True, "on": False}
+        assert a1["events"] == [{"src": "watt", "idx": 254, "cmp": "over", "value": 100.0}] and a1["ev_on"] is True
+        assert a2["events"] == [{"src": "server", "idx": 0, "active": True}] and a2["ev_on"] is False
         assert "12-25 every year" in auxcfg.describe(d.cfg["aux"][0], d)
         assert "any channel" in auxcfg.describe(d.cfg["aux"][1], d)
         assert auxcfg.describe(d.cfg["aux"][2], d) == "Event: OFF while No server / internet"
@@ -164,9 +165,58 @@ def test_ups_input_and_battery_event(app, admin):
     with app.app_context():
         d = db.session.get(Device, pk)
         a0, a1, _ = devconfig.to_device(d.cfg, 1)["cfg"]["aux"]
-        assert a0["event"] == {"src": "ups", "idx": 0, "active": True, "on": True}
-        assert a1["event"] == {"src": "bat", "idx": 0, "cmp": "under", "value": 20.0, "on": False}
+        assert a0["events"] == [{"src": "ups", "idx": 0, "active": True}] and a0["ev_on"] is True
+        assert a1["events"] == [{"src": "bat", "idx": 0, "cmp": "under", "value": 20.0}] and a1["ev_on"] is False
         assert auxcfg.describe(d.cfg["aux"][1], d) == "Event: OFF while Battery % ≤ 20.0 %"
     text, errors, _ = cfggen.generate({"meter": "pzem_ac", "pin_sda": 8, "pin_scl": 9, "pin_led": 48, "pin_pzem_rx": 5,
                                        "pin_pzem_tx": 6, "ups": True, "pin_ups": 2, "ups_level": "HIGH"})
     assert not errors and "#define UPS_ENABLE 1" in text and "#define UPS_ACTIVE_LEVEL HIGH" in text
+
+
+def test_event_or_conditions(app, admin):
+    """Up to 3 conditions per AUX relay, OR-ed, one ON / OFF action; the old single "event" is converted."""
+    from app.services import auxcfg
+    with app.app_context():
+        pk = _meter("Dryer A", "AAAA1111")
+        db.session.get(Device, pk).caps = {"channels": 1, "aux": 2, "tamper": True, "temp": 1}
+        db.session.commit()
+    form = _form(**{"aux_mode_0": "event", "aux_ev_on_0": "on",
+                    "aux_ev_src_0": "wifi", "aux_ev_active_0": "active",
+                    "aux_ev_use_0_1": "on", "aux_ev_src_0_1": "tamper", "aux_ev_active_0_1": "active",
+                    "aux_ev_use_0_2": "on", "aux_ev_src_0_2": "session", "aux_ev_running_0_2": "ended",
+                    "aux_ev_src_0_3": "temp"})   # a 4th set of fields is ignored
+    assert admin.post(f"/meters/{pk}/configure", data=form).status_code in (200, 302)
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        a0 = d.cfg["aux"][0]
+        assert a0["events"] == [{"src": "wifi", "idx": 0, "active": True}, {"src": "tamper", "idx": 0, "active": True},
+                                {"src": "session", "idx": 0, "running": False}]
+        doc = auxcfg.to_device(d.cfg["aux"])[0]
+        assert doc["events"] == a0["events"] and doc["ev_on"] is True and "event" not in doc
+        assert auxcfg.describe(a0, d) == "Event: ON while No Wi-Fi OR Tamper OR the session is ended"
+    # the second box unticked: it is removed
+    form = _form(**{"aux_mode_0": "event", "aux_ev_src_0": "wifi", "aux_ev_active_0": "active", "aux_ev_on_0": "off",
+                    "aux_ev_src_0_1": "tamper"})
+    admin.post(f"/meters/{pk}/configure", data=form)
+    with app.app_context():
+        a0 = db.session.get(Device, pk).cfg["aux"][0]
+        assert len(a0["events"]) == 1 and a0["ev_on"] is False
+    # an event relay needs a condition
+    r = admin.post(f"/meters/{pk}/configure", data=_form(**{"aux_mode_0": "event", "aux_ev_src_0": ""}))
+    assert b"choose what the relay reacts to" in r.data
+    # older stored config: one "event" with its own "on"
+    legacy = auxcfg.norm({"mode": "event", "event": {"src": "temp", "idx": 1, "cmp": "over", "value": 50, "on": False}})
+    assert legacy["events"] == [{"src": "temp", "idx": 1, "cmp": "over", "value": 50}] and legacy["ev_on"] is False and "event" not in legacy
+    assert auxcfg.to_device([{"mode": "event", "event": {"src": "temp", "idx": 1, "cmp": "over", "value": 50, "on": False}}])[0]["ev_on"] is False
+
+
+def test_save_returns_to_configuration(app, admin):
+    with app.app_context():
+        pk = _meter("Dryer A", "AAAA1111")
+    admin.post(f"/meters/{pk}/configure", data=_form())          # a change: the page waits for the meter, then goes back to itself
+    with app.app_context():
+        d = db.session.get(Device, pk)
+        d.cfg_ver_applied = d.cfg_ver_wanted                    # the meter confirmed it
+        db.session.commit()
+    r = admin.post(f"/meters/{pk}/configure", data=_form())      # nothing changed
+    assert r.status_code == 302 and r.headers["Location"].endswith(f"/meters/{pk}/configure")

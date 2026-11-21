@@ -341,3 +341,12 @@ and hardware from the tag inside the image and refuses a file without it. Needs 
   hold BOOT, press RESET.
 
 Notification **Meter restart** (on by default): hardware profile restart pending, firmware update restarting / updated / failed / rolled back.
+
+## AUX relay events: up to 3 conditions (OR)
+
+In *Configuration → AUX relays*, mode **Event** has one line "While **any** of these is true the relay is ON / OFF (otherwise the opposite)" and up to
+**3 conditions** joined by **— OR —** (e.g. *No Wi-Fi* OR *Tamper* OR *Session ended*). *Add condition (OR)* shows the next line; untick a line to remove it.
+Each condition has its own source, channel / sensor, comparison and value (hysteresis per condition). The meter evaluates them itself (also offline).
+The Info page shows them as `Event: ON while No Wi-Fi OR Tamper OR the session is ended`. Older single events are converted to one condition.
+
+After **Save** (any tab) the page returns to the Configuration page (the same tab is reopened), not to the meter Info page.

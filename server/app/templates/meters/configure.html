@@ -317,7 +317,6 @@
         The meter runs the automation itself, so it keeps working while offline. <em>Enable override</em>: the ON / OFF buttons still work and win until the automation changes state again.</p>
       {% for a in aux_cfg %}{% set j = loop.index0 %}
       {% set mode = val('aux_mode_' ~ j, a.get('mode', 'manual')) %}
-      {% set ev = a.get('event') or {} %}
       <div class="border rounded p-2 mb-2 pm-aux" data-aux="{{ j }}">
         <div class="d-flex flex-wrap gap-2 align-items-center">
           <span class="fw-semibold" style="min-width:110px">AUX{{ j + 1 }}{% if aux_relays.get(j) %} <span class="fw-normal small text-body-secondary">· {{ aux_relays.get(j) }}</span>{% endif %}</span>
@@ -364,47 +363,60 @@
             <select class="form-select form-select-sm" style="width:80px" name="aux_else_{{ j }}"><option value="off" {{ 'selected' if els == 'off' }}>OFF</option><option value="on" {{ 'selected' if els == 'on' }}>ON</option></select>
             <span class="text-body-secondary">· the first matching line wins · an end before the start runs over midnight · end 23:59 = to midnight</span></div>
         </div>
-        {# event #}
-        {% set esrc = val('aux_ev_src_' ~ j, ev.get('src', '')) %}
-        {% if esrc not in aux_sources %}{% set esrc = (aux_sources|list)[0] %}{% endif %}
-        {% set eidx = val('aux_ev_idx_' ~ j, ev.get('idx', 0))|string %}
+        {# event: up to 3 conditions, OR-ed #}
         {% set indep = d.is_mc and d.mc_mode == 'independent' %}
-        <div class="mt-2 pm-aux-event d-flex flex-wrap gap-2 align-items-center small">
-          <span>When</span>
-          <select class="form-select form-select-sm pm-aux-src" style="width:190px" name="aux_ev_src_{{ j }}">
-            {% for k, label in aux_sources.items() %}<option value="{{ k }}" {{ 'selected' if esrc == k }}>{{ label }}</option>{% endfor %}
-          </select>
-          <select class="form-select form-select-sm pm-aux-idx" style="width:190px" name="aux_ev_idx_{{ j }}">
-            {% for t in range(n_temp) %}<option data-src="temp hum" value="{{ t }}" {{ 'selected' if eidx == t|string and esrc in ('temp', 'hum') }}>T{{ t + 1 }}</option>{% endfor %}
-            {% if d.is_mc %}
-              <option data-src="amp watt trip{{ ' kwh session' if indep }}" value="254" {{ 'selected' if eidx == '254' }}>Any channel</option>
-              <option data-src="amp watt" value="255" {{ 'selected' if eidx == '255' and esrc in ('amp', 'watt') }}>All channels together</option>
-              {% for c in range(n_channels) %}<option data-src="amp watt trip" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('amp', 'watt', 'trip') }}>{{ d.channel_name(c) }}</option>{% endfor %}
-              {% if indep %}
-                {% for c in range(n_channels) %}<option data-src="kwh session" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('kwh', 'session') }}>Session of {{ d.channel_name(c) }}</option>{% endfor %}
-              {% else %}<option data-src="kwh session" value="0">Meter session</option>{% endif %}
-            {% else %}
-              <option data-src="amp watt trip" value="0">The measured line</option>
-              <option data-src="kwh session" value="0">The session</option>
-            {% endif %}
-          </select>
-          {% set ecmp = val('aux_ev_cmp_' ~ j, ev.get('cmp', 'over')) %}
-          <span class="pm-aux-num d-flex gap-2 align-items-center">
-            <span>is</span>
-            <select class="form-select form-select-sm" style="width:80px" name="aux_ev_cmp_{{ j }}"><option value="over" {{ 'selected' if ecmp == 'over' }}>≥</option><option value="under" {{ 'selected' if ecmp == 'under' }}>≤</option></select>
-            <input class="form-control form-control-sm" style="width:100px" inputmode="decimal" name="aux_ev_value_{{ j }}" value="{{ val('aux_ev_value_' ~ j, ev.get('value', 50)) }}">
-            <span class="pm-aux-unit text-body-secondary"></span>
-          </span>
-          {% set erun = val('aux_ev_running_' ~ j, 'running' if ev.get('running', true) else 'ended') %}
-          <span class="pm-aux-sess d-flex gap-2 align-items-center"><span>is</span>
-            <select class="form-select form-select-sm" style="width:110px" name="aux_ev_running_{{ j }}"><option value="running" {{ 'selected' if erun == 'running' }}>running</option><option value="ended" {{ 'selected' if erun == 'ended' }}>ended</option></select></span>
-          {% set eact = val('aux_ev_active_' ~ j, 'active' if ev.get('active', true) else 'clear') %}
-          <span class="pm-aux-flag d-flex gap-2 align-items-center"><span>is</span>
-            <select class="form-select form-select-sm" style="width:120px" name="aux_ev_active_{{ j }}"><option value="active" {{ 'selected' if eact == 'active' }}>active</option><option value="clear" {{ 'selected' if eact == 'clear' }}>not active</option></select></span>
-          {% set eon = val('aux_ev_on_' ~ j, 'on' if ev.get('on', true) else 'off') %}
-          <span>the relay is</span>
-          <select class="form-select form-select-sm" style="width:80px" name="aux_ev_on_{{ j }}"><option value="on" {{ 'selected' if eon == 'on' }}>ON</option><option value="off" {{ 'selected' if eon == 'off' }}>OFF</option></select>
-          <span class="text-body-secondary">(otherwise the opposite)</span>
+        {% set evs = a.get('events') or [] %}
+        <div class="mt-2 pm-aux-event small">
+          {% set eon = val('aux_ev_on_' ~ j, 'on' if a.get('ev_on', true) else 'off') %}
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-2"><span>While <strong>any</strong> of these is true the relay is</span>
+            <select class="form-select form-select-sm" style="width:80px" name="aux_ev_on_{{ j }}"><option value="on" {{ 'selected' if eon == 'on' }}>ON</option><option value="off" {{ 'selected' if eon == 'off' }}>OFF</option></select>
+            <span class="text-body-secondary">(otherwise the opposite) · up to {{ aux_ev_max }} conditions, joined by OR</span></div>
+          {% for k in range(aux_ev_max) %}
+          {% set sfx = '' if k == 0 else '_' ~ k %}
+          {% set ev = evs[k] if evs|length > k else {} %}
+          {% set esrc = val('aux_ev_src_' ~ j ~ sfx, ev.get('src', '')) %}
+          {% if esrc not in aux_sources %}{% set esrc = (aux_sources|list)[0] %}{% endif %}
+          {% set eidx = val('aux_ev_idx_' ~ j ~ sfx, ev.get('idx', 0))|string %}
+          {% if k %}<div class="text-center fw-semibold text-body-secondary pm-aux-or {{ '' if (form and form.get('aux_ev_use_' ~ j ~ sfx) == 'on') or (not form and ev) else 'd-none' }}" data-or="{{ k }}">— OR —</div>{% endif %}
+          <div class="pm-aux-ev d-flex flex-wrap gap-2 align-items-center {{ 'd-none' if k and not ((form and form.get('aux_ev_use_' ~ j ~ sfx) == 'on') or (not form and ev)) }} mb-1" data-ev="{{ k }}">
+            {% if k %}<div class="form-check mb-0"><input class="form-check-input pm-aux-evuse" type="checkbox" name="aux_ev_use_{{ j }}{{ sfx }}" id="aux_ev_use_{{ j }}{{ sfx }}" {{ 'checked' if (form and form.get('aux_ev_use_' ~ j ~ sfx) == 'on') or (not form and ev) }}>
+              <label class="form-check-label" for="aux_ev_use_{{ j }}{{ sfx }}" style="min-width:1.6em">{{ k + 1 }}.</label></div>
+            {% else %}<span style="min-width:1.6em">1.</span>{% endif %}
+            <span>When</span>
+            <select class="form-select form-select-sm pm-aux-src" style="width:190px" name="aux_ev_src_{{ j }}{{ sfx }}">
+              {% for kk, label in aux_sources.items() %}<option value="{{ kk }}" {{ 'selected' if esrc == kk }}>{{ label }}</option>{% endfor %}
+            </select>
+            <select class="form-select form-select-sm pm-aux-idx" style="width:190px" name="aux_ev_idx_{{ j }}{{ sfx }}">
+              {% for t in range(n_temp) %}<option data-src="temp hum" value="{{ t }}" {{ 'selected' if eidx == t|string and esrc in ('temp', 'hum') }}>T{{ t + 1 }}</option>{% endfor %}
+              {% if d.is_mc %}
+                <option data-src="amp watt trip{{ ' kwh session' if indep }}" value="254" {{ 'selected' if eidx == '254' }}>Any channel</option>
+                <option data-src="amp watt" value="255" {{ 'selected' if eidx == '255' and esrc in ('amp', 'watt') }}>All channels together</option>
+                {% for c in range(n_channels) %}<option data-src="amp watt trip" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('amp', 'watt', 'trip') }}>{{ d.channel_name(c) }}</option>{% endfor %}
+                {% if indep %}
+                  {% for c in range(n_channels) %}<option data-src="kwh session" value="{{ c }}" {{ 'selected' if eidx == c|string and esrc in ('kwh', 'session') }}>Session of {{ d.channel_name(c) }}</option>{% endfor %}
+                {% else %}<option data-src="kwh session" value="0">Meter session</option>{% endif %}
+              {% else %}
+                <option data-src="amp watt trip" value="0">The measured line</option>
+                <option data-src="kwh session" value="0">The session</option>
+              {% endif %}
+            </select>
+            {% set ecmp = val('aux_ev_cmp_' ~ j ~ sfx, ev.get('cmp', 'over')) %}
+            <span class="pm-aux-num d-flex gap-2 align-items-center">
+              <span>is</span>
+              <select class="form-select form-select-sm" style="width:80px" name="aux_ev_cmp_{{ j }}{{ sfx }}"><option value="over" {{ 'selected' if ecmp == 'over' }}>≥</option><option value="under" {{ 'selected' if ecmp == 'under' }}>≤</option></select>
+              <input class="form-control form-control-sm" style="width:100px" inputmode="decimal" name="aux_ev_value_{{ j }}{{ sfx }}" value="{{ val('aux_ev_value_' ~ j ~ sfx, ev.get('value', 50)) }}">
+              <span class="pm-aux-unit text-body-secondary"></span>
+            </span>
+            {% set erun = val('aux_ev_running_' ~ j ~ sfx, 'running' if ev.get('running', true) else 'ended') %}
+            <span class="pm-aux-sess d-flex gap-2 align-items-center"><span>is</span>
+              <select class="form-select form-select-sm" style="width:110px" name="aux_ev_running_{{ j }}{{ sfx }}"><option value="running" {{ 'selected' if erun == 'running' }}>running</option><option value="ended" {{ 'selected' if erun == 'ended' }}>ended</option></select></span>
+            {% set eact = val('aux_ev_active_' ~ j ~ sfx, 'active' if ev.get('active', true) else 'clear') %}
+            <span class="pm-aux-flag d-flex gap-2 align-items-center"><span>is</span>
+              <select class="form-select form-select-sm" style="width:120px" name="aux_ev_active_{{ j }}{{ sfx }}"><option value="active" {{ 'selected' if eact == 'active' }}>active</option><option value="clear" {{ 'selected' if eact == 'clear' }}>not active</option></select></span>
+          </div>
+          {% endfor %}
+          <button type="button" class="btn btn-sm btn-outline-secondary pm-aux-evadd mt-1"><i class="bi bi-plus-lg me-1"></i>Add condition (OR)</button>
+          <span class="text-body-secondary ms-1">untick a condition to remove it</span>
         </div>
       </div>
       {% endfor %}
@@ -505,7 +517,7 @@
 {% block scripts %}
 <script>
 (function () {
-  var actionUrl = "{{ url_for('meters.action', pk=d.id) }}", infoUrl = "{{ url_for('meters.info', pk=d.id) }}";
+  var actionUrl = "{{ url_for('meters.action', pk=d.id) }}", infoUrl = "{{ url_for('meters.configure', pk=d.id) }}";   // after a save: back to this page (the same tab is reopened)
   // ---- Tune: zero / tare per channel (docs/protocol.md §13); calibration is greyed out until it exists
   (function () {
     var BASE = "{{ url_for('meters.calibration', pk=d.id) }}";
@@ -609,19 +621,29 @@
     box.querySelector('.pm-aux-sched').classList.toggle('d-none', mode !== 'schedule');
     box.querySelector('.pm-aux-event').classList.toggle('d-none', mode !== 'event');
     box.querySelector('.pm-aux-auto').classList.toggle('d-none', mode === 'manual');
-    var src = box.querySelector('.pm-aux-src').value, idx = box.querySelector('.pm-aux-idx'), firstVisible = null, selVisible = false;
-    Array.prototype.forEach.call(idx.options, function (o) {
-      var show = (o.dataset.src || '').split(' ').indexOf(src) >= 0;
-      o.hidden = !show; o.disabled = !show;
-      if (show && !firstVisible) firstVisible = o;
-      if (show && o.selected) selVisible = true;
+    box.querySelectorAll('.pm-aux-ev').forEach(function (ev) {   // conditions: show the fields of the chosen source
+      var use = ev.querySelector('.pm-aux-evuse'), k = ev.dataset.ev;
+      if (use) {
+        ev.classList.toggle('d-none', !use.checked);
+        var or = box.querySelector('.pm-aux-or[data-or="' + k + '"]');
+        if (or) or.classList.toggle('d-none', !use.checked);
+      }
+      var src = ev.querySelector('.pm-aux-src').value, idx = ev.querySelector('.pm-aux-idx'), firstVisible = null, selVisible = false;
+      Array.prototype.forEach.call(idx.options, function (o) {
+        var show = (o.dataset.src || '').split(' ').indexOf(src) >= 0;
+        o.hidden = !show; o.disabled = !show;
+        if (show && !firstVisible) firstVisible = o;
+        if (show && o.selected) selVisible = true;
+      });
+      if (!selVisible && firstVisible) firstVisible.selected = true;
+      var flag = FLAGS.indexOf(src) >= 0;
+      idx.classList.toggle('d-none', !firstVisible);
+      ev.querySelector('.pm-aux-num').classList.toggle('d-none', src === 'session' || flag);
+      ev.querySelector('.pm-aux-sess').classList.toggle('d-none', src !== 'session');
+      ev.querySelector('.pm-aux-flag').classList.toggle('d-none', !flag);
+      ev.querySelector('.pm-aux-unit').textContent = UNITS[src] || '';
     });
-    if (!selVisible && firstVisible) firstVisible.selected = true;
-    var flag = FLAGS.indexOf(src) >= 0;
-    idx.classList.toggle('d-none', !firstVisible);
-    box.querySelector('.pm-aux-num').classList.toggle('d-none', src === 'session' || flag);
-    box.querySelector('.pm-aux-sess').classList.toggle('d-none', src !== 'session');
-    box.querySelector('.pm-aux-flag').classList.toggle('d-none', !flag);
+    box.querySelector('.pm-aux-evadd').classList.toggle('d-none', !box.querySelector('.pm-aux-ev.d-none'));
     box.querySelectorAll('.pm-aux-row').forEach(function (row) {
       var k = row.querySelector('.pm-aux-kind'), byDate = k && k.value === 'date';
       row.querySelector('.pm-aux-days').classList.toggle('d-none', !!byDate);
@@ -629,10 +651,16 @@
       if (dt) dt.classList.toggle('d-none', !byDate);
     });
     box.querySelector('.pm-aux-add').classList.toggle('d-none', !box.querySelector('.pm-aux-row.d-none'));
-    box.querySelector('.pm-aux-unit').textContent = UNITS[src] || '';
   }
   document.querySelectorAll('.pm-aux').forEach(function (box) {
     syncAux(box);
+    box.querySelector('.pm-aux-evadd').addEventListener('click', function () {
+      var row = box.querySelector('.pm-aux-ev.d-none');
+      if (!row) return;
+      var use = row.querySelector('.pm-aux-evuse');
+      use.checked = true;
+      syncAux(box);
+    });
     box.querySelector('.pm-aux-add').addEventListener('click', function () {
       var row = box.querySelector('.pm-aux-row.d-none');
       if (!row) return;

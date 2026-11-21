@@ -73,6 +73,33 @@ int main() {
   // Tamper
   assert(!on(3)); in.tamper = true; step(T(60, 12, 4)); assert(on(3));
   in.tamper = false; step(T(60, 12, 10)); assert(!on(3));
+  // Several conditions, OR-ed (max 3): relay ON while no Wi-Fi OR tamper OR a hot sensor
+  in = auxrelay::Inputs(); in.nch = 1; in.readOk = true;
+  deserializeJson(d, R"([
+    {"i":0,"mode":"event","ev_on":true,"events":[{"src":"wifi","active":true},{"src":"tamper","active":true},{"src":"temp","idx":1,"cmp":"over","value":50}]},
+    {"i":1,"mode":"event","ev_on":false,"events":[{"src":"wifi","active":true},{"src":"session","running":false}]},
+    {"i":2,"mode":"event","event":{"src":"tamper","active":true,"on":true}}])");
+  assert(auxrelay::parse(d.as<JsonArrayConst>(), 480, err));
+  auxrelay::commit();
+  g_temp[1] = 20; in.running[0] = true;
+  step(T(70, 12, 0)); assert(!on(1) && on(2) && !on(3));   // nothing true: AUX1 off; AUX2 (OFF while any) is ON; AUX3 off
+  in.noWifi = true; step(T(70, 12, 1)); assert(on(1) && !on(2));
+  in.noWifi = false; step(T(70, 12, 10)); assert(!on(1) && on(2));
+  in.tamper = true; step(T(70, 12, 20)); assert(on(1) && on(3));
+  in.tamper = false; g_temp[1] = 55; step(T(70, 12, 30)); assert(on(1) && !on(3));   // the third condition alone
+  g_temp[1] = 49.5; step(T(70, 12, 40)); assert(on(1));   // hysteresis of that condition only
+  g_temp[1] = 48.5; step(T(70, 12, 50)); assert(!on(1));
+  in.running[0] = false; step(T(70, 13, 0)); assert(!on(2));   // session ended = the second condition of AUX2
+  g_temp[1] = NAN; step(T(70, 13, 10)); assert(!on(1));       // unknown and nothing true: keeps its state (off)
+  g_temp[1] = 60; step(T(70, 13, 20)); assert(on(1));
+  g_temp[1] = NAN; step(T(70, 13, 30)); assert(on(1));        // unknown, nothing known true: keeps ON
+  in.tamper = true; step(T(70, 13, 40)); assert(on(1));       // a known true condition wins over an unknown one
+  in.tamper = false; g_temp[1] = 20;
+  // a 4th condition is refused
+  deserializeJson(d, R"([{"i":0,"mode":"event","events":[{"src":"wifi"},{"src":"tamper"},{"src":"server"},{"src":"ups"}]}])");
+  assert(!auxrelay::parse(d.as<JsonArrayConst>(), 480, err) && !strcmp(err, "aux.event"));
+  deserializeJson(d, R"([{"i":0,"mode":"event","events":[]}])");
+  assert(!auxrelay::parse(d.as<JsonArrayConst>(), 480, err));   // event mode needs a condition
   // Disabled meter: everything off
   in.tamper = true; step(T(60, 12, 20)); assert(on(3));
   in.disabled = true; step(T(60, 12, 30)); assert(!on(3));

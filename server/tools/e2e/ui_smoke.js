@@ -140,6 +140,24 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   const text = await page.inputValue('#gText');
   check(/\{\s*1,\s+3,\s+SCT_30A,\s+1,\s+3 \}/.test(text), 'config.h has the relay board + output columns (CH3 = relay board 1, output 3)');
 
+  // ---------------- AUX relay: up to 3 conditions (OR) and "save returns to the configuration"
+  await page.goto(base + '/meters/' + pk + '/configure');
+  await page.click('[data-tab=aux]');
+  await page.selectOption('[name=aux_mode_0]', 'event');
+  const box = page.locator('.pm-aux[data-aux="0"]');
+  check(await box.locator('.pm-aux-ev:not(.d-none)').count() === 1, 'AUX event starts with one condition');
+  await box.locator('.pm-aux-evadd').click();
+  await box.locator('.pm-aux-evadd').click();
+  check(await box.locator('.pm-aux-ev:not(.d-none)').count() === 3 && await box.locator('.pm-aux-evadd:not(.d-none)').count() === 0, 'three conditions (OR) and then no more Add button');
+  await page.selectOption('[name=aux_ev_src_0]', 'wifi');
+  await page.selectOption('[name=aux_ev_src_0_1]', 'tamper').catch(() => {});
+  await page.selectOption('[name=aux_ev_src_0_2]', 'session');
+  await page.click('#saveBtn, button:has-text("Save")');
+  await page.waitForTimeout(3000);
+  await page.waitForURL(/\/configure/, { timeout: 20000 });
+  await page.waitForTimeout(1500);
+  check(page.url().includes('/configure') && !page.url().match(/\/meters\/\d+$/), 'after saving the page stays on the configuration');
+
   // ---------------- Firmware list, OTA update of the simulated meter, USB tab
   await page.goto(base + '/firmware');
   await page.click('text=Add New Firmware');

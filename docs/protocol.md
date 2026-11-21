@@ -353,7 +353,8 @@ Config `aux[i]`:
 
 - `sched`: up to 14 entries `{"on", "start", "end"}` (minutes of the local day) with either `"days"` (bit 0 = Monday
   … bit 6 = Sunday) or `"date": [year, month, day]` (year 0 = every year). First match wins.
-- `event.src`: `temp`, `hum`, `amp`, `watt`, `kwh`, `session`, and new `tamper`, `trip`, `volt`, `wifi`, `server`, and (from 1.1.0, §12) `reboot` = "Wait for Reboot": active during the countdown of a hardware profile change.
+- `events` (event mode): **1 to 3 conditions, OR-ed**, each `{"src", "idx", "cmp", "value", "running" | "active"}`, and `ev_on` (bool): while **any** condition is true the relay is ON (`ev_on` true) or OFF; otherwise the opposite. Unknown conditions (sensor missing, no reading) count as false, but when nothing is true and one is unknown the last state is kept. Hysteresis is per condition. The older single `event` object (with its own `on`) is still accepted by the meter (= one condition, `ev_on` = its `on`); the server sends `events` / `ev_on`. More than 3 conditions, or event mode without a condition, is refused (`aux.event`).
+- condition `src`: `temp`, `hum`, `amp`, `watt`, `kwh`, `session`, and new `tamper`, `trip`, `volt`, `wifi`, `server`, and (from 1.1.0, §12) `reboot` = "Wait for Reboot": active during the countdown of a hardware profile change.
   The new ones are on / off conditions: `"active": true|false` (`wifi` / `server` are active while the link is
   missing). `event.idx`: channel / sensor, `255` = all channels together (amp, watt), `254` = any channel (amp,
   watt, kwh, session, trip).

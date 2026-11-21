@@ -290,7 +290,7 @@ def configure(pk):
             else:
                 db.session.commit()
                 flash("Saved.", "success")
-                return redirect(url_for("meters.info", pk=device.id))
+                return redirect(url_for("meters.configure", pk=device.id))   # stay on the configuration (same tab)
     cfg = device.cfg or devconfig.default_for(device)
     dur = int(cfg.get("dur_min", 1440))
     return render_template("meters/configure.html", d=device, cfg=cfg, errors=errors,
@@ -302,7 +302,7 @@ def configure(pk):
                                        if isinstance(a, dict) and a.get("relay")},
                            n_temp=auxcfg.temp_count(device), aux_sched_max=auxcfg.SCHED_MAX, fw_old=devconfig.fw_outdated(device),
                            mqtt_meter=mqtt_bridge.meter_config(),
-                           aux_sources=auxcfg.sources(device), aux_flags=auxcfg.FLAGS, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
+                           aux_sources=auxcfg.sources(device), aux_ev_max=auxcfg.EV_MAX, aux_flags=auxcfg.FLAGS, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
                            aux_cfg=auxcfg.fit(cfg.get("aux"), devconfig.aux_count(device)),
                            n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
