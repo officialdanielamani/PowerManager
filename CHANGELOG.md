@@ -4,6 +4,7 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 
 ## Unreleased (1.1.0)
 
+- **AUX relay events: up to 3 conditions, OR-ed** (`docs/protocol.md` §8): `events` + `ev_on` instead of one `event`; meter (`auxrelay.cpp`, both sketches, config blob version 3) and server (older configs are converted); Info page text with OR. **Saving the configuration now returns to the Configuration page** instead of the Info page.
 - **Firmware list, OTA update and USB flash from the browser** (design + rules: `docs/protocol.md` §14): Firmware page lists firmware
   (admin: Add New Firmware / Edit / bulk Delete; manager: Info and Flash). The admin uploads the zip of the Arduino IDE export; the server
   keeps the app image and the USB files and reads the firmware **tag** (type / version / hardware) from the image. *Flash* a meter:
