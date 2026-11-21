@@ -62,6 +62,10 @@ Everything about the hardware is in a few tables at the top:
 Example for 2 × rbAmp UI5 + 1 × MCP23017 (10 SSRs + 6 AUX relays) + DS3231 + 2 × DS18B20 + tamper switch:
 [`../examples/config_rbamp_2xUI5_MCP23017.h`](../examples/config_rbamp_2xUI5_MCP23017.h).
 
+`config.h` keeps one-line comments only. The explanation of every other setting (pins, UPS / battery / SHT / DS18B20, timing, link, mesh, offline buffer) is in [`../../docs/firmware.md`](../../docs/firmware.md), section *config.h reference*. The channels table: a line per channel; **relay board + output** is the relay that switches it (board A = 1 … and the output on it, both 0 = no relay); the voltage comes from the first board that has a voltage input (UI* variants); outputs no channel uses are AUX relays, numbered across all relay boards (board A first). A new rbAmp module answers at `0x50`: see *Giving a module its own address* below.
+
+Example with 2 rbAmp (UI5 `0x50` + I7 `0x51`), 8 channels and two XL9535 8-relay boards (A `0x20`, B `0x21`): `RBAMP_BOARDS { 0x50, 0x51 }`, `RELAY_BOARDS { {RELAY_XL9535, 0x20, 8, 1}, {RELAY_XL9535, 0x21, 8, 1} }`, `CHANNELS { {1,1,SCT_100A,1,1}, {1,2,SCT_30A,1,2}, {1,3,SCT_30A,1,3}, {1,4,SCT_30A,1,4}, {1,5,SCT_30A,1,5}, {2,1,SCT_20A,2,1}, {2,2,SCT_20A,2,2}, {2,3,SCT_20A,2,3} }`: outputs 6-8 of board A and 4-8 of board B are AUX relays.
+
 Mistakes in the tables (a board number that does not exist, the same input or relay used twice) stop the
 **compile** with a clear message. At start-up the meter checks the tables against the modules it finds (e.g.
 "CH5: board 1 is an UI2 with 2 input(s): it has no input 5") and prints the channel map:
