@@ -18,7 +18,7 @@ open(os.path.join(out, "net_snippet.cpp"), "w", encoding="utf-8").write('''#incl
 #include "ota.h"
 SerialT Serial;
 static void sendJson(JsonDocument &) {}
-namespace rbamp { uint8_t scan(uint8_t *, uint8_t) { return 0; } bool scanFlooded() { return false; } bool isRbamp(uint8_t) { return true; }
+namespace rbamp { uint8_t scan(uint8_t *, uint8_t) { return 0; } bool scanFlooded() { return false; } bool describe(uint8_t, JsonObject) { return true; } bool isRbamp(uint8_t) { return true; }
                   bool changeAddress(uint8_t, uint8_t, String &) { return true; } }
 namespace control { bool anySessionRunning() { return false; }
                     bool startSensorCheck(uint8_t, uint8_t, const char *&) { return true; } }

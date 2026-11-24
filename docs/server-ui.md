@@ -350,3 +350,5 @@ Each condition has its own source, channel / sensor, comparison and value (hyste
 The Info page shows them as `Event: ON while No Wi-Fi OR Tamper OR the session is ended`. Older single events are converted to one condition.
 
 After **Save** (any tab) the page returns to the Configuration page (the same tab is reopened), not to the meter Info page.
+
+**rbAmp modules found** (Update Device I/O): when the page opens (and with *Read now* / *Scan Address*) the meter scans the bus and sends, for every rbAmp it finds, its identity (variant UI1 … UI7 / I1 … I3, number of current inputs, voltage input, version, uptime, result valid / error) and one live reading: voltage and Hz, and A / W / PF of every input. The rbAmp board chips show the variant next to *found*. A found module that is not in the profile is marked *not in the profile*. (`res.modules` of the `i2c_scan` ack, protocol §12.)

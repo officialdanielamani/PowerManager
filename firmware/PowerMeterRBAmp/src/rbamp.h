@@ -6,6 +6,7 @@
 //   - energy: CMD_LATCH_PERIOD (0x27) closes a period; average power x master dt (the module keeps no kWh)
 #pragma once
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "app_state.h"
 
 namespace rbamp {
@@ -40,6 +41,7 @@ bool periodStart();
 bool periodFinish(float avgW[MC_MAX_CH], bool &valid);
 
 bool isRbamp(uint8_t addr);                        // an rbAmp answers at this address
+bool describe(uint8_t addr, JsonObject o);  // identity + one live reading of a module (scan result); false = not an rbAmp
 bool scanFlooded();  // the last scan: more than 16 addresses ACKed (the list was verified by reading)
 uint8_t scan(uint8_t *found, uint8_t max);         // I2C addresses 0x08..0x77 that answer (returns how many)
 void applyClamps();                                // hardware profile: clamp models changed live (tables already reloaded)

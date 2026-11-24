@@ -771,6 +771,13 @@ static void fillScanRes(JsonObject o, void *p) {
     all.add(r->found[i]);
     if (r->found[i] >= 0x50 && r->found[i] <= 0x57 && rbamp::isRbamp(r->found[i])) rb.add(r->found[i]);
   }
+  JsonArray mods = o["modules"].to<JsonArray>();  // identity + live data of every rbAmp found (Update Device I/O page)
+  for (uint8_t i = 0; i < r->n; i++) {
+    if (r->found[i] < 0x50 || r->found[i] > 0x57) continue;
+    JsonObject m = mods.add<JsonObject>();
+    m["addr"] = r->found[i];
+    if (!rbamp::describe(r->found[i], m)) mods.remove(mods.size() - 1);
+  }
 }
 
 static void goOnline() {

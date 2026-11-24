@@ -46,6 +46,10 @@
       <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="addBoard"><i class="bi bi-plus-lg"></i> Board</button>
     </div></div>
 
+  <div class="card mb-3"><div class="card-header fw-semibold d-flex align-items-center">rbAmp modules found <span class="small fw-normal text-body-secondary ms-2">identity and a live reading (from Scan Address)</span>
+      <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="readBtn"><i class="bi bi-arrow-clockwise me-1"></i>Read now</button></div>
+    <div class="card-body small" id="modules"><span class="text-body-secondary">Reading the modules…</span></div></div>
+
   <div class="card mb-3"><div class="card-header fw-semibold">Relay boards</div>
     <div class="card-body">
       <div class="table-responsive"><table class="table table-sm align-middle mb-1">
@@ -124,13 +128,33 @@
     return found.indexOf(a) >= 0 ? '<span class="badge text-bg-success">found</span>' : '<span class="badge text-bg-danger">not found</span>';
   }
 
+  var modules = {};      // rbAmp modules of the last scan: address -> {variant, inputs, volt, v, hz, a[], w[], pf[], ver, up, valid, err}
+  function modLine(m) {
+    return PM.esc(m.variant) + ' · ' + m.inputs + ' input' + (m.inputs === 1 ? '' : 's') + (m.volt ? ' · ' + (+m.v).toFixed(1) + ' V ' + (m.hz || '') + ' Hz' : ' · no voltage input');
+  }
+  function renderModules() {
+    var addrs = Object.keys(modules).map(Number).sort(function (a, b) { return a - b; });
+    if (found === null) { $('modules').innerHTML = '<span class="text-body-secondary">' + (online ? 'Reading the modules…' : 'The meter is offline.') + '</span>'; return; }
+    if (!addrs.length) { $('modules').innerHTML = '<span class="text-body-secondary">No rbAmp module answered (check SDA / SCL, 5 V and the address).</span>'; return; }
+    $('modules').innerHTML = addrs.map(function (a) {
+      var m = modules[a], inP = P.boards.indexOf(a) >= 0;
+      var head = '<div class="d-flex flex-wrap align-items-center gap-2 mb-1"><code>' + hex(a) + '</code><strong>' + modLine(m) + '</strong>' +
+        (inP ? '<span class="badge text-bg-success">in the profile as B' + (P.boards.indexOf(a) + 1) + '</span>' : '<span class="badge text-bg-warning">not in the profile</span>') +
+        (m.err ? '<span class="badge text-bg-danger">module error</span>' : (m.valid ? '' : '<span class="badge text-bg-secondary">no valid result yet</span>')) +
+        '<span class="text-body-secondary">version 0x' + ('0' + (m.ver >>> 0).toString(16)).slice(-2).toUpperCase() + ' · up ' + m.up + '</span></div>';
+      var rows = (m.a || []).map(function (x, i) {
+        return '<tr><td>input ' + (i + 1) + '</td><td class="text-end">' + (+x).toFixed(3) + ' A</td><td class="text-end">' + (+m.w[i]).toFixed(1) + ' W</td><td class="text-end">PF ' + (+m.pf[i]).toFixed(2) + '</td></tr>';
+      }).join('');
+      return '<div class="border rounded p-2 mb-2">' + head + (rows ? '<table class="table table-sm mb-0" style="max-width:420px"><tbody>' + rows + '</tbody></table>' : '') + '</div>';
+    }).join('');
+  }
   function renderBoards() {
     $('boards').innerHTML = P.boards.map(function (a, i) {
       var o = ''; for (var x = 0x50; x <= 0x57; x++) o += opt(x, hex(x), x === a);
       return '<div class="input-group input-group-sm" style="width:190px"><span class="input-group-text">B' + (i + 1) + '</span>' +
         '<select class="form-select" data-board="' + i + '">' + o + '</select>' +
         '<button class="btn btn-outline-danger" data-delboard="' + i + '" type="button" title="Remove"><i class="bi bi-x-lg"></i></button></div>' +
-        '<span class="align-self-center me-2">' + badge(a) + '</span>';
+        '<span class="align-self-center me-2">' + badge(a) + (modules[a] ? ' <span class="text-body-secondary small">' + modLine(modules[a]) + '</span>' : '') + '</span>';
     }).join('');
   }
   function renderRelays() {
@@ -323,6 +347,9 @@
         if (!c.success) { PM.toast('Scan failed: ' + (c.err || 'no answer'), 'danger'); return; }
         found = (c.res.found || []).slice();
         var rb = c.res.rbamp || [];
+        modules = {};
+        (c.res.modules || []).forEach(function (m) { modules[m.addr] = m; });
+        renderModules();
         $('scanCard').classList.remove('d-none');
         $('scanOut').innerHTML = found.length ? '<table class="table table-sm mb-0" style="max-width:520px"><tbody>' + found.map(function (a) {
           return '<tr><td><code>' + hex(a) + '</code></td><td>' + LABEL(a) + (rb.indexOf(a) >= 0 ? ' <span class="badge text-bg-primary">rbAmp confirmed</span>' : '') + '</td></tr>';
@@ -338,6 +365,9 @@
     }).finally(function () { $('scanBtn').disabled = !online; });
   }
   $('scanBtn').addEventListener('click', scan);
+  $('readBtn').addEventListener('click', scan);
+  renderModules();
+  if (online) scan();   // show what is on the bus right away
   $('addrBtn').addEventListener('click', function () {
     var from = parseInt($('addrFrom').value, 10), to = parseInt($('addrTo').value, 10);
     if (isNaN(from) || isNaN(to)) { PM.toast('Scan first, then choose both addresses', 'warning'); return; }

@@ -137,6 +137,10 @@ static void setModels(Board &b, uint8_t bi) {
   }
 }
 
+static const struct { uint8_t n; bool u; const char *name; } V[] = {
+    {0, false, "?"}, {1, true, "UI1"}, {2, true, "UI2"}, {3, true, "UI3"}, {1, false, "I1"},
+    {2, false, "I2"}, {3, false, "I3"}, {5, true, "UI5"}, {7, true, "UI7"}};
+
 static bool probeBoard(Board &b, uint8_t bi) {
   uint8_t pid = 0;
   uint32_t t0 = millis();
@@ -147,9 +151,6 @@ static bool probeBoard(Board &b, uint8_t bi) {
   uint8_t var = 0, cap[2] = {0, 0};
   i2cbus::readRegs(b.addr, REG_HW_VARIANT, &var, 1);
   i2cbus::readRegs(b.addr, REG_CAPABILITY, cap, 2);
-  static const struct { uint8_t n; bool u; const char *name; } V[] = {
-      {0, false, "?"}, {1, true, "UI1"}, {2, true, "UI2"}, {3, true, "UI3"}, {1, false, "I1"},
-      {2, false, "I2"}, {3, false, "I3"}, {5, true, "UI5"}, {7, true, "UI7"}};
   if (var < 1 || var > 8) {
     Serial.printf("[rbamp] B%u @0x%02X: unknown variant 0x%02X\n", bi + 1, b.addr, var);
     return false;
@@ -405,6 +406,57 @@ uint8_t scan(uint8_t *found, uint8_t max) {
   }
   if (flooded_) Serial.printf("[i2c] %u addresses ACK: the bus answers everywhere (rbAmp module); %u verified by a read\n", na, n);
   return n;
+}
+
+// What the Update Device I/O page shows for a module found by the scan: identity and one live reading of every input.
+bool describe(uint8_t addr, JsonObject o) {
+  i2cbus::Lock l;
+  uint8_t pid = 0, var = 0, cap[2] = {0, 0}, ver = 0, cls = 0, st = 0, valid = 0, hz = 0, up[4] = {0, 0, 0, 0};
+  if (!(i2cbus::readRegs(addr, REG_PRODUCT_ID, &pid, 1) && pid == 0x01)) return false;
+  i2cbus::readRegs(addr, REG_HW_VARIANT, &var, 1);
+  i2cbus::readRegs(addr, REG_CAPABILITY, cap, 2);
+  i2cbus::readRegs(addr, 0x03, &ver, 1);
+  i2cbus::readRegs(addr, REG_SENSOR_CLASS, &cls, 1);
+  i2cbus::readRegs(addr, REG_STATUS, &st, 1);
+  i2cbus::readRegs(addr, REG_RT_STATUS, &valid, 1);
+  i2cbus::readRegs(addr, REG_UPTIME, up, 4);
+  bool volt = cap[1] & 0x01;
+  uint8_t n = (var >= 1 && var <= 8) ? V[var].n : 0;
+  o["variant"] = (var >= 1 && var <= 8) ? V[var].name : "?";
+  o["inputs"] = n;
+  o["volt"] = volt;
+  o["ver"] = ver;
+  o["class"] = cls;
+  o["up"] = up[0] | (up[1] << 8) | (up[2] << 16) | ((uint32_t)up[3] << 24);
+  o["valid"] = (valid & 1) != 0;
+  o["err"] = (st & 0x02) != 0;
+  uint8_t rt[56];
+  if (!n || !i2cbus::readRegs(addr, REG_RT, rt, sizeof(rt))) return true;  // identity only
+  if (volt) {
+    i2cbus::readRegs(addr, REG_AC_FREQ, &hz, 1);
+    o["v"] = f32(rt);
+    o["hz"] = hz;
+  }
+  JsonArray a = o["a"].to<JsonArray>(), w = o["w"].to<JsonArray>(), pf = o["pf"].to<JsonArray>();
+  for (uint8_t in = 0; in < n; in++) {
+    float fa = 0, fw = 0, fp = 0;
+    if (in < 3) {
+      fa = f32(rt + 8 + in * 4);
+      fw = f32(rt + 32 + in * 4);
+      fp = f32(rt + 44 + in * 4);
+    } else {
+      i2cbus::writeReg(addr, REG_CH_SELECT, (uint8_t)((F_I_RMS << 4) | in));
+      readFloat(addr, REG_CH_DATA, fa);
+      i2cbus::writeReg(addr, REG_CH_SELECT, (uint8_t)((F_P_REAL << 4) | in));
+      readFloat(addr, REG_CH_DATA, fw);
+      i2cbus::writeReg(addr, REG_CH_SELECT, (uint8_t)((F_PF << 4) | in));
+      readFloat(addr, REG_CH_DATA, fp);
+    }
+    a.add(serialized(String(fa, 3)));
+    w.add(serialized(String(fw, 1)));
+    pf.add(serialized(String(fp, 2)));
+  }
+  return true;
 }
 
 // Live clamp change (hardware profile with only the clamp models different): the tables were reloaded; write the

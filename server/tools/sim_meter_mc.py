@@ -435,6 +435,9 @@ class MeterMC:
                 ok, err = self.cmd_ota(m)
             elif c == "i2c_scan":
                 res = {"found": sorted(self.bus), "rbamp": sorted(a for a in self.bus if 0x50 <= a <= 0x57)}
+                res["modules"] = [{"addr": a_, "variant": "UI7", "inputs": 7, "volt": True, "v": 230.1, "hz": 50, "ver": 13, "class": 1,
+                                   "up": 1234, "valid": True, "err": False, "a": [0.1 * (k + 1) for k in range(7)],
+                                   "w": [23.0 * (k + 1) for k in range(7)], "pf": [0.95] * 7} for a_ in res["rbamp"]]
                 self.send({"t": "cmd_ack", "ref": m.get("ref"), "ok": True, "res": res})
                 return
             elif c == "rbamp_addr":

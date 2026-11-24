@@ -28,6 +28,8 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   check(options.length === 2, 'one multi-channel meter is listed: ' + options[1]);
   await page.selectOption('#meterSel', { index: 1 });
   await page.waitForSelector('#io');
+  await page.waitForSelector('#modules:has-text("UI7")', { timeout: 15000 });
+  check((await page.textContent('#modules')).includes('7 inputs') && (await page.textContent('#modules')).includes('230.1 V') && (await page.textContent('#boards')).includes('UI7'), 'rbAmp modules found: variant, inputs, voltage and live data shown right after opening the page');
   check(await page.locator('#channels tr').count() === 2 && await page.locator('#relays tr').count() === 1, 'editor shows 2 channels, 1 relay board');
   check((await page.textContent('#relays tr')).includes('Board A [2C]'), 'relay board is labelled Board A [2C]');
   check(await page.isDisabled('#saveBtn') && await page.isDisabled('#clampBtn'), 'nothing changed: both apply buttons disabled');
