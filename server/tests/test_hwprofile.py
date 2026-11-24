@@ -262,6 +262,24 @@ def test_profile_sent_again_after_factory_reset(app, admin, mc):
     assert d.hw_state == "queued" and d.hw_profile["ch"] == NEW["ch"]
 
 
+def test_flashed_config_h_replaces_the_stored_profile(app, admin, mc):
+    """config.h changed (e.g. clamp 30 A -> 20 A) and flashed without erasing: the meter drops the stored profile
+    (hello.hwp.reset = "config") and the server forgets its wanted profile instead of sending it back."""
+    d = db.session.get(Device, mc)
+    cmd, _ = hwprofile.submit(d, NEW)
+    cmd_ack(d, cmd, res={"state": "pending", "in_s": 60})
+    hello(d, new_caps(NEW), "trial", 1, NEW)
+    evt(d, "hw_active", ver=1)
+    assert d.hw_state == "active"
+    before = Command.query.filter_by(device_fk=d.id, c="hw_profile").count()
+    changed = dict(DEFAULT, ch=[dict(DEFAULT["ch"][0], a=20)] + list(DEFAULT["ch"][1:]))
+    ingest.handle(FakeConn(), d, {"t": "hello", "up": 10, "boot": 2, "cfg_ver": 0, "caps": CAPS,
+                                  "hwp": {"ver": 0, "state": "default", "reset": "config", "profile": changed}})
+    db.session.commit()
+    assert Command.query.filter_by(device_fk=d.id, c="hw_profile").count() == before   # nothing sent again
+    assert d.hw_profile == {} and d.hw_ver == 0 and d.hw_state == "" and d.hw_current["ch"][0]["a"] == 20
+
+
 def test_aux_conflict_blocks_save(app, admin, mc):
     d = db.session.get(Device, mc)
     d.caps = new_caps(NEW)

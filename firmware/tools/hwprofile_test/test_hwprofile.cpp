@@ -34,6 +34,7 @@ static void applyClamps() { clampApplies++; }
 static uint32_t ms() { return g_ms; }
 static hwp::Hooks hooks = {probe, event, restart, applyClamps, ms};
 
+static uint8_t g_clamp = 3;  // clamp model of the compiled default (the test "flashes" another config.h by changing it)
 static hwp::Profile defaultProfile() {  // config.h: one rbAmp 0x50, XL9535 0x20 with 2 relays, 2 channels
   hwp::Profile p;
   p.nBoards = 1;
@@ -41,7 +42,7 @@ static hwp::Profile defaultProfile() {  // config.h: one rbAmp 0x50, XL9535 0x20
   p.nRelayBoards = 1;
   p.relay[0] = {1, HWP_DRV_XL9535, 0x20, 2, 1};
   p.nCh = 2;
-  p.ch[0] = {1, 1, 3, 1, 1};  // board, input, SCT_30A = 3, relay board 1, output 1
+  p.ch[0] = {1, 1, g_clamp, 1, 1};  // board, input, SCT_30A = 3, relay board 1, output 1
   p.ch[1] = {1, 2, 3, 1, 2};
   return p;
 }
@@ -252,6 +253,19 @@ int main() {
   JsonDocument h;
   hwp::stateJson(h.to<JsonObject>());
   CHECK(h["state"] == "active" && h["ver"] == 3 && h["profile"]["ch"].size() == 7);
+
+  // ---------------- config.h changed and flashed: it wins over the profile the server stored (30 A -> 20 A in config.h)
+  boot();
+  CHECK(hwp::state() == hwp::ST_ACTIVE && hwp::active().ver == 3);   // same config.h: the profile stays
+  { JsonDocument j; hwp::stateJson(j.to<JsonObject>()); CHECK(j["reset"].isNull()); }
+  g_clamp = 6;                                                       // SCT_20A
+  boot();
+  CHECK(hwp::state() == hwp::ST_DEFAULT && hwp::active().ver == 0 && hwp::active().ch[0].clamp == 6 && hwp::active().nCh == 2);
+  { JsonDocument j; hwp::stateJson(j.to<JsonObject>()); CHECK(j["reset"] == "config" && j["profile"]["ch"][0]["a"] == 20 && j["state"] == "default"); }
+  boot();                                                            // the next restart: nothing is stored any more, no reset flag
+  CHECK(hwp::state() == hwp::ST_DEFAULT && hwp::active().ch[0].clamp == 6);
+  { JsonDocument j; hwp::stateJson(j.to<JsonObject>()); CHECK(j["reset"].isNull()); }
+  printf("config.h change ok\n");
 
   if (failures) {
     printf("%d check(s) FAILED\n", failures);

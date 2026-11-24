@@ -206,6 +206,8 @@ void toJson(const Profile &p, JsonObject o) {
 
 static const char *K_ACT = "hw_act", *K_TRY = "hw_try", *K_BOOTS = "hw_boots", *K_NOTE = "hw_note";
 static const size_t BUF = 1400;
+static uint32_t dfltHash = 0;      // fingerprint of the compiled default (config.h): a stored profile belongs to one config.h
+static bool configReset_ = false;  // this boot dropped the stored profile because config.h changed
 
 static bool load(const char *key, Profile &p) {
   Preferences pr;
@@ -236,6 +238,7 @@ static bool save(const char *key, const Profile &p) {
   Preferences pr;
   pr.begin("pm", false);
   size_t written = pr.putBytes(key, buf, len);
+  if (!strcmp(key, K_ACT)) pr.putUInt("hw_dh", dfltHash);  // the config.h this profile was made for
   pr.end();
   return len > 0 && written == len;
 }
@@ -306,8 +309,38 @@ void begin(const Profile &compiledDefault, uint8_t gpio, const Hooks &hooks) {
   bootMs = nowMs();
   char err[64];
 
+  {  // fingerprint of config.h (FNV-1a of the compiled default as JSON)
+    JsonDocument d;
+    toJson(dflt, d.to<JsonObject>());
+    char b[BUF];
+    size_t n = serializeJson(d, b, sizeof(b));
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) h = (h ^ (uint8_t)b[i]) * 16777619u;
+    dfltHash = h;
+  }
+  configReset_ = false;
   Profile act;
   bool haveAct = load(K_ACT, act) && validate(act, gpioPins, err, sizeof(err));
+  if (haveAct) {
+    Preferences pr;
+    pr.begin("pm", true);
+    uint32_t was = pr.getUInt("hw_dh", 0);
+    pr.end();
+    if (was && was != dfltHash) {  // config.h was changed and flashed: it wins over the profile the server stored earlier
+      Serial.printf("[hwp] config.h changed since the profile of the server was stored: using config.h\n");
+      drop(K_ACT);
+      drop(K_TRY);
+      drop("hw_dh");
+      setBoots(0);
+      configReset_ = true;
+      haveAct = false;
+    } else if (!was) {  // stored by an older firmware: adopt the current config.h as its base
+      Preferences pw;
+      pw.begin("pm", false);
+      pw.putUInt("hw_dh", dfltHash);
+      pw.end();
+    }
+  }
   if (haveAct) {
     cur = act;
     st = ST_ACTIVE;
@@ -344,6 +377,7 @@ void stateJson(JsonObject o) {
   o["ver"] = cur.ver;
   o["state"] = st == ST_DEFAULT ? "default" : st == ST_ACTIVE ? "active" : st == ST_PENDING ? "pending" : "trial";
   toJson(cur, o["profile"].to<JsonObject>());
+  if (configReset_) o["reset"] = "config";  // config.h changed: the profile of the server was dropped, this one is the new truth
 }
 
 // ---------------------------------------------------------------- commands

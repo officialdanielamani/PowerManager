@@ -431,6 +431,8 @@ channel uses are AUX relays as before.
 
 > **rbAmp and I2C scans:** an rbAmp SCT-UI7 ACKs every address (tested alone on the bus at 50 / 20 / 100 kHz), so an ACK does not prove a part is there. `i2c_scan` therefore lists every ACKing address only up to 16; with more ACKs it lists the addresses that also return a byte when read (register 0x03) and sets `res.flood = true`. The rbAmp itself is confirmed by `PRODUCT_ID` (`res.rbamp`).
 
+> **config.h wins over a stored profile (1.1.0):** the meter stores a fingerprint of its compiled default (`hw_dh` in NVS) with every profile it keeps. When a changed `config.h` is flashed (e.g. a clamp 30 A -> 20 A) without erasing the flash, the stored profile no longer belongs to it: the meter drops it (and any trial) and runs `config.h`; its next hello has `hwp = {state: "default", ver: 0, reset: "config", profile}`. The server then forgets its wanted profile (does not send it again) and takes the reported profile as current. A profile stored by an older firmware (no fingerprint) is kept and tied to the config.h of that moment. Erasing the flash (state `default` without `reset`) still makes the server send its stored profile again.
+
 ### 12.3 Commands (server → meter)
 
 | `c` | Params | Behaviour |

@@ -75,9 +75,13 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.waitForSelector('text=Good: would set', {timeout: 20000});
   await page.click('[data-act=apply][data-kind=tare][data-ch="0"]');
   await page.waitForTimeout(2500);
-  await post('/action', {action: 'send_now'});
-  await page.waitForTimeout(1500);
-  const tared = await live();
+  let tared;
+  for (let i = 0; i < 8; i++) {   // fresh report from the meter (the first one after the tare may still be the old one)
+    await post('/action', {action: 'send_now'});
+    await page.waitForTimeout(1500);
+    tared = await live();
+    if (tared.channels[0].w > 590) break;
+  }
   const c0 = tared.channels[0];
   check(c0.tare && c0.tare.w > 590 && c0.tare.w < 610, 'tare of channel 0 is the connected load (' + (c0.tare && c0.tare.w) + ' W)');
   check(c0.w > 590 && c0.w_tared < 15, 'channel 0: raw ' + c0.w + ' W, tared ' + c0.w_tared + ' W');

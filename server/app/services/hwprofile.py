@@ -310,6 +310,12 @@ def on_hello(device, hwp, conn_send=None):
         else:
             device.hw_state = "active"
             device.hw_reason = None
+    elif state == "default" and hwp.get("reset") == "config":
+        # config.h was changed and flashed: the meter dropped the profile the server had stored and runs config.h.
+        # What it reports now is the truth; the old wanted profile is forgotten (not sent again).
+        device.hw_profile, device.hw_ver, device.hw_state = {}, 0, ""
+        device.hw_reason, device.hw_due_at, device.hw_active_ver = None, None, 0
+        notify.notify(device, "meter_status", "config.h was changed and flashed: the hardware profile stored on the server was replaced by the meter's config.h")
     elif state == "default":
         device.hw_active_ver = 0
         if (device.hw_ver or 0) > 0 and device.hw_profile and device.hw_state not in (
@@ -330,7 +336,7 @@ def profile_change_expected(device, hwp, new_sig_kind_same):
     """True when a changed channel count in hello comes from a profile change (not from other hardware)."""
     if not new_sig_kind_same or not isinstance(hwp, dict):
         return False
-    if hwp.get("state") in ("trial", "active", "pending"):
+    if hwp.get("state") in ("trial", "active", "pending") or hwp.get("reset") == "config":
         return True
     return hwp.get("state") == "default" and device.hw_state in ("rolled_back", "trial", "pending")
 
