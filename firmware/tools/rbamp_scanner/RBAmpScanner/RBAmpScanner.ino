@@ -55,6 +55,15 @@ static bool ack(uint8_t a) {
   return Wire.endTransmission() == 0;
 }
 
+// A real device at this address: an ACK AND a byte back when read (an rbAmp module ACKs every address, a missing part only ACKs the write).
+static bool real(uint8_t a) {
+  if (!ack(a)) return false;
+  uint8_t b = 0;
+  if (readRegs(a, REG_VERSION, &b, 1)) return true;
+  Wire.beginTransmission(a);                                  // a part without registers (PCF8574 ...): plain read
+  return Wire.endTransmission() == 0 && Wire.requestFrom(a, (uint8_t)1) == 1;
+}
+
 static float f32(const uint8_t *p) { float f; memcpy(&f, p, 4); return isfinite(f) ? f : NAN; }
 
 static void startWire() {
@@ -215,10 +224,10 @@ static void cmdReg(uint8_t reg, int n) {
   Serial.print("\n");
 }
 
-static void cmdAddr(uint8_t from, uint8_t to) {   // the same steps as the meter firmware
+static void cmdAddr(uint8_t from, uint8_t to, bool force) {   // the same steps as the meter firmware
   if (to < 0x08 || to > 0x77 || from == to) { Serial.println("new address must be 0x08..0x77 and different"); return; }
   if (!isRbamp(from)) { Serial.printf("no rbAmp at 0x%02X\n", from); return; }
-  if (ack(to)) { Serial.printf("something already answers at 0x%02X (or the bus floods): connect ONLY this module and use a free address\n", to); return; }
+  if (!force && real(to)) { Serial.printf("a device already answers at 0x%02X (it returns data): connect ONLY this module, or use a free address (addr %02X %02X force = skip this check)\n", to, from, to); return; }
   Serial.printf("changing 0x%02X -> 0x%02X (only ONE rbAmp may be on the bus) ...\n", from, to);
   bool ok = writeReg(from, REG_I2C_ADDRESS, to);        // stage
   ok = ok && writeReg(from, REG_ADDR_MAGIC, 0xA5);      // arm (expires after 5 s)
@@ -246,7 +255,7 @@ static void help() {
       "  drdy                 count DRDY pulses for 2 s\n"
       "  reg <reg> [n]        raw read of n registers (1..64), e.g. reg 0x54  or  reg 0x86 4\n"
       "  wreg <reg> <val>     raw write of one register (careful)\n"
-      "  addr <from> <to>     change the I2C address (ONE module on the bus!), e.g. addr 0x50 0x51\n"
+      "  addr <from> <to>     change the I2C address (ONE module on the bus!), e.g. addr 0x50 0x51  (add  force  to skip the free-address check)\n"
       "  reset                send the reset command to the module");
 }
 
@@ -277,7 +286,7 @@ static void handle(char *line) {
   else if (!strcmp(c, "drdy")) cmdDrdy();
   else if (!strcmp(c, "reg") && n >= 2) cmdReg(num(tok[1]), n >= 3 ? num(tok[2]) : 1);
   else if (!strcmp(c, "wreg") && n >= 3) Serial.printf("write %s\n", writeReg(cur, num(tok[1]), num(tok[2])) ? "ok" : "FAILED");
-  else if (!strcmp(c, "addr") && n >= 3) cmdAddr(num(tok[1]), num(tok[2]));
+  else if (!strcmp(c, "addr") && n >= 3) cmdAddr(num(tok[1]), num(tok[2]), n >= 4 && !strcmp(tok[3], "force"));
   else if (!strcmp(c, "reset")) Serial.printf("reset %s\n", writeReg(cur, REG_COMMAND, CMD_RESET) ? "sent" : "FAILED");
   else Serial.println("unknown command: type  help");
 }

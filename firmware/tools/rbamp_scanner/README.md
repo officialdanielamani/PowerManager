@@ -14,7 +14,7 @@ Open the Serial Monitor at 115200 baud (line ending *Newline*) and type `help`. 
 | `watch 30` | a reading every second for 30 s (any character stops it) |
 | `drdy` | counts the DRDY pulses for 2 s |
 | `reg 0x54 [n]` / `wreg 0x05 0x03` | raw register read / write |
-| `addr 0x50 0x51` | changes the I2C address (only ONE rbAmp on the bus), like the meter firmware does |
+| `addr 0x50 0x51` | changes the I2C address (only ONE rbAmp on the bus), like the meter firmware does; the new address must not return data (an ACK alone does not count: the rbAmp ACKs everything); `addr 0x50 0x51 force` skips that check |
 | `reset`, `speed 50000`, `pins …` | module reset, I2C clock, pins |
 
 The register map is the one of `firmware/PowerMeterRBAmp/src/rbamp.cpp`. Not tested on hardware by the author.
