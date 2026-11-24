@@ -30,6 +30,7 @@ float value(uint8_t i);      // degC; NAN = not readable
 float humidity(uint8_t i);   // %RH (SHT only); NAN = none
 bool hasHumidity();          // at least one SHT sensor configured
 bool takeFresh();            // true once after every complete round of readings (record them)
+String name(uint8_t i);      // "SHT40 @0x44" / "DS18B20 28-0316a2794e1f"
 String summary();            // "T1 SHT40 @0x44 24.5 C 55 %RH, T2 DS18B20 28-0316a2794e1f 24.5 C"
 #else
 inline void begin() {}
@@ -39,6 +40,7 @@ inline float value(uint8_t) { return NAN; }
 inline float humidity(uint8_t) { return NAN; }
 inline bool hasHumidity() { return false; }
 inline bool takeFresh() { return false; }
+inline String name(uint8_t) { return ""; }
 inline String summary() { return "off"; }
 #endif
 }  // namespace temp

@@ -26,6 +26,7 @@ void stateJson(JsonObject o);      // hello.ota: {state: ok | trial | rolled_bac
 bool onCommand(JsonObjectConst m, const char *&err);  // "ota": starts the update (the download runs in its own task)
 bool busy();                       // an update is running (config / profile changes are refused meanwhile)
 void confirm();                    // the server answered the hello of this boot: the new firmware is good
+void webJson(JsonObject o);     // the meter's own page: {state, ver, slot, busy, pct, why, tried}
 void tick();                       // loop: events for the progress, confirm timeout (rollback)
 
 }  // namespace ota

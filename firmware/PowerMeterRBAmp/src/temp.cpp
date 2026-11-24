@@ -305,6 +305,20 @@ bool takeFresh() {
   return f;
 }
 
+String name(uint8_t i) {
+#if TEMP_SHT
+  if (i < SHT_N) {
+    char b[24];
+    snprintf(b, sizeof(b), "%s @0x%02X", shtName(SHT[i].type), SHT[i].address);
+    return b;
+  }
+#endif
+#if TEMP_DS18B20
+  if (i >= SHT_N && i - SHT_N < nDs) return String("DS18B20 ") + hex(roms[i - SHT_N]);
+#endif
+  return "";
+}
+
 String summary() {
   if (!count()) return "no sensor found";
   String s;

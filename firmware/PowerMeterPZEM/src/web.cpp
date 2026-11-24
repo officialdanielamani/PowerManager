@@ -13,6 +13,7 @@
 #include "auxrelay.h"
 #include "temp.h"
 #include "net.h"
+#include "ota.h"
 #include "storage.h"
 #include "system.h"
 #include "timekeep.h"
@@ -323,6 +324,10 @@ static void hState() {
   d["kwh"] = serialized(String(control::sessionKwh(), 4));
   d["kwh_limit"] = serialized(String(control::sessionKwhLimit(), 4));  // what the kWh limit compares
   d["hw_info"] = HW_INFO;
+  d["power_sensor"] = String(SENSOR_NAME) + " · PZEM" + (METER_DC ? "-017" : "-004T") + " (Modbus 0x" + String((unsigned int)PZEM_ADDRESS, HEX) + ")";
+  ota::webJson(d["ota"].to<JsonObject>());  // firmware: pushed from the server, state / progress here
+  JsonArray sn = d["sensors"].to<JsonArray>();  // temperature / humidity sensors: T1.. with their type / address
+  for (uint8_t i = 0; i < temp::count(); i++) sn.add(temp::name(i));
   d["heap"] = ESP.getFreeHeap();
   if (battery::enabled()) {
     float v = battery::volts();

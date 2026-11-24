@@ -301,6 +301,18 @@ bool onCommand(JsonObjectConst m, const char *&err) {
   return true;
 }
 
+void webJson(JsonObject o) {
+  stateJson(o);
+  const esp_partition_t *s = nextSlot();
+  o["slot"] = s ? s->size : 0;
+  Phase ph = phase_;
+  if (ph != IDLE) {
+    o["busy"] = ph == DOWNLOADING ? "downloading" : ph == VERIFYING ? "verifying" : ph == REBOOTING ? "restarting" : "failed";
+    o["pct"] = (uint8_t)pct_;
+    if (ph == FAILED) o["why"] = why_;
+  }
+}
+
 void confirm() {
   if (!trial_) {
     if (rbWhy_[0]) {  // the report of a rollback went out with the hello

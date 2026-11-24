@@ -13,6 +13,9 @@
 #include "auxrelay.h"
 #include "temp.h"
 #include "net.h"
+#include "hwprofile.h"
+#include "rbamp.h"
+#include "ota.h"
 #include "storage.h"
 #include "system.h"
 #include "timekeep.h"
@@ -320,6 +323,15 @@ static void hState() {
   d["mesh_only"] = store::meshOnly();
   d["outbox"] = net::outboxCount();
   d["hw_info"] = HW_INFO;
+  {  // power sensor line: rbAmp variant + I2C addresses
+    String ps = String("rbAmp ") + rbamp::variantName() + " @";
+    const hwp::Profile &hp = hwp::active();
+    for (uint8_t i = 0; i < hp.nBoards; i++) ps += String(i ? ", " : "") + "0x" + String((unsigned int)hp.addr[i], HEX);
+    d["power_sensor"] = ps;
+  }
+  ota::webJson(d["ota"].to<JsonObject>());  // firmware: pushed from the server, state / progress here
+  JsonArray sn = d["sensors"].to<JsonArray>();  // temperature / humidity sensors: T1.. with their type / address
+  for (uint8_t i = 0; i < temp::count(); i++) sn.add(temp::name(i));
   d["heap"] = ESP.getFreeHeap();
   if (battery::enabled()) {
     float v = battery::volts();
