@@ -233,6 +233,9 @@ The sensor sits behind a small `Sensor` interface (`begin()`, `channels()`, `rea
 
 ## I2C faults: what the meter does when a device goes away
 
+**An rbAmp ACKs every address.** On an SCT-UI7 a plain address scan returns all 112 addresses (also alone on the bus, at 50 / 20 / 100 kHz); only reads at the real addresses give data. The meter therefore never trusts an ACK alone when more than 16 addresses answer: the *I2C scan* then lists only addresses that also return a byte and tells the server (`flood`). Parts are identified by reading (rbAmp `PRODUCT_ID`, relay boards by their registers). Reads at other addresses were correct in the tests with the RTC (0x68), SHT30 (0x44) and MCP23017 (0x20) on the bus; a read-back test of the RTC time with the rbAmp present is still to be done on the bench.
+
+
 The I2C bus is shared by the rbAmp module(s), the relay board(s), the DS3231 clock and the SHT sensors (`i2cbus.cpp`, one
 lock). Nothing needs a restart:
 

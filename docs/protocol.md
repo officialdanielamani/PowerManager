@@ -429,6 +429,8 @@ channel uses are AUX relays as before.
   (a server profile in use), `trial` (booted with a new profile, not confirmed yet), `pending` (stored, reboot
   countdown running).
 
+> **rbAmp and I2C scans:** an rbAmp SCT-UI7 ACKs every address (tested alone on the bus at 50 / 20 / 100 kHz), so an ACK does not prove a part is there. `i2c_scan` therefore lists every ACKing address only up to 16; with more ACKs it lists the addresses that also return a byte when read (register 0x03) and sets `res.flood = true`. The rbAmp itself is confirmed by `PRODUCT_ID` (`res.rbamp`).
+
 ### 12.3 Commands (server → meter)
 
 | `c` | Params | Behaviour |

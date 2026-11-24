@@ -327,6 +327,7 @@
         $('scanOut').innerHTML = found.length ? '<table class="table table-sm mb-0" style="max-width:520px"><tbody>' + found.map(function (a) {
           return '<tr><td><code>' + hex(a) + '</code></td><td>' + LABEL(a) + (rb.indexOf(a) >= 0 ? ' <span class="badge text-bg-primary">rbAmp confirmed</span>' : '') + '</td></tr>';
         }).join('') + '</tbody></table>' : 'Nothing answers (check SDA / SCL / power).';
+        if (c.res.flood) $('scanOut').innerHTML = '<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle me-1"></i>The I2C bus answers at <strong>every</strong> address (an rbAmp module does this). Only the addresses that also returned data are listed: a part that cannot be read (for example a relay board without a readable register) may be missing.</div>' + $('scanOut').innerHTML;
         var from = '', to = '';
         (rb.length ? rb : []).forEach(function (a) { from += opt(a, hex(a), a === rb[0]); });
         for (var a = 0x50; a <= 0x57; a++) if (found.indexOf(a) < 0) to += opt(a, hex(a), false);

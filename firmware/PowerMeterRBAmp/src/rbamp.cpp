@@ -386,11 +386,24 @@ bool isRbamp(uint8_t addr) {
   return i2cbus::readRegs(addr, REG_PRODUCT_ID, &pid, 1) && pid == 0x01;
 }
 
+static bool flooded_ = false;
+bool scanFlooded() { return flooded_; }
+
+// The addresses that answer. An rbAmp module ACKs EVERY address (seen on an SCT-UI7: 112 of 112 at 50 / 20 / 100 kHz, alone on
+// the bus), so an ACK alone proves nothing. When more than 16 addresses ACK, only those that also give a byte back when read
+// (register 0x03, as the rbAmp scanner does; a missing device only ACKs the write) are listed, and scanFlooded() is true.
 uint8_t scan(uint8_t *found, uint8_t max) {
   i2cbus::begin();
+  uint8_t acks[112], na = 0;
+  for (uint8_t a = 0x08; a <= 0x77; a++)
+    if (i2cbus::probe(a)) acks[na++] = a;
+  flooded_ = na > 16;
   uint8_t n = 0;
-  for (uint8_t a = 0x08; a <= 0x77 && n < max; a++)
-    if (i2cbus::probe(a)) found[n++] = a;
+  for (uint8_t i = 0; i < na && n < max; i++) {
+    uint8_t b = 0;
+    if (!flooded_ || i2cbus::readRegs(acks[i], 0x03, &b, 1) || i2cbus::readRaw(acks[i], &b, 1)) found[n++] = acks[i];
+  }
+  if (flooded_) Serial.printf("[i2c] %u addresses ACK: the bus answers everywhere (rbAmp module); %u verified by a read\n", na, n);
   return n;
 }
 

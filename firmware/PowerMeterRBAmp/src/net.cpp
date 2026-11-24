@@ -766,6 +766,7 @@ static void fillHwProfileRes(JsonObject o, void *p) {
 static void fillScanRes(JsonObject o, void *p) {
   HwRes *r = (HwRes *)p;
   JsonArray all = o["found"].to<JsonArray>(), rb = o["rbamp"].to<JsonArray>();
+  if (rbamp::scanFlooded()) o["flood"] = true;  // every address ACKed: "found" holds only the ones that also returned data
   for (uint8_t i = 0; i < r->n; i++) {
     all.add(r->found[i]);
     if (r->found[i] >= 0x50 && r->found[i] <= 0x57 && rbamp::isRbamp(r->found[i])) rb.add(r->found[i]);

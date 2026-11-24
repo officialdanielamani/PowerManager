@@ -40,6 +40,7 @@ bool periodStart();
 bool periodFinish(float avgW[MC_MAX_CH], bool &valid);
 
 bool isRbamp(uint8_t addr);                        // an rbAmp answers at this address
+bool scanFlooded();  // the last scan: more than 16 addresses ACKed (the list was verified by reading)
 uint8_t scan(uint8_t *found, uint8_t max);         // I2C addresses 0x08..0x77 that answer (returns how many)
 void applyClamps();                                // hardware profile: clamp models changed live (tables already reloaded)
 
