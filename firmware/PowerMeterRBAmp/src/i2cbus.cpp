@@ -115,6 +115,27 @@ bool probe(uint8_t addr) {
   return rc == 0;
 }
 
+// An rbAmp module ACKs EVERY address (SCT-UI7 alone on the bus: 112 of 112), so an ACK does not prove that a part is there.
+// flooded(): an address nobody has ACKs (looked at most every 10 s). Then present() also wants a byte back from a read,
+// which a missing device never gives (it only ACKs the write).
+static bool flooded() {
+  static bool flood = false;
+  static uint32_t checkedAt = 0;
+  if (checkedAt && millis() - checkedAt < 10000) return flood;
+  checkedAt = millis() | 1;
+  flood = false;
+  for (uint8_t a : {0x03, 0x1F, 0x7E}) flood = flood || probe(a);
+  return flood;
+}
+
+bool present(uint8_t addr) {
+  Lock l;
+  if (!probe(addr)) return false;
+  if (!flooded()) return true;
+  uint8_t b = 0;
+  return readRegs(addr, 0x03, &b, 1) || readRaw(addr, &b, 1);
+}
+
 bool writeReg(uint8_t addr, uint8_t reg, uint8_t val) {
   uint8_t d[2] = {reg, val};
   return writeRaw(addr, d, 2);

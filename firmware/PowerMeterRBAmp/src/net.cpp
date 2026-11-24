@@ -895,7 +895,7 @@ static void handleCommand(JsonObject m) {
     } else if (!rbamp::isRbamp(from)) {
       ok = false;
       err = "no_reply";
-    } else if (i2cbus::probe(to)) {
+    } else if (i2cbus::present(to)) {
       ok = false;
       err = "addr_in_use";
     } else {

@@ -29,13 +29,13 @@ int digitalRead(int pin) { return pin == PIN_I2C_SDA && sdaStuckPulses > 0 ? LOW
 
 // ---- fake Wire: absent addresses NACK (2); a stuck bus times out (5); `dataShort` = address ACKed but no data comes
 static bool present[128];
-static bool dataShort = false;
+static bool dataShort = false, floodAll = false;   // floodAll: every address ACKs a write (an rbAmp module), only real devices return data
 static uint8_t cur = 0;
 void WireT::begin(int, int, uint32_t) { wireBegins++; }
 void WireT::end() { wireEnds++; }
 void WireT::beginTransmission(uint8_t a) { cur = a; }
-uint8_t WireT::endTransmission(bool) { return sdaStuckPulses > 0 ? 5 : present[cur] ? 0 : 2; }
-size_t WireT::requestFrom(uint16_t, uint8_t n) { return dataShort ? 0 : n; }
+uint8_t WireT::endTransmission(bool) { return sdaStuckPulses > 0 ? 5 : (floodAll || present[cur]) ? 0 : 2; }
+size_t WireT::requestFrom(uint16_t a, uint8_t n) { return dataShort || (floodAll && !present[a]) ? 0 : n; }
 
 static void reset(int stuck) {
   sdaStuckPulses = stuck; sclPulses = 0; wireEnds = 0;
@@ -100,6 +100,21 @@ int main() {
   dataShort = false;
   CHECK(i2cbus::readRegs(0x50, 0, b, 4));
   printf("data timeout ok\n");
+
+  // 7. a bus that ACKs every address (rbAmp module): present() trusts only addresses that also return data
+  reset(0);
+  present[0x68] = true;
+  CHECK(i2cbus::present(0x68) && !i2cbus::present(0x21));      // normal bus: an ACK is enough, a missing part NACKs
+  floodAll = true;
+  g_ms += 20000;                                               // the flood check is repeated every 10 s
+  CHECK(i2cbus::probe(0x21));                                  // the raw probe is fooled ...
+  CHECK(!i2cbus::present(0x21) && !i2cbus::present(0x57));     // ... present() is not
+  CHECK(i2cbus::present(0x68) && i2cbus::present(0x50));       // real devices still count
+  CHECK(i2cbus::recoveries() == before + 1);                   // an ACK flood is not a bus fault
+  floodAll = false;
+  g_ms += 20000;
+  CHECK(!i2cbus::present(0x21));
+  printf("ACK flood: present() ok\n");
 
   if (failures) { printf("%d check(s) FAILED\n", failures); return 1; }
   printf("all I2C bus recovery checks passed\n");

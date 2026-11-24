@@ -22,7 +22,7 @@ namespace rbamp { uint8_t scan(uint8_t *, uint8_t) { return 0; } bool scanFloode
                   bool changeAddress(uint8_t, uint8_t, String &) { return true; } }
 namespace control { bool anySessionRunning() { return false; }
                     bool startSensorCheck(uint8_t, uint8_t, const char *&) { return true; } }
-namespace i2cbus { bool probe(uint8_t) { return false; } }
+namespace i2cbus { bool probe(uint8_t) { return false; } bool present(uint8_t) { return false; } }
 ''' + helpers + '''
 static void handle(JsonObject m) {
   const char *c = m["c"] | "";
@@ -49,7 +49,7 @@ struct WifiT { int status() { return 0; } };
 static WifiT WiFi;
 #define WL_CONNECTED 3
 namespace rbamp { bool isRbamp(uint8_t) { return true; } void applyClamps() {} }
-namespace i2cbus { bool probe(uint8_t) { return true; } }
+namespace i2cbus { bool probe(uint8_t) { return true; } bool present(uint8_t) { return true; } }
 namespace control { void emitEvent(const char *, void (*)(JsonObject, void *) = nullptr, void * = nullptr) {}
                     void prepareRestart(bool = false) {} void bumpState() {} }
 namespace sys { void reboot(uint32_t) {} }

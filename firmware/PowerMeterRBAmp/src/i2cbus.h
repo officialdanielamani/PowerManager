@@ -13,6 +13,7 @@ SemaphoreHandle_t mutex();
 bool readRegs(uint8_t addr, uint8_t reg, uint8_t *buf, size_t n);
 bool writeReg(uint8_t addr, uint8_t reg, uint8_t val);
 bool writeRaw(uint8_t addr, const uint8_t *data, size_t n);
+bool present(uint8_t addr);  // ACK, and a byte back from a read when the bus ACKs everywhere (an rbAmp module does)
 bool probe(uint8_t addr);
 bool readRaw(uint8_t addr, uint8_t *buf, size_t n);  // read without a register (SHT sensors)  // something answers (ACK) at this address
 

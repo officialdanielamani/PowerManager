@@ -443,7 +443,7 @@ bool changeAddress(uint8_t from, uint8_t to, String &msg) {
     msg = "already at that address";
     return true;
   }
-  if (i2cbus::probe(to)) {
+  if (i2cbus::present(to)) {
     msg = "something already answers at the new address";
     return false;
   }

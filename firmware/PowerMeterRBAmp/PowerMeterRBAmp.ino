@@ -36,7 +36,7 @@
 #include "src/web.h"
 
 // ---- hardware profile (src/hwprofile.h): glue to the rest of the firmware
-static bool hwProbe(uint8_t addr, bool rbampOnly) { return rbampOnly ? rbamp::isRbamp(addr) : i2cbus::probe(addr); }
+static bool hwProbe(uint8_t addr, bool rbampOnly) { return rbampOnly ? rbamp::isRbamp(addr) : i2cbus::present(addr); }
 
 struct HwEvent {
   uint32_t ver;
@@ -152,7 +152,7 @@ static void serialCommand(const String &cmd) {
     Serial.print("[i2c] answering:");
     int n = 0;
     for (uint8_t a = 0x08; a <= 0x77; a++)
-      if (i2cbus::probe(a)) {
+      if (i2cbus::present(a)) {
         Serial.printf(" 0x%02X", a);
         n++;
       }

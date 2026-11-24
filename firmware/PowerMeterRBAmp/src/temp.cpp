@@ -230,7 +230,7 @@ void begin() {
   i2cbus::begin();
   for (uint8_t j = 0; j < SHT_N; j++)
     Serial.printf("[temp] T%u = %s @0x%02X: %s\n", j + 1, shtName(SHT[j].type), SHT[j].address,
-                  i2cbus::probe(SHT[j].address) ? "OK" : "NOT ANSWERING (check wiring / address)");
+                  i2cbus::present(SHT[j].address) ? "OK" : "NOT ANSWERING (check wiring / address)");
 #endif
 #if TEMP_DS18B20
   gpio_reset_pin(PIN);
