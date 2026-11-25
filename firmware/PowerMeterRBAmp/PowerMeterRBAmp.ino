@@ -64,6 +64,7 @@ static void hwApplyClamps() {  // live clamp change: tables reloaded, models wri
   hw::reload();
   rbamp::applyClamps();
   control::bumpState();
+  net::requestHello();  // caps.ratings changed: tell the server
 }
 static void hwInit() {  // before anything uses the hardware tables
   hwp::Hooks h = {hwProbe, hwEvent, hwRestart, hwApplyClamps, nullptr};

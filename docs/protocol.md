@@ -433,6 +433,8 @@ channel uses are AUX relays as before.
 
 > **config.h wins over a stored profile (1.1.0):** the meter stores a fingerprint of its compiled default (`hw_dh` in NVS) with every profile it keeps. When a changed `config.h` is flashed (e.g. a clamp 30 A -> 20 A) without erasing the flash, the stored profile no longer belongs to it: the meter drops it (and any trial) and runs `config.h`; its next hello has `hwp = {state: "default", ver: 0, reset: "config", profile}`. The server then forgets its wanted profile (does not send it again) and takes the reported profile as current. A profile stored by an older firmware (no fingerprint) is kept and tied to the config.h of that moment. Erasing the flash (state `default` without `reset`) still makes the server send its stored profile again.
 
+> **Which clamp value is true:** the module itself. `i2c_scan` returns for every rbAmp `modules[].ct` = the clamp rating (A) the module reports it uses (read back from `APPLIED_CT`); the Update Device I/O page shows it next to every input (red when the profile says something else). After a **live** clamp change the meter sends a fresh hello (new `caps.ratings`) and the server also updates `caps.ratings` from the profile at once; the Configuration page's "clamp N A" comes from `caps.ratings`.
+
 ### 12.3 Commands (server → meter)
 
 | `c` | Params | Behaviour |

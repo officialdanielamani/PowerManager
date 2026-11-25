@@ -341,6 +341,18 @@ def profile_change_expected(device, hwp, new_sig_kind_same):
     return hwp.get("state") == "default" and device.hw_state in ("rolled_back", "trial", "pending")
 
 
+def _apply_ratings(device, profile):
+    """caps.ratings (clamp rating of every channel, shown on the Configuration page) from a profile the meter now uses.
+    The meter also sends them in its next hello (that is the truth); this only avoids showing the old ones meanwhile."""
+    ch = (profile or {}).get("ch") or []
+    old = list((device.caps or {}).get("ratings") or [])
+    ratings = [(c.get("a") or (old[i] if i < len(old) else 0)) for i, c in enumerate(ch)]
+    if ratings:
+        caps = dict(device.caps or {})
+        caps["ratings"] = ratings
+        device.caps = caps
+
+
 def on_ack(device, cmd, ok, err, res):
     """cmd_ack of hw_profile / hw_cancel."""
     res = res if isinstance(res, dict) else {}
@@ -350,6 +362,7 @@ def on_ack(device, cmd, ok, err, res):
         if ok:
             if res.get("state") == "live":
                 device.hw_current = dict(device.hw_profile, ver=device.hw_ver)
+                _apply_ratings(device, device.hw_current)
                 device.hw_state, device.hw_active_ver, device.hw_reason, device.hw_due_at = (
                     "active", device.hw_ver, None, None)
             else:
@@ -385,6 +398,7 @@ def on_event(device, ev):
         if ver == device.hw_ver:
             device.hw_current = dict(device.hw_profile, ver=ver)
             device.hw_state, device.hw_reason = "active", None
+            _apply_ratings(device, device.hw_current)
             _trim_viewers(device)
             notify.notify(device, "meter_status", f"Hardware profile v{ver} is active")
     elif ev.type == "hw_rollback":

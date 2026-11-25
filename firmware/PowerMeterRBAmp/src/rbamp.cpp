@@ -437,6 +437,13 @@ bool describe(uint8_t addr, JsonObject o) {
     o["v"] = f32(rt);
     o["hz"] = hz;
   }
+  static const uint8_t AMPS[] = {0, 5, 10, 30, 50, 100, 20, 60};   // CT model code (SCT_*) -> clamp rating in A
+  JsonArray ct = o["ct"].to<JsonArray>();                           // what the MODULE itself says it uses (read back)
+  for (uint8_t in = 0; in < n; in++) {
+    uint8_t m = 0;
+    i2cbus::readRegs(addr, REG_APPLIED_CT0 + in, &m, 1);
+    ct.add(m < sizeof(AMPS) ? AMPS[m] : 0);
+  }
   JsonArray a = o["a"].to<JsonArray>(), w = o["w"].to<JsonArray>(), pf = o["pf"].to<JsonArray>();
   for (uint8_t in = 0; in < n; in++) {
     float fa = 0, fw = 0, fp = 0;

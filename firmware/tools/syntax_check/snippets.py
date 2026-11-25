@@ -44,7 +44,7 @@ open(os.path.join(out, "glue_snippet.cpp"), "w", encoding="utf-8").write('''#inc
 #include "hwprofile.h"
 #include "ota.h"
 SerialT Serial;
-namespace net { bool serverParams(String &, uint16_t &, bool &, bool &) { return false; } }
+namespace net { bool serverParams(String &, uint16_t &, bool &, bool &) { return false; } void requestHello() {} }
 struct WifiT { int status() { return 0; } };
 static WifiT WiFi;
 #define WL_CONNECTED 3

@@ -262,6 +262,16 @@ def test_profile_sent_again_after_factory_reset(app, admin, mc):
     assert d.hw_state == "queued" and d.hw_profile["ch"] == NEW["ch"]
 
 
+def test_live_clamp_change_updates_the_ratings_shown(app, admin, mc):
+    """The Configuration page shows caps.ratings: a live clamp change must update them (and the meter's next hello confirms)."""
+    d = db.session.get(Device, mc)
+    hello(d, new_caps(NEW), "active", 1, NEW)
+    cmd, _ = hwprofile.submit(d, dict(NEW, ch=[dict(c, a=20) for c in NEW["ch"]]))
+    cmd_ack(d, cmd, res={"state": "live"})
+    db.session.commit()
+    assert d.caps["ratings"] == [20] * len(NEW["ch"])
+
+
 def test_flashed_config_h_replaces_the_stored_profile(app, admin, mc):
     """config.h changed (e.g. clamp 30 A -> 20 A) and flashed without erasing: the meter drops the stored profile
     (hello.hwp.reset = "config") and the server forgets its wanted profile instead of sending it back."""

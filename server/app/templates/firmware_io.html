@@ -142,8 +142,13 @@
         (inP ? '<span class="badge text-bg-success">in the profile as B' + (P.boards.indexOf(a) + 1) + '</span>' : '<span class="badge text-bg-warning">not in the profile</span>') +
         (m.err ? '<span class="badge text-bg-danger">module error</span>' : (m.valid ? '' : '<span class="badge text-bg-secondary">no valid result yet</span>')) +
         '<span class="text-body-secondary">version 0x' + ('0' + (m.ver >>> 0).toString(16)).slice(-2).toUpperCase() + ' · up ' + m.up + '</span></div>';
+      var bi = P.boards.indexOf(a) + 1;
       var rows = (m.a || []).map(function (x, i) {
-        return '<tr><td>input ' + (i + 1) + '</td><td class="text-end">' + (+x).toFixed(3) + ' A</td><td class="text-end">' + (+m.w[i]).toFixed(1) + ' W</td><td class="text-end">PF ' + (+m.pf[i]).toFixed(2) + '</td></tr>';
+        var amps = (m.ct || [])[i], want = null;
+        P.ch.forEach(function (c) { if (c.b === bi && c.i === i + 1) want = c.a; });
+        var clamp = amps ? '<span class="badge text-bg-' + (want && want !== amps ? 'danger' : 'secondary') + '" title="read back from the module">clamp ' + amps + ' A</span>' +
+          (want && want !== amps ? ' <span class="text-danger">profile says ' + want + ' A</span>' : '') : '';
+        return '<tr><td>input ' + (i + 1) + ' ' + clamp + '</td><td class="text-end">' + (+x).toFixed(3) + ' A</td><td class="text-end">' + (+m.w[i]).toFixed(1) + ' W</td><td class="text-end">PF ' + (+m.pf[i]).toFixed(2) + '</td></tr>';
       }).join('');
       return '<div class="border rounded p-2 mb-2">' + head + (rows ? '<table class="table table-sm mb-0" style="max-width:420px"><tbody>' + rows + '</tbody></table>' : '') + '</div>';
     }).join('');

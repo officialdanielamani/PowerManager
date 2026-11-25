@@ -72,6 +72,8 @@ static bool mdnsStarted = false;
 
 String apSsid() { return "Power_" + store::deviceId(); }
 String serverHost() { return srv.host; }
+static volatile bool helloAgain = false;
+void requestHello() { helloAgain = true; }
 bool serverParams(String &host, uint16_t &port, bool &tls, bool &insecure) {
   if (leafMode || !srv.host.length()) return false;
   host = srv.host;
@@ -1221,6 +1223,10 @@ static void leafLoop() {
       sendHello();
     }
     return;
+  }
+  if (helloAgain) {  // capabilities changed (live clamp change): the server learns the new ones
+    helloAgain = false;
+    sendHello();
   }
   onlineWork();
 }
