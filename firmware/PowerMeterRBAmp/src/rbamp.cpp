@@ -399,11 +399,17 @@ uint8_t scan(uint8_t *found, uint8_t max) {
   for (uint8_t a = 0x08; a <= 0x77; a++)
     if (i2cbus::probe(a)) acks[na++] = a;
   flooded_ = na > 16;
+  bool isRb[8];  // the rbAmp range is identified by PRODUCT_ID: reliable whatever the bus does (listed even if the ACK was missed)
+  for (uint8_t a = 0x50; a <= 0x57; a++) isRb[a - 0x50] = isRbamp(a);
   uint8_t n = 0;
+  for (uint8_t a = 0x50; a <= 0x57; a++)
+    if (isRb[a - 0x50] && n < max) found[n++] = a;
   for (uint8_t i = 0; i < na && n < max; i++) {
+    if (acks[i] >= 0x50 && acks[i] <= 0x57 && isRb[acks[i] - 0x50]) continue;  // already listed
     uint8_t b = 0;
     if (!flooded_ || i2cbus::readRegs(acks[i], 0x03, &b, 1) || i2cbus::readRaw(acks[i], &b, 1)) found[n++] = acks[i];
   }
+  // (the list is not sorted by address: the page sorts it)
   if (flooded_) Serial.printf("[i2c] %u addresses ACK: the bus answers everywhere (rbAmp module); %u verified by a read\n", na, n);
   return n;
 }

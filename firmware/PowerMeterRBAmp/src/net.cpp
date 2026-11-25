@@ -888,7 +888,7 @@ static void handleCommand(JsonObject m) {
     ok = hwp::onCancel();
     if (!ok) err = "nothing_pending";
   } else if (!strcmp(c, "i2c_scan")) {
-    uint8_t found[40];
+    uint8_t found[64];
     HwRes r = {"", 0, found, 0};
     r.n = rbamp::scan(found, sizeof(found));
     cmdAckRes(ref, true, nullptr, nullptr, fillScanRes, &r);
