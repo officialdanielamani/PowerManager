@@ -404,13 +404,23 @@ uint8_t scan(uint8_t *found, uint8_t max) {
   uint8_t n = 0;
   for (uint8_t a = 0x50; a <= 0x57; a++)
     if (isRb[a - 0x50] && n < max) found[n++] = a;
-  for (uint8_t i = 0; i < na && n < max; i++) {
-    if (acks[i] >= 0x50 && acks[i] <= 0x57 && isRb[acks[i] - 0x50]) continue;  // already listed
-    uint8_t b = 0;
-    if (!flooded_ || i2cbus::readRegs(acks[i], 0x03, &b, 1) || i2cbus::readRaw(acks[i], &b, 1)) found[n++] = acks[i];
+  if (!flooded_) {
+    for (uint8_t i = 0; i < na && n < max; i++)
+      if (!(acks[i] >= 0x50 && acks[i] <= 0x57 && isRb[acks[i] - 0x50])) found[n++] = acks[i];
+  } else {
+    // The bus answers everywhere and even reads can return data at addresses nobody has (the rbAmp module answers for them),
+    // so a generic list means nothing. List only the parts this meter can use (relay boards / expanders, SHT, DS3231) whose
+    // answer differs from what an unused address returns.
+    uint8_t phantom = 0;
+    bool hasPhantom = i2cbus::readRegs(0x1F, 0x03, &phantom, 1);
+    static const uint8_t CAND[] = {0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+                                   0x40, 0x44, 0x45, 0x46, 0x68};
+    for (uint8_t c : CAND) {
+      uint8_t b = 0;
+      if (n >= max) break;
+      if ((i2cbus::readRegs(c, 0x03, &b, 1) || i2cbus::readRaw(c, &b, 1)) && !(hasPhantom && b == phantom)) found[n++] = c;
+    }
   }
-  // (the list is not sorted by address: the page sorts it)
-  if (flooded_) Serial.printf("[i2c] %u addresses ACK: the bus answers everywhere (rbAmp module); %u verified by a read\n", na, n);
   return n;
 }
 
