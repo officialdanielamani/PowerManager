@@ -72,6 +72,8 @@ def test_rules(single, online):
 
     bad("zero", "not stable", a=(0.4, 0.1, 0.9))                       # current varies by 0.8 A
     bad("zero", "power is not stable", w=(5.0, 1.0, 12.0))
+    ev = run_check(single, 0, "zero", a=(0.034, 0.0, 0.069), w=(0.4, 0.0, 1.8))     # the noise of a 30 A clamp with no load is fine
+    assert ev["ok"], ev["reasons"]
     bad("zero", "A load seems to be connected", a=(3.2, 3.19, 3.21), w=(700.0, 699.0, 701.0))
     bad("zero", "Only 7 readings", n=7)
     bad("zero", "took 6 s", secs=6)

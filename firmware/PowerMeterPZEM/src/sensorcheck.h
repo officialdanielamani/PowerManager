@@ -52,7 +52,9 @@ class Check {
     if (!active_) return false;
     if (n_ > 0 && (uint32_t)(nowMs - lastCountMs_) < READING_GAP_MS) return false;  // at most one per second
     lastCountMs_ = nowMs;
-    add(n_ == 0, a, w, v);
+    // Noise below 0 (a clamp or shunt with no load reads -1 W or so) counts as 0: zero and tare are never negative and the
+    // meter's limits never use a negative value either.
+    add(n_ == 0, a > 0 ? a : 0, w > 0 ? w : 0, v);
     n_++;
     // At least n readings AND at least n seconds since the start (10 readings = 10 s at least): the first reading counts at
     // the start, so the check completes with the reading counted n seconds later (n + 1 readings).

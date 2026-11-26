@@ -35,6 +35,13 @@ int main() {
   CHECK(!chk.feed(1, 1, 1, 500, r) && !chk.feed(1, 1, 1, 999, r));
   chk.cancel();
   CHECK(!chk.active() && !chk.feed(1, 1, 1, 5000, r));              // not active: nothing happens
+  {  // no load: the sensor noise goes below 0, which counts as 0 (zero and tare are never negative)
+    sc::Check c2;
+    sc::Result r2;
+    c2.start(0, 10, 0);
+    for (uint32_t k = 0; k <= 10 && !c2.feed(k % 2 ? -0.02f : 0.04f, k % 2 ? -1.4f : 1.8f, 242, k * 1000, r2); k++) {}
+    CHECK(r2.ok && r2.w.mn == 0 && r2.a.mn == 0 && r2.w.mx > 1.7);
+  }
 
   // ---- statistics: mean / min / max of raw values
   chk.start(0, 10, 0);

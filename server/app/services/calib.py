@@ -11,7 +11,7 @@ from . import commands, devconfig, hub
 MIN_READINGS = 10
 MIN_SECS = 10
 CHECK_MAX_AGE_S = 600          # an older check is not used any more
-STABLE_A = (0.03, 0.03)        # readings are stable when max - min <= max(abs, rel * mean)
+STABLE_A = (0.03, 0.03)        # readings are stable when max - min <= max(abs, rel * mean); abs is raised for bigger clamps (stable_a)
 STABLE_W = (3.0, 0.05)
 ZERO_MAX_A, ZERO_MAX_W = 1.0, 100.0   # a zero is small: more means a load is still connected
 TARE_MIN_A = 0.05              # a tare needs something to measure
@@ -99,6 +99,11 @@ def _spread_ok(triple, limits):
     return (mx - mn) <= max(limits[0], limits[1] * abs(mean)), mx - mn
 
 
+def stable_a(device, ch):
+    """Allowed spread of the current: a bigger clamp is noisier (twice the smallest tare: 0.1 / 0.3 / 0.6 / 1 A)."""
+    return max(STABLE_A[0], 2 * tare_min(device, ch)), STABLE_A[1]
+
+
 def evaluate(device, ch, kind):
     """Is the last check of channel `ch` good for a zero / a tare? -> {ok, reasons, a, w, stats, state}
 
@@ -122,7 +127,7 @@ def evaluate(device, ch, kind):
         out["reasons"].append(f"Only {s.get('n') or 0} readings (at least {MIN_READINGS} are needed).")
     if float(s.get("secs") or 0) < MIN_SECS:
         out["reasons"].append(f"The check took {s.get('secs') or 0} s (at least {MIN_SECS} s are needed).")
-    ok_a, spread_a = _spread_ok(s.get("a"), STABLE_A)
+    ok_a, spread_a = _spread_ok(s.get("a"), stable_a(device, ch))
     ok_w, spread_w = _spread_ok(s.get("w"), STABLE_W)
     if not ok_a:
         out["reasons"].append(f"The current is not stable (it varied by {spread_a:.3f} A).")

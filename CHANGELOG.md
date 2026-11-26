@@ -9,6 +9,7 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
   single AUX `event` form (only `events` + `ev_on`), the `rdy` / `notify_disconnected_min` spellings, the `end` flag of the `quota`
   event, the server-side execution of Schedule Next Session (the meter does it), the `caps.next` flag, database upgrades from
   versions before 1.0.0 (a 1.0.0 database is still upgraded), the unused `tare_a` / `tare_w` columns and their migration. The system is experimental: a database from an older version may need a fresh `instance/` folder.
+- **Zero / Tare sensor check:** readings below 0 (noise with no load) count as 0, and the allowed spread of the current depends on the clamp (0.1 A up to 30 A ...), so a no-load check of a 30 A clamp no longer fails as "not stable".
 - Everything below was developed as 1.1.0 and ships in 1.2.0.
 
 - **Session time limit on days of the week**: besides *Every day at HH:MM* (and Duration) tick any days of the week, each with its own time (`sess.mode "weekly"`, `sess.wk` = UTC minutes of the week). Configuration (single / Shared / per channel), Bulk Configuration and Schedule Next Session. Meter: `weekly.h` (shared, host test `weekly_test.cpp`).

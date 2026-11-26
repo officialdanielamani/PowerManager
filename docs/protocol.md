@@ -548,8 +548,9 @@ statistics; the server decides what to do with them. Command (server → meter):
 
 ### 13.2 What the server checks (it owns the thresholds, so they can change without a firmware update)
 
-A check is **acceptable** when `n ≥ 10` and `secs ≥ 10` and the readings are **stable**: for current `max − min ≤ max(0.03 A,
-3 % of the mean)`, for power `max − min ≤ max(3 W, 5 % of the mean)`. Additionally:
+A check is **acceptable** when `n ≥ 10` and `secs ≥ 10` and the readings are **stable**: for current `max − min ≤ max(X A,
+3 % of the mean)` with X = twice the smallest tare of the clamp (0.1 A up to 30 A, 0.3 A up to 50 A, 0.6 A up to 100 A, 1 A above; a clamp is noisier at small currents), for power `max − min ≤ max(3 W, 5 % of the mean)`. The meter counts a reading below 0 (sensor noise with no load, e.g. -1.4 W) as 0 in the check: zero and tare are never negative.
+Additionally:
 - **Zero**: the mean must be small: `a ≤ 1.0 A` and `w ≤ 100 W` — otherwise "a load is still connected".
 - **Tare**: the load must be measurable: `a − zero.a ≥` a minimum that depends on the clamp rating: 0.05 A up to 30 A, 0.15 A up to 50 A, 0.3 A up to 100 A, 0.5 A above (bigger clamps are noisier at small currents), and not above the sensor rating.
 The page shows the numbers and why a check failed; **Set zero / Set tare** is only offered for an acceptable check.
