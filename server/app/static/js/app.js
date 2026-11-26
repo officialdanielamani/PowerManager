@@ -455,7 +455,7 @@ var PM = (function () {
           (function check() {
             fetch(opt.deviceInfo, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (d) {
               if (d.at && d.at !== prev.at) return (body.innerHTML = infoTable(d));
-              if (++tries >= 15) return (body.innerHTML = '<div class="alert alert-warning">The meter did not answer (firmware older than 0.5?).</div>' + (prev.at ? infoTable(prev) : ''));
+              if (++tries >= 15) return (body.innerHTML = '<div class="alert alert-warning">The meter did not answer.</div>' + (prev.at ? infoTable(prev) : ''));
               setTimeout(check, 1000);
             });
           })();

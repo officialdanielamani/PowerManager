@@ -3,13 +3,12 @@
 Where it is stored: `cfg["ch"][i]["next"]` (a channel of a meter in Independent mode) or `cfg["next"]` (a single-channel meter, or the
 whole meter in Shared mode). The settings go to the meter inside its configuration (docs/protocol.md §3, `next`) and the METER carries
 them out at the set time on its own clock, so it also works while the meter is offline (the events it records meanwhile are sent when it
-is back). The server then copies the values into its own configuration (`device_applied`). A meter without that capability
-(`caps.next`) is served by the scheduler (every 30 s) as before. docs/server-ui.md."""
+is back). The server then copies the values into its own configuration (`device_applied`). docs/server-ui.md."""
 import copy
 
 from ..extensions import db
-from ..models import Device, now
-from . import commands, devconfig, hub, notify, settings
+from ..models import now
+from . import devconfig, hub, notify, settings
 
 MIN_AHEAD_S = 300            # at least 5 minutes in the future when it is saved
 MAX_AHEAD_S = 366 * 86400
@@ -142,33 +141,12 @@ def _replace(cfg, ch, n, device):
             cfg["ch"][0][k] = n[k]
 
 
-def _announce(device, ch, n, started, record=True):
-    from . import ingest
-    if record:   # the meter's own event is already in the list when it carried the schedule out itself
-        ingest.server_event(device, "next_session", {"ch": ch, "at": n.get("at"), "by": n.get("by"), "amp_max": n.get("amp_max"),
-                                                      "kwh_max": n.get("kwh_max"), "auto": bool(n.get("auto"))})
+def _announce(device, ch, n):
     who = device.channel_name(ch) + ": " if ch is not None else ""
     limit = f"max {n.get('amp_max')} A, " if n.get("amp_max") is not None else ""
     notify.notify(device, "channel_status",
                   f"{who}the scheduled session settings are now in use ({limit}{n.get('kwh_max') or 'no'} kWh limit)"
-                  + (", a new session started" if started else ""), ch=ch)
-
-
-def execute(device, ch):
-    """The server carries the schedule out (meters without `caps.next`): replace the settings, end the session, start a new one with Auto renew."""
-    cfg = copy.deepcopy(device.cfg or {})
-    n = _node(cfg, ch).pop("next", None)
-    if not n:
-        return
-    _replace(cfg, ch, n, device)
-    device.cfg = cfg
-    _push(device)
-    disabled = bool(cfg["ch"][ch].get("disabled")) if ch is not None else False
-    if not disabled and not device.disabled_at:
-        # The running session ends at this moment; with Auto renew the next one starts on the new settings (renew ends the old one).
-        commands.issue(device, "renew" if n.get("auto") else "end", {"ch": ch} if ch is not None else {})
-    _announce(device, ch, n, bool(n.get("auto")) and not disabled)
-    db.session.commit()
+                  + (", a new session started" if n.get("auto") else ""), ch=ch)
 
 
 def device_applied(device, ch, at):
@@ -185,19 +163,5 @@ def device_applied(device, ch, at):
     _replace(cfg, ch, n, device)
     device.cfg = cfg
     db.session.commit()
-    _announce(device, ch, n, bool(n.get("auto")), record=False)
+    _announce(device, ch, n)
 
-
-def run():
-    """Scheduler job: carry out the schedules of meters that cannot do it themselves."""
-    t = now()
-    for device in Device.query.filter(Device.removed_at.is_(None)).all():
-        if (device.caps or {}).get("next"):
-            continue
-        cfg = device.cfg or {}
-        scopes = [(None, cfg)] if not (device.is_mc and device.mc_mode == "independent") else \
-                 [(i, c) for i, c in enumerate(cfg.get("ch") or [])]
-        for ch, c in scopes:
-            n = (c or {}).get("next")
-            if n and int(n.get("at") or 0) <= t:
-                execute(device, ch)

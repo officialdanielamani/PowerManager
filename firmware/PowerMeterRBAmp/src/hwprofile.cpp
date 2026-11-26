@@ -334,11 +334,6 @@ void begin(const Profile &compiledDefault, uint8_t gpio, const Hooks &hooks) {
       setBoots(0);
       configReset_ = true;
       haveAct = false;
-    } else if (!was) {  // stored by an older firmware: adopt the current config.h as its base
-      Preferences pw;
-      pw.begin("pm", false);
-      pw.putUInt("hw_dh", dfltHash);
-      pw.end();
     }
   }
   if (haveAct) {

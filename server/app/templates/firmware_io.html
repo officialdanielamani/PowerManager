@@ -26,7 +26,7 @@
 
 {% if meter and not view.hw_cfg %}
 <div class="alert alert-warning" style="max-width:1000px"><i class="bi bi-exclamation-triangle me-1"></i>
-  This meter runs firmware {{ meter.fw or '?' }} that does not support hardware profiles. Flash firmware 1.1.0 or newer
+  This meter runs firmware {{ meter.fw or '?' }} that does not support hardware profiles. Flash firmware 1.2.0 or newer
   (<a href="{{ url_for('main.firmware_config_page') }}">Generate config.h</a>), then come back.</div>
 {% elif meter %}
 <div id="io" style="max-width:1000px">

@@ -41,7 +41,7 @@ NOTIFY_OPTS = {t: o for _g, items in NOTIFY_GROUPS for t, _l, o in items}
 NOTIFY_DEFAULT_ON = {"meter_status", "channel_status", "temp_high", "ups", "reboot_pending"}
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
-MIN_FW = (1, 1, 0)  # oldest meter firmware this server works with (both sketches)
+MIN_FW = (1, 2, 0)  # oldest meter firmware this server works with (both sketches)
 
 
 def fw_outdated(device):
@@ -327,7 +327,7 @@ def parse_form(form, device):
     """Return (cfg, errors) from the Configure form."""
     errors = []
     cfg = default_for(device)
-    drdy = device.is_mc and form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", (device.caps or {}).get("rdy", True)))
+    drdy = device.is_mc and form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", True))
     if drdy:
         # DRDY data mode: every measurement window is recorded (no read interval); send every 1-90 s.
         cfg["report_s"] = _num(form, "report_s_drdy", int, 1, DRDY_SEND_MAX, "Send every (s)", errors, DRDY_SEND_DEFAULT)
@@ -448,7 +448,7 @@ def to_device(cfg, ver, calib=None):
             "report_s": int(cfg.get("report_s", 60)),
             "read_s": int(cfg.get("read_s", cfg.get("report_s", 60))),
             "read_ms": int(cfg.get("read_s", cfg.get("report_s", 60))) * 1000,
-            "drdy": bool(cfg.get("drdy", cfg.get("rdy"))),
+            "drdy": bool(cfg.get("drdy")),
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "mode": cfg.get("mode", "shared"),
             "sess": _sess_doc(cfg),

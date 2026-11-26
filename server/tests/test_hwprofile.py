@@ -24,7 +24,7 @@ NEW = {"boards": [0x50, 0x51], "relays": [{"id": 1, "drv": "mcp23017", "addr": 0
 
 @pytest.fixture()
 def mc(app, admin):
-    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "HWP00001", "fw": "1.1.0", "proto": 1,
+    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "HWP00001", "fw": "1.2.0", "proto": 1,
                                          "caps": CAPS})
     assert r.status_code == 200
     with app.app_context():

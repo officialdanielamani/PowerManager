@@ -472,7 +472,6 @@ static void fillCaps(JsonObject caps) {
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
   ota::capsJson(caps["ota"].to<JsonObject>());  // firmware update over the air (docs/protocol.md §14)
-  caps["next"] = 1;                 // carries out Schedule Next Session itself, also offline (docs/protocol.md §3)
   caps["hw_cfg"] = 1;               // hardware profile can be sent by the server (docs/protocol.md §12)
   caps["hw_limits"].to<JsonObject>()["gpio"] = hw::RELAY_GPIO_COUNT;
   if (temp::hasHumidity()) caps["hum"] = true;

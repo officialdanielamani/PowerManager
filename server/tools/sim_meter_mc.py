@@ -82,7 +82,7 @@ def validate_profile(p):
 def caps(n, profile=None):
     c = {"kind": "ac", "mc": True, "sensor": "rbamp", "variant": f"UI{n}", "channels": n, "relays": n,
          "voltage": True, "drdy": True, "rtc": True, "amp_rating": 34.8, "ratings": [30] * n, "inputs": ["tamper"],
-         "hw_cfg": 1, "ota": {"slot": 6291456, "layout": "3e58d8a2", "tag": "PMFWTAG|rbamp-mc|1.1.0|esp32s3-n16r8|"}}
+         "hw_cfg": 1, "ota": {"slot": 6291456, "layout": "3e58d8a2", "tag": "PMFWTAG|rbamp-mc|1.2.0|esp32s3-n16r8|"}}
     if profile:
         chans = profile["ch"]
         total = sum(r["n"] for r in profile["relays"])
@@ -511,7 +511,7 @@ class MeterMC:
             prog("rebooting", 100)
             time.sleep(1.5)
             with self.lock:
-                self.st["fw_prev"], self.st["fw"], self.st["ota_try"] = self.st.get("fw", "1.1.0"), ver, ver
+                self.st["fw_prev"], self.st["fw"], self.st["ota_try"] = self.st.get("fw", "1.2.0"), ver, ver
                 self.st["boot"] += 1
                 save_state(self.args.state, self.st)
             self.reconnect()
@@ -527,7 +527,7 @@ class MeterMC:
             return
         tried = self.st.pop("ota_try")
         if getattr(self.args, "ota_rollback", False):
-            self.st["fw"] = self.st.get("fw_prev", "1.1.0")
+            self.st["fw"] = self.st.get("fw_prev", "1.2.0")
             self.st["ota_note"] = {"why": "no_server", "tried": tried}
             save_state(self.args.state, self.st)
             self.reconnect()
@@ -637,7 +637,7 @@ class MeterMC:
                 self.ws = Client.connect(self.ws_url(), headers=headers)
                 self.log("CONNECTED")
                 with self.lock:
-                    fw = self.st.get("fw", "1.1.0")
+                    fw = self.st.get("fw", "1.2.0")
                     ota = {"state": "trial" if self.st.get("ota_try") else "ok", "ver": fw}
                     if self.st.get("ota_note") and not self.st.get("ota_try"):
                         ota = dict(ota, state="rolled_back", **self.st.pop("ota_note"))

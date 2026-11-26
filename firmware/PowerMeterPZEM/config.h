@@ -4,7 +4,7 @@
 #pragma once
 
 // ================================================================ [1] BOARD INFO
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
 #define HW_NAME "esp32s3-n16r8"
 #define PROTO_VERSION 1
 // 0 = AC meter (PZEM-004T), 1 = DC meter (PZEM-017)

@@ -10,7 +10,7 @@ For whoever takes the project over. Read this first, then `architecture.md` and 
 - **Firmware** (`firmware/`): two Arduino sketches for the ESP32-S3.
   `PowerMeterPZEM` = one channel (PZEM-004T AC or PZEM-017 DC), `PowerMeterRBAmp` = 1–16 channels (rbAmp modules).
   The meter enforces every limit itself and keeps working offline; the server owns the configuration.
-- **Versions**: server 1.1.0 (`server/app/__init__.py`), firmware 1.1.0 (`FW_VERSION` in each `config.h`).
+- **Versions**: server 1.2.0 (`server/app/__init__.py`), firmware 1.2.0 (`FW_VERSION` in each `config.h`).
   The server only supports firmware ≥ `MIN_FW` (`server/app/services/devconfig.py`).
 
 ## 2. What is verified, and what is not

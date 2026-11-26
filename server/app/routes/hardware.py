@@ -109,5 +109,5 @@ def generator_profile(pk):
     d = _meter(pk)
     prof = d.hw_current if (d.hw_current or {}).get("ch") else d.hw_profile
     if not (prof or {}).get("ch"):
-        return jsonify(ok=False, error="This meter has not reported its hardware profile yet (needs firmware 1.1.0)."), 404
+        return jsonify(ok=False, error="This meter has not reported its hardware profile yet (needs firmware 1.2.0)."), 404
     return jsonify(ok=True, name=d.name, **cfggen.from_profile(prof))

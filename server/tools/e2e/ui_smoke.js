@@ -203,7 +203,7 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.click('tr:has-text("RB-Amp 16C Relay") >> text=Flash');
   await page.selectOption('#mSel', { index: 0 });
   await page.waitForSelector('#verdict .alert-success', { timeout: 15000 });
-  check((await page.textContent('#fwBox')).includes('1.3.0') && (await page.textContent('#mBox')).includes('1.1.0'), 'Firmware Info and Meter Info side by side (1.3.0 vs 1.1.0)');
+  check((await page.textContent('#fwBox')).includes('1.3.0') && (await page.textContent('#mBox')).includes('1.2.0'), 'Firmware Info and Meter Info side by side (1.3.0 vs 1.2.0)');
   check(await page.isDisabled('#goBtn'), 'upload button waits for the confirmation');
   await page.check('#okBox');
   await page.click('#goBtn');

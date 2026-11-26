@@ -458,7 +458,7 @@ def notifications(pk):
             r.enabled = form.get(f"notify_{ntype}") == "on"
             if "param" in opts:
                 unit, lo, hi, dflt = opts["param"]
-                raw = (form.get(f"notify_{ntype}_param") or (form.get("notify_disconnected_min") if ntype == "disconnected" else "") or "").strip()
+                raw = (form.get(f"notify_{ntype}_param") or "").strip()
                 try:
                     if not raw:
                         val = r.param or dflt   # not sent: keep the value

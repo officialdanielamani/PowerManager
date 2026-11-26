@@ -463,7 +463,6 @@ static String pairBody(const PairRequest &r) {
   body["hw"] = HW_NAME;
   body["proto"] = PROTO_VERSION;
   JsonObject caps = body["caps"].to<JsonObject>();
-  caps["next"] = 1;  // carries out Schedule Next Session itself, also offline (docs/protocol.md §3)
   caps["kind"] = METER_KIND;  // "ac" / "dc": the server sets the meter type from this
   caps["sensor"] = METER_DC ? "pzem017" : "pzem004t";
   caps["channels"] = SENSOR_CHANNELS;

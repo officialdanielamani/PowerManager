@@ -9,7 +9,7 @@ Two sketches (open the folder's `.ino` in Arduino IDE):
 | `PowerMeterPZEM/PowerMeterPZEM.ino` | single channel: PZEM-004T (AC) or PZEM-017 (DC) — this page |
 | `PowerMeterRBAmp/PowerMeterRBAmp.ino` | multi-channel AC: one or more rbAmp modules — see [`PowerMeterRBAmp/README.md`](PowerMeterRBAmp/README.md) |
 
-Example configurations: [`examples/`](examples/). The server needs firmware 1.0.0 or newer.
+Example configurations: [`examples/`](examples/). The server needs firmware 1.2.0 or newer.
 
 **AC or DC meter:** one sketch, two firmwares. In `config.h` set `METER_DC 0` for the **AC meter** (PZEM-004T) or `METER_DC 1` for the **DC meter** (PZEM-017). Everything else (limits, sessions, mesh, offline buffer, local page) is the same. The meter tells the server its type when it pairs, so the server shows it as AC or DC automatically and uses the matching price. Design: [`../docs/firmware.md`](../docs/firmware.md), protocol: [`../docs/protocol.md`](../docs/protocol.md).
 
@@ -174,9 +174,9 @@ on the server) and AUX relays can react to it, and to the battery % when `BATTER
 
 Both sketches use the same four parts: **[1] Board info** (version, type), **[2] Enable flags** (every optional
 part and link, 1 / 0), **[3] Pin out**, **[4] Options / configuration** (boards, relays, channels, sensors,
-timing). The server makes a complete file for your hardware: *Firmware → Generate config.h*. Firmware 1.0.0 does
-not read settings saved by older versions: after updating an older meter, save its configuration on the server
-once (kWh counters and AUX automation of the old version are not carried over).
+timing). The server makes a complete file for your hardware: *Firmware → Generate config.h*. Firmware 1.2.0 does
+not read the settings saved by older versions: after updating, the meter takes its configuration from the server
+again (kWh counters and relay states of the old version are not carried over).
 
 ## 10. Building and testing without the Arduino IDE
 

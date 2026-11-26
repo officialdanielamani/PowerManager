@@ -2,7 +2,14 @@
 
 Server and firmware are versioned separately; from 1.0.0 the server needs firmware 1.0.0 or newer.
 
-## Unreleased (1.1.0)
+## 1.2.0 (server and firmware)
+
+- **Breaking, old support removed on both sides:** the server works with firmware **1.2.0 or newer** (`MIN_FW`); the meters read no
+  older stored settings (config blobs rbAmp 106 / PZEM 8: they take the configuration from the server again). Removed: the
+  single AUX `event` form (only `events` + `ev_on`), the `rdy` / `notify_disconnected_min` spellings, the `end` flag of the `quota`
+  event, the server-side execution of Schedule Next Session (the meter does it), the `caps.next` flag, database upgrades from
+  versions before 1.0.0 (a 1.0.0 database is still upgraded).
+- Everything below was developed as 1.1.0 and ships in 1.2.0.
 
 - **Session time limit on days of the week**: besides *Every day at HH:MM* (and Duration) tick any days of the week, each with its own time (`sess.mode "weekly"`, `sess.wk` = UTC minutes of the week). Configuration (single / Shared / per channel), Bulk Configuration and Schedule Next Session. Meter: `weekly.h` (shared, host test `weekly_test.cpp`).
 - **Schedule Next Session for every meter** (single channel, Shared mode and Independent channels) and **it works offline**: the schedule is part of the configuration (`next`) and the **meter** carries it out on its own clock (event `next_session` when it is back online; the server then follows). Older firmware (no `caps.next`) is still served by the server. Config blob versions: rbAmp 106, PZEM 8 (the server re-sends the configuration).

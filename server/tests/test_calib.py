@@ -38,7 +38,7 @@ def single(app, admin):
 
 @pytest.fixture()
 def mc(app, admin):
-    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00001", "fw": "1.1.0", "proto": 1,
+    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00001", "fw": "1.2.0", "proto": 1,
                                          "caps": dict(CAPS, channels=3, relays=3, ratings=[30, 30, 30])})
     assert r.status_code == 200
     with app.app_context():
@@ -217,7 +217,7 @@ def test_offline_check_is_refused_by_the_page(app, admin):
 # ------------------------------------------------------------------ tared views, per channel
 
 def test_tare_views_are_per_channel(app, admin):
-    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00002", "fw": "1.1.0", "proto": 1,
+    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00002", "fw": "1.2.0", "proto": 1,
                                          "caps": dict(CAPS, channels=3, relays=3, ratings=[30, 30, 30])})
     assert r.status_code == 200
     t0 = now() - 3600
@@ -251,7 +251,7 @@ def test_tare_views_are_per_channel(app, admin):
 
 
 def test_independent_session_kwh_is_tared_per_channel(app, admin):
-    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00003", "fw": "1.1.0", "proto": 1,
+    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00003", "fw": "1.2.0", "proto": 1,
                                          "caps": dict(CAPS, channels=2, relays=2)})
     assert r.status_code == 200
     t0 = now() - 3600
@@ -272,7 +272,7 @@ def test_independent_session_kwh_is_tared_per_channel(app, admin):
 
 
 def test_independent_meter_kwh_t_is_used_when_the_meter_sends_it(app, admin):
-    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00004", "fw": "1.1.0", "proto": 1,
+    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "CAL00004", "fw": "1.2.0", "proto": 1,
                                          "caps": dict(CAPS, channels=2, relays=2)})
     assert r.status_code == 200
     t0 = now() - 3600

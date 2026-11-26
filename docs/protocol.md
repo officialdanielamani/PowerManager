@@ -178,7 +178,7 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `e` | Meaning |
 |-----|---------|
 | `overcurrent` | A > `amp_max` → relay OFF, latched |
-| `quota` | Session kWh ≥ `kwh_max`. `action`: `end` → followed by `session_end` reason `quota` (the **server also closes the session record on this event**, in case `session_end` is late); `hold` → relay OFF, session stays open; `warn` → power stays on (sent once per session). `end` (bool) is kept for older servers |
+| `quota` | Session kWh ≥ `kwh_max`. `action`: `end` → followed by `session_end` reason `quota` (the **server also closes the session record on this event**, in case `session_end` is late); `hold` → relay OFF, session stays open; `warn` → power stays on (sent once per session). |
 | `session_end` | Session ended (`reason`: quota/expired/manual). Sent **once** per session: renewing a session that a limit already ended does not send another |
 | `session_start` | New session (`sid`, `auto`: bool) |
 | `tamper_open` / `tamper_close` | Panel switch. With Tamper Protection on, `tamper_open` carries `action` |
@@ -242,14 +242,14 @@ The server sends the whole config every time (no partial updates).
 | Field | Range | Default | Notes |
 |-------|-------|---------|-------|
 | `report_s` | 10–3600 | 60 | Send buffered readings to the server every … s (events go right away) |
-| `read_s` | 5–`report_s` | = `report_s` | Record a reading every … s. Example: `read_s` 10 + `report_s` 60 = 6 readings sent together once a minute. Missing (older server) = one reading per send |
+| `read_s` | 5–`report_s` | = `report_s` | Record a reading every … s. Example: `read_s` 10 + `report_s` 60 = 6 readings sent together once a minute. |
 | `offline_off_min` | 0–1440 | 0 | 0 = disabled |
 | `sess.mode` | `weekly` / `daily` / `duration` / `none` | `none` | `none` = no time limit |
 | `sess.daily_utc_min` | 0–1439 | – | Local reset time converted to UTC by the server. Example: 01:00 at UTC+08:00 → 17:00 UTC → `1020` |
 | `sess.wk` | list of 1–7 integers, 0–10079 | – | `weekly` mode: reset times as **UTC minutes of the week**, Monday 00:00 UTC = 0 (Wednesday 18:30 UTC = 2·1440 + 1110). The server converts the chosen days + times of its time zone (using the offset of the moment it builds the config, like `daily_utc_min`). The session ends at the first of these times after it started (`src/weekly.h`, host test `tools/weekly_test.cpp`). The meter rejects `weekly` without a time |
 | `sess.dur_min` | 1–525600 | – | Duration mode; UI enters days/hours/minutes |
 | `sess.auto` | bool | false | |
-| `next` | object | absent | **Schedule Next Session** of the whole meter (single-channel meter, or Shared mode of a multi-channel meter): `{"at": epoch, "kwh_max", "kwh_action", "amp_max"?, "sess": {…as `sess`}}`. At `at` (epoch, the **meter's clock**: NTP or RTC) the values replace the current ones (`amp_max` only for a single-channel meter; in Shared mode only `kwh_max`, `kwh_action` and `sess`), the running session ends and, with `sess.auto`, a new one starts on them (end reason `next`; without `auto` the session just ends, relay off until Renew). Then the meter drops the schedule, remembers its `at` in NVS (a configuration that still carries that `at` is not run again) and sends the event `next_session`. **It runs while the meter is offline**; without a valid clock it waits for one. A schedule that is already past when the meter receives it (or when its clock becomes valid) runs at once. Announced with `caps.next: 1` |
+| `next` | object | absent | **Schedule Next Session** of the whole meter (single-channel meter, or Shared mode of a multi-channel meter): `{"at": epoch, "kwh_max", "kwh_action", "amp_max"?, "sess": {…as `sess`}}`. At `at` (epoch, the **meter's clock**: NTP or RTC) the values replace the current ones (`amp_max` only for a single-channel meter; in Shared mode only `kwh_max`, `kwh_action` and `sess`), the running session ends and, with `sess.auto`, a new one starts on them (end reason `next`; without `auto` the session just ends, relay off until Renew). Then the meter drops the schedule, remembers its `at` in NVS (a configuration that still carries that `at` is not run again) and sends the event `next_session`. **It runs while the meter is offline**; without a valid clock it waits for one. A schedule that is already past when the meter receives it (or when its clock becomes valid) runs at once.|
 | `ch[].next` | object | absent | The same for one channel of a meter in Independent mode (`amp_max` included) |
 | `ch[].kwh_max` | 0–100000 | 0 | 0 = unlimited |
 | `ch[].kwh_action` | `warn` / `hold` / `end` | `hold` | What happens at `kwh_max`. **warn** = *Session run as usual* (`quota` event once + `sess.over`, power stays on). **hold** = *Off relay, but session continue* (relay OFF until the session ends at its time limit or is renewed). **end** = *End session* now (relay OFF until renewed). |
@@ -384,8 +384,8 @@ Config `aux[i]`:
 
 ## 11. Supported firmware
 
-The server works with meter firmware **1.1.0 or newer** (both sketches; the hardware profile of §12 uses relay board +
-output for a channel's relay, which older firmware does not know). Older firmware is not supported: the
+The server works with meter firmware **1.2.0 or newer** (both sketches; weekly session resets and Schedule Next Session
+of §3, the hardware profile of §12 ...). Older firmware is not supported: the
 meter's Configuration page and the Firmware page show that it must be updated. What a meter can do is taken from
 `hello.caps` (parts switched on in its `config.h`), not from its version number.
 

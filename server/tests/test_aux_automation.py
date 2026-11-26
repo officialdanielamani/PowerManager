@@ -204,10 +204,6 @@ def test_event_or_conditions(app, admin):
     # an event relay needs a condition
     r = admin.post(f"/meters/{pk}/configure", data=_form(**{"aux_mode_0": "event", "aux_ev_src_0": ""}))
     assert b"choose what the relay reacts to" in r.data
-    # older stored config: one "event" with its own "on"
-    legacy = auxcfg.norm({"mode": "event", "event": {"src": "temp", "idx": 1, "cmp": "over", "value": 50, "on": False}})
-    assert legacy["events"] == [{"src": "temp", "idx": 1, "cmp": "over", "value": 50}] and legacy["ev_on"] is False and "event" not in legacy
-    assert auxcfg.to_device([{"mode": "event", "event": {"src": "temp", "idx": 1, "cmp": "over", "value": 50, "on": False}}])[0]["ev_on"] is False
 
 
 def test_save_returns_to_configuration(app, admin):

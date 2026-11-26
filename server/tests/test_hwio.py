@@ -16,7 +16,7 @@ from .test_pairing import _code
 
 @pytest.fixture()
 def mc(app, admin):
-    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "HWIO0001", "fw": "1.1.0", "proto": 1, "caps": CAPS})
+    r = admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "HWIO0001", "fw": "1.2.0", "proto": 1, "caps": CAPS})
     assert r.status_code == 200
     with app.app_context():  # (not kept open around the requests: flask-login would reuse the cached user)
         d = Device.query.filter_by(device_id="HWIO0001").one()
@@ -152,7 +152,7 @@ def test_generator_starts_from_the_meter(app, admin, mc):
 
 
 def test_no_profile_known_yet(app, admin):
-    assert admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "HWIO0003", "fw": "1.1.0", "proto": 1,
+    assert admin.post("/api/v1/pair", json={"code": _code(admin), "device_id": "HWIO0003", "fw": "1.2.0", "proto": 1,
                                             "caps": CAPS}).status_code == 200
     with app.app_context():
         pk = Device.query.filter_by(device_id="HWIO0003").one().id
@@ -188,12 +188,12 @@ def test_generator_relay_boards_a_and_b(app, admin):
 
 def test_old_firmware_is_outdated(app):
     from app.services import devconfig
-    assert devconfig.MIN_FW == (1, 1, 0)
+    assert devconfig.MIN_FW == (1, 2, 0)
 
     class D:
-        fw = "1.0.0"
+        fw = "1.1.0"
     assert devconfig.fw_outdated(D)
-    D.fw = "1.1.0"
+    D.fw = "1.2.0"
     assert not devconfig.fw_outdated(D)
 
 

@@ -62,9 +62,9 @@ def ota_meter(app, name="Dryer A", did="AAAA1111", **over):
     with app.app_context():
         pk = _meter(name, did)
         d = db.session.get(Device, pk)
-        d.fw, d.fw_type = "1.1.0", "rbamp-mc"
+        d.fw, d.fw_type = "1.2.0", "rbamp-mc"
         d.caps = {"channels": 1, "ota": {"slot": 6291456, "layout": LAYOUT, "tag": "x"}}
-        d.ota = {"state": "ok", "ver": "1.1.0", "hw": "esp32s3-n16r8"}
+        d.ota = {"state": "ok", "ver": "1.2.0", "hw": "esp32s3-n16r8"}
         for k, v in over.items():
             setattr(d, k, v)
         db.session.commit()
@@ -248,8 +248,8 @@ def test_ota_failed_and_rollback(app, admin, online):
     with app.app_context():
         d = db.session.get(Device, pk)
         ingest.handle(FakeConn(), d, {"t": "evt", "seq": 2, "ts": now(), "tv": 1, "e": "ota_progress", "state": "rebooting", "pct": 100, "ver": "1.3.0"})
-        ingest.handle(FakeConn(), d, {"t": "hello", "fw": "1.1.0", "fw_type": "rbamp-mc", "proto": 1,
-                                      "ota": {"state": "rolled_back", "ver": "1.1.0", "tried": "1.3.0", "why": "no_server"},
+        ingest.handle(FakeConn(), d, {"t": "hello", "fw": "1.2.0", "fw_type": "rbamp-mc", "proto": 1,
+                                      "ota": {"state": "rolled_back", "ver": "1.2.0", "tried": "1.3.0", "why": "no_server"},
                                       "caps": {"channels": 1, "ota": {"slot": 1, "layout": LAYOUT}}})
         db.session.commit()
         job = OtaJob.query.order_by(OtaJob.id.desc()).first()

@@ -108,7 +108,7 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 
 ### Firmware (admin, manager)
 **List of firmware** with one **Generate config.h** button; the list itself is empty for now (OTA updates are
-coming in a later version). A warning shows when some of your meters run firmware older than 1.0.0.
+coming in a later version). A warning shows when some of your meters run firmware older than 1.2.0.
 
 **Generate config.h** (own page, `/firmware/config`): choose the meter type, power sensor boards / channels, relay
 boards, temperature / humidity sensors, other parts (RTC, tamper, UPS input, battery) and defaults (WebSocket /
@@ -270,14 +270,14 @@ switch the measured relays; use an AUX relay event for that.
 The Configuration page is split into tabs: **General**, **Limits & protection**, **Channels** (single-channel
 meters: **Tare**), **AUX relays** (when the meter has them), **Data**, **Users** and **Connection**. One **Save**
 bar at the bottom saves every tab at once; Connection has its own *Send to meter* buttons. The page remembers the
-last tab, and a field the browser refuses opens its tab. A meter on firmware older than 1.0.0 shows a warning
+last tab, and a field the browser refuses opens its tab. A meter on firmware older than 1.2.0 shows a warning
 that it must be updated.
 
 
 ## Firmware → Update Device I/O (hardware profile of an rbAmp meter)
 
 Admin, and a manager for their own meters (a viewer gets 403). Reached from the Firmware page, next to **Generate
-config.h**. Needs a multi-channel meter with firmware 1.1.0 or newer (`caps.hw_cfg`); older meters show a hint.
+config.h**. Needs a multi-channel meter with firmware 1.2.0 or newer (`caps.hw_cfg`).
 Protocol, rollback and rules: [protocol.md §12](protocol.md).
 
 1. **Select meter**: the multi-channel meters the user manages.
@@ -376,7 +376,7 @@ On the Info page the **Channels** button of *Historical data* opens a list with 
 
 *Configuration*: a **Schedule Next Session** switch under the session settings of **every** kind of meter: a single-channel meter and Shared mode (under *Auto renew*, for the whole meter) and every channel in Independent mode (*Channels*). ON shows a second set of fields (Max A, kWh limit + action, session time limit, Auto renew) that **replace the current ones at a set time**, and a countdown ("Starts in 2d 03:12:05"). Shared mode has no Max A in the schedule (that is per channel). *This will be set on*: **Next DD:HH:MM** (from the moment you press Save) or **On** a calendar date and time (display time zone). The time must be **at least 5 minutes ahead** when you press **Save** (the panel has its own Save; it does not wait for the page's Save). What happens at that time: the running session ends, the new values replace the old ones and, with **Auto renew** ticked, a new session starts on them; without it the session stays ended until it is renewed. Then the schedule is cleared ("Future: not set"). Switch OFF = the current settings go on as usual (the schedule is removed). The Info page shows "New session settings on …". A normal Save of the Configuration keeps the schedule.
 
-**Works offline.** The schedule is sent to the meter inside its configuration and **the meter carries it out on its own clock** (docs/protocol.md §3 `next`), so it happens on time even when the meter has no connection (it needs a valid clock: NTP before it went offline, or an RTC). The sessions and events it creates are buffered and reach the server when the meter is back; the server then takes the new values over (event `next_session`) and clears the schedule. If you switch the schedule OFF while the meter is offline, the meter learns it at the next connection (if the time came earlier, it ran it and the server then puts the meter back to the server's settings). A meter with older firmware (no `caps.next`) is served by the server (checked every 30 s, the renew / end command is queued while it is offline).
+**Works offline.** The schedule is sent to the meter inside its configuration and **the meter carries it out on its own clock** (docs/protocol.md §3 `next`), so it happens on time even when the meter has no connection (it needs a valid clock: NTP before it went offline, or an RTC). The sessions and events it creates are buffered and reach the server when the meter is back; the server then takes the new values over (event `next_session`) and clears the schedule. If you switch the schedule OFF while the meter is offline, the meter learns it at the next connection (if the time came earlier, it ran it and the server then puts the meter back to the server's settings).
 
 ## Session time limit: days of the week
 

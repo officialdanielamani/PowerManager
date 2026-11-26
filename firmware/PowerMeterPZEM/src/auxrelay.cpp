@@ -145,17 +145,12 @@ bool parse(JsonArrayConst list, int tzMin, const char *&err) {
       c.s[k].on = s["on"] | true;
       k++;
     }
-    // Event conditions: "events": [ ... ] (1..3, OR-ed) with "ev_on" (relay ON while any is true); the older single "event" still works.
+    // Event conditions: "events": [ ... ] (1..3, OR-ed) with "ev_on" (relay ON while any is true).
     JsonArrayConst evs = a["events"];
-    JsonObjectConst one = a["event"];
     uint8_t n = 0;
     bool evOn = a["ev_on"] | true;
-    if (evs.isNull() && !one.isNull()) {
-      evOn = one["on"] | true;
-      n = 1;
-    }
-    for (uint8_t k = 0; k < (evs.isNull() ? (uint8_t)(n ? 1 : 0) : (uint8_t)evs.size()); k++) {
-      JsonObjectConst e = evs.isNull() ? one : evs[k].as<JsonObjectConst>();
+    for (uint8_t k = 0; k < (uint8_t)evs.size(); k++) {
+      JsonObjectConst e = evs[k].as<JsonObjectConst>();
       if (k >= EV_MAX) {
         err = "aux.event";
         return false;

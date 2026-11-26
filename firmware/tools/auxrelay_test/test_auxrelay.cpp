@@ -15,7 +15,7 @@ int main() {
     {"i":0,"name":"Desk Lamp","mode":"schedule","override":true,"else":"off",
      "sched":[{"on":true,"start":1080,"end":1439,"days":127},{"on":true,"start":60,"end":120,"days":32}]},
     {"i":1,"name":"Exhaust Fan","mode":"event","override":false,
-     "event":{"src":"temp","idx":1,"cmp":"over","value":50,"on":true}},
+     "ev_on":true,"events":[{"src":"temp","idx":1,"cmp":"over","value":50}]},
     {"i":2,"name":"Night","mode":"schedule","else":"off","sched":[{"on":true,"start":1320,"end":360,"days":1}]}])");
   const char *err = nullptr;
   assert(auxrelay::parse(d.as<JsonArrayConst>(), 480, err));
@@ -51,8 +51,8 @@ int main() {
   deserializeJson(d, R"([
     {"i":0,"mode":"schedule","else":"off","sched":[{"on":true,"start":1200,"end":120,"date":[2026,12,25]},
                                                    {"on":true,"start":0,"end":0,"date":[0,1,1]}]},
-    {"i":1,"mode":"event","event":{"src":"watt","idx":254,"cmp":"over","value":100,"on":true}},
-    {"i":2,"mode":"event","event":{"src":"tamper","active":true,"on":true}}])");
+    {"i":1,"mode":"event","ev_on":true,"events":[{"src":"watt","idx":254,"cmp":"over","value":100}]},
+    {"i":2,"mode":"event","ev_on":true,"events":[{"src":"tamper","active":true}]}])");
   assert(auxrelay::parse(d.as<JsonArrayConst>(), 480, err));
   auxrelay::commit();
   const int XMAS = 48;  // days from Sat 2026-11-07 to Fri 2026-12-25
@@ -78,7 +78,7 @@ int main() {
   deserializeJson(d, R"([
     {"i":0,"mode":"event","ev_on":true,"events":[{"src":"wifi","active":true},{"src":"tamper","active":true},{"src":"temp","idx":1,"cmp":"over","value":50}]},
     {"i":1,"mode":"event","ev_on":false,"events":[{"src":"wifi","active":true},{"src":"session","running":false}]},
-    {"i":2,"mode":"event","event":{"src":"tamper","active":true,"on":true}}])");
+    {"i":2,"mode":"event","ev_on":true,"events":[{"src":"tamper","active":true}]}])");
   assert(auxrelay::parse(d.as<JsonArrayConst>(), 480, err));
   auxrelay::commit();
   g_temp[1] = 20; in.running[0] = true;

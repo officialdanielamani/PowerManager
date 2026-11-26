@@ -2,7 +2,7 @@
 import pytest
 
 from app.extensions import db
-from app.models import Command, Device, Event, Notification, now
+from app.models import Command, Device, Notification, now
 from app.services import hub, nextsession
 
 from .test_multichannel import _form, _pair_mc
@@ -68,30 +68,22 @@ def test_set_validate_clear(app, admin, mc):
     assert admin.post(f"/meters/{mc}/next-session", json=BODY).status_code == 400
 
 
-def test_execute_with_and_without_auto_renew(app, admin, mc, online):
+def test_meter_carries_it_out_and_the_server_follows(app, admin, mc, online):
     admin.post(f"/meters/{mc}/next-session", json=BODY)
     admin.post(f"/meters/{mc}/next-session", json=dict(BODY, ch=1, auto="", amp_max="7", sess_mode="none"))
-    with app.app_context():                                   # make both due
+    assert any(m.get("t") == "cfg" and m["cfg"]["ch"][0].get("next") for m in online)   # the schedule is on the meter
+    with app.app_context():
         d = db.session.get(Device, mc)
-        import copy
-        cfg = copy.deepcopy(d.cfg)
-        for c in cfg["ch"]:
-            c["next"]["at"] = now() - 5
-        d.cfg = cfg
-        d.cfg_ver_wanted = 5
-        db.session.commit()
-        nextsession.run()
+        ats = [c["next"]["at"] for c in d.cfg["ch"]]
+        ver = d.cfg_ver_wanted
+        nextsession.device_applied(d, 0, ats[0])
+        nextsession.device_applied(d, 1, ats[1])
         d = db.session.get(Device, mc)
         assert d.cfg["ch"][0]["amp_max"] == 13.5 and d.cfg["ch"][0]["daily_at"] == "23:30" and "next" not in d.cfg["ch"][0]
         assert d.cfg["ch"][1]["amp_max"] == 7 and d.cfg["ch"][1]["sess_mode"] == "none" and "next" not in d.cfg["ch"][1]
-        assert d.cfg_ver_wanted == 7                                       # one new config per channel
-        cmds = [(c.c, c.params) for c in Command.query.filter_by(device_fk=mc).order_by(Command.id)]
-        assert ("renew", {"ch": 0}) in cmds and ("end", {"ch": 1}) in cmds   # auto renew starts the new session; otherwise it just ends
-        assert any(m.get("t") == "cfg" for m in online)
-        assert Event.query.filter_by(device_fk=mc, type="next_session").count() == 2
+        assert d.cfg_ver_wanted == ver                     # nothing to send: the meter already runs on the new values
+        assert Command.query.filter_by(device_fk=mc).count() == 0
         assert any("scheduled session settings" in n.message for n in Notification.query.all())
-        nextsession.run()                                                  # nothing left to do
-        assert Command.query.filter_by(device_fk=mc).count() == len(cmds)
 
 
 def test_voltage_default_button(app, admin, mc):
@@ -165,7 +157,7 @@ def test_schedule_single_channel_meter(app, admin, online):
         assert any(m.get("t") == "cfg" and "next" not in m["cfg"] for m in online)
 
 
-def test_schedule_shared_mode_and_server_fallback(app, admin, mc, online):
+def test_schedule_shared_mode(app, admin, mc, online):
     admin.post(f"/meters/{mc}/configure", data=_form(mode="shared", kwh_max="10", kwh_action="hold", sess_mode="daily", daily_at="06:00"))
     body = {"action": "set", "when": "rel", "d": 0, "h": 2, "m": 0, "kwh_max": "20", "kwh_action": "end", "sess_mode": "none", "auto": "on"}
     assert "amp_max" not in admin.post(f"/meters/{mc}/next-session", json=body).get_json()["next"]
@@ -173,22 +165,9 @@ def test_schedule_shared_mode_and_server_fallback(app, admin, mc, online):
     with app.app_context():
         d = db.session.get(Device, mc)
         assert d.cfg["next"]["kwh_max"] == 20 and (d.cfg["ch"][0].get("next") is None)
-        import copy
-        cfg = copy.deepcopy(d.cfg)
-        cfg["next"]["at"] = now() - 5
-        d.cfg = cfg
-        db.session.commit()
-        # the meter reports the capability: it carries the schedule out itself, the server leaves it alone
-        d.caps = dict(d.caps or {}, next=1)
-        db.session.commit()
-        nextsession.run()
-        assert "next" in db.session.get(Device, mc).cfg
-        d.caps = dict(d.caps, next=0)
-        db.session.commit()
-        nextsession.run()                                  # old firmware: the server does it
+        nextsession.device_applied(d, None, d.cfg["next"]["at"])
         d = db.session.get(Device, mc)
-        assert "next" not in d.cfg and d.cfg["kwh_max"] == 20 and d.cfg["sess_mode"] == "none"
-        assert ("renew", {}) in [(c.c, c.params) for c in Command.query.filter_by(device_fk=mc)]
+        assert "next" not in d.cfg and d.cfg["kwh_max"] == 20 and d.cfg["sess_mode"] == "none" and d.cfg["kwh_action"] == "end"
 
 
 def test_config_page_shows_weekly_and_meter_panel(app, admin, mc):

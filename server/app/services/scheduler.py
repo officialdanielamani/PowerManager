@@ -5,7 +5,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ..extensions import db
 from ..models import Device, Incident, now
-from . import devconfig, nextsession, notify, notify_limits, rollup
+from . import devconfig, notify, notify_limits, rollup
 
 log = logging.getLogger(__name__)
 _scheduler = None
@@ -115,7 +115,6 @@ def start(app):
     sch.add_job(wrap(check_tz_offset), "interval", minutes=30, id="tz_offset")
     sch.add_job(wrap(check_disconnected), "interval", seconds=60, id="disconnected")
     sch.add_job(wrap(notify_limits.run), "interval", seconds=30, id="notify_limits")
-    sch.add_job(wrap(nextsession.run), "interval", seconds=30, id="next_session")
     sch.add_job(wrap(run_rollups), "interval", minutes=5, id="rollups")
     sch.add_job(wrap(rollup.retention), "cron", hour=3, minute=17, id="retention")
     sch.add_job(wrap(cleanup), "cron", hour=3, minute=41, id="cleanup")

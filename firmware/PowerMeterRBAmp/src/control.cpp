@@ -1092,7 +1092,6 @@ static void checkRules(bool firstPass) {
         if (c->ch >= 0) o["ch"] = c->ch;
         o["kwh"] = serialized(String(c->kwh, 4));
         o["action"] = c->action;
-        o["end"] = strcmp(c->action, "warn") != 0;
       };
       if (act == KWH_WARN) {
         if (!ss.over) {  // warn once, keep the power on

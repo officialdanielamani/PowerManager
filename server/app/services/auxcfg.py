@@ -44,19 +44,14 @@ def default():
 
 
 def norm(a):
-    """One stored AUX entry in the current form. Older configs had a single "event" with its own "on": it becomes the first
-    condition of "events", and its "on" the relay action of the whole list ("ev_on")."""
+    """One stored AUX entry: missing keys get their defaults, at most EV_MAX event conditions."""
     a = dict(default(), **(a or {}))
-    old = a.pop("event", None)
-    if old and not a.get("events"):
-        a["ev_on"] = bool(old.get("on", True))
-        a["events"] = [{k: v for k, v in old.items() if k != "on"}]
     a["events"] = [e for e in (a.get("events") or []) if isinstance(e, dict)][:EV_MAX]
     return a
 
 
 def fit(items, n):
-    """Pad / trim a stored AUX list to n relays (older configs only had names)."""
+    """Pad / trim a stored AUX list to n relays."""
     return [norm(a) for a in (list(items or []) + [None] * n)[:n]]
 
 
