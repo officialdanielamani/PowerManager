@@ -713,6 +713,10 @@ def process_event(device, ev):
                           f"{pre}Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed", ch=ev.ch)
         else:
             notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit exceeded ({kwh} kWh): power kept on", ch=ev.ch)
+    elif e == "next_session":
+        # The meter carried out its Schedule Next Session itself (it may have been offline at that time): see services/nextsession.py
+        from . import nextsession
+        nextsession.device_applied(device, mch if device.is_mc and device.mc_mode == "independent" else None, d.get("at"))
     elif e == "session_start":
         sid = d.get("sid")
         if isinstance(sid, int):

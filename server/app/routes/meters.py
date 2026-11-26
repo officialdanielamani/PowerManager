@@ -132,14 +132,13 @@ def calibration_clear(pk):
 @bp.post("/<int:pk>/next-session")
 @staff_required
 def next_session(pk):
-    """Schedule Next Session of a channel (Configuration -> Channels): action set | clear."""
+    """Schedule Next Session of a channel or of the whole meter (Configuration): action set | clear."""
     device = _device(pk)
     body = request.get_json(silent=True) or {}
     ch = body.get("ch")
-    ch = int(ch) if str(ch).isdigit() else None
+    ch = int(ch) if str(ch).isdigit() else None   # none = the whole meter (single channel / Shared mode)
     if body.get("action") == "clear":
-        ok = nextsession.clear(device, ch) if ch is not None else False
-        return jsonify(ok=True, cleared=ok)
+        return jsonify(ok=True, cleared=nextsession.clear(device, ch))
     info, errors = nextsession.schedule(device, ch, body, current_user)
     if errors:
         return jsonify(ok=False, errors=errors), 400
@@ -1187,7 +1186,7 @@ def _bulk_apply(cfg, new, groups):
     if "report" in groups:
         out["report_s"], out["read_s"] = new["report_s"], new["read_s"]
     if "session" in groups:
-        for k in ("sess_mode", "dur_min", "daily_at", "auto"):
+        for k in ("sess_mode", "dur_min", "daily_at", "week", "auto"):
             out[k] = new[k]
     if "offline" in groups:
         out["offline_off"], out["offline_off_min"] = new["offline_off"], new["offline_off_min"]
@@ -1271,7 +1270,7 @@ def bulk_configure():
         "report": _differs(devices, lambda c: (c.get("read_s", c.get("report_s")), c.get("report_s"))),
         "kwh": _differs(devices, lambda c: [(x.get("kwh_max"), devconfig.kwh_action(x)) for x in c.get("ch", [])]),
         "amp": _differs(devices, lambda c: [x.get("amp_max") for x in c.get("ch", [])]),
-        "session": _differs(devices, lambda c: (c.get("sess_mode"), c.get("dur_min"), c.get("daily_at"), c.get("auto"))),
+        "session": _differs(devices, lambda c: (c.get("sess_mode"), c.get("dur_min"), c.get("daily_at"), c.get("week"), c.get("auto"))),
         "offline": _differs(devices, lambda c: (c.get("offline_off"), c.get("offline_off_min"))),
         "voltage": _differs(devices, lambda c: (c.get("volt_min", 0), c.get("volt_max", 0), c.get("volt_action", "hold"))),
         "tamper": _differs(devices, lambda c: (bool(c.get("tamper_protect")), c.get("tamper_action", "hold"))),

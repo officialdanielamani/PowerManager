@@ -43,6 +43,8 @@ void saveConfig(const MeterConfig &c);
 // Session slot i (0 in shared mode, one per channel in independent mode).
 void loadSession(uint8_t i, SessionState &s);
 void saveSession(uint8_t i, const SessionState &s);
+void loadNextDone(uint32_t d[MC_MAX_CH + 1]);
+void saveNextDone(const uint32_t d[MC_MAX_CH + 1]);
 uint32_t loadSidCounter();
 void saveSidCounter(uint32_t n);
 

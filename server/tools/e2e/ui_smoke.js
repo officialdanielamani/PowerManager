@@ -174,6 +174,18 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.waitForTimeout(1500);
   check(page.url().includes('/configure') && !page.url().match(/\/meters\/\d+$/), 'after saving the page stays on the configuration');
 
+  // ---------------- Days of the week + Schedule Next Session of the whole meter (Shared mode)
+  await page.goto(base + '/meters/' + pk + '/configure');
+  const weekOk = await page.evaluate(() => {
+    const box = document.querySelector('.pm-week'), all = box.querySelector('.pm-wk-all');
+    all.checked = true; all.dispatchEvent(new Event('change', { bubbles: true }));
+    const every = [...box.querySelectorAll('.pm-wk-day')].every(c => c.checked) && [...box.querySelectorAll('.pm-wk-time')].every(t => !t.disabled);
+    const one = box.querySelector('.pm-wk-day'); one.checked = false; one.dispatchEvent(new Event('change', { bubbles: true }));
+    return every && box.querySelector('.pm-wk-time').disabled && !all.checked;
+  });
+  check(weekOk, 'days of the week: "All days" ticks every day, a day without a tick has its time disabled');
+  check(await page.locator('.pm-next[data-ch=""]').count() === 1, 'Schedule Next Session is offered for the whole meter too');
+
   // ---------------- Firmware list, OTA update of the simulated meter, USB tab
   await page.goto(base + '/firmware');
   await page.click('text=Add New Firmware');

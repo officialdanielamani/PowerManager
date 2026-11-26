@@ -370,7 +370,7 @@ static void hState() {
   JsonObject c = d["cfg"].to<JsonObject>();
   static const char *KA[] = {"end", "hold", "warn"};
   static const char *PA[] = {"run", "hold", "end"};
-  static const char *SM[] = {"none", "duration", "daily"};
+  static const char *SM[] = {"none", "duration", "daily", "weekly"};
   c["report_s"] = g.cfg.report_s;
   c["read_s"] = g.cfg.read_s;
   c["read_ms"] = g.cfg.read_ms;
@@ -378,7 +378,7 @@ static void hState() {
   c["mode"] = g.cfg.mode == MODE_INDEPENDENT ? "independent" : "shared";
   c["kwh_max"] = num4(g.cfg.kwh_max);
   c["kwh_action"] = KA[g.cfg.kwh_action % 3];
-  c["sess_mode"] = SM[g.cfg.sess.mode % 3];
+  c["sess_mode"] = SM[g.cfg.sess.mode % 4];
   c["auto"] = g.cfg.sess.auto_renew;
   c["offline_off_min"] = g.cfg.offline_off_min;
   c["volt_min"] = num4(g.cfg.volt_min);
@@ -414,7 +414,7 @@ static void hState() {
     JsonObject o = cc.add<JsonObject>();
     o["amp_max"] = num4(g.cfg.ch[i].amp_max);
     o["kwh_max"] = num4(g.cfg.ch[i].kwh_max);
-    o["sess_mode"] = SM[g.cfg.ch[i].sess.mode % 3];
+    o["sess_mode"] = SM[g.cfg.ch[i].sess.mode % 4];
     o["auto"] = g.cfg.ch[i].sess.auto_renew;
   }
   sendJson(200, d);

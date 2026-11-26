@@ -7,7 +7,7 @@
 #include "hwmap.h"
 
 enum KwhAction : uint8_t { KWH_END = 0, KWH_HOLD = 1, KWH_WARN = 2 };
-enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
+enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2, SESS_WEEKLY = 3 };
 // ENDED = ended early (protection, End command, mode change, disabled): relay off until renewed.
 enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, SESS_ENDED = 3 };
 // Voltage / tamper / sensor protection: run as usual, relay off while the problem lasts, or end the session.
@@ -35,8 +35,20 @@ enum NetStatus : uint8_t {
 struct SessConfig {
   SessMode mode = SESS_NONE;
   uint16_t daily_utc_min = 0;
+  uint8_t nwk = 0;         // weekly: reset times as UTC minutes of the week (Monday 00:00 UTC = 0), see weekly.h
+  uint16_t wk[7] = {0};
   uint32_t dur_min = 1440;
   bool auto_renew = false;
+};
+
+// Schedule Next Session (docs/protocol.md §3 `next`): new limits and session details that replace the current ones at `at` (epoch).
+// The meter carries it out on its own clock, also while it is offline; at == 0: none.
+struct NextCfg {
+  uint32_t at = 0;
+  float amp_max = 0;
+  float kwh_max = 0;
+  uint8_t kwh_action = KWH_HOLD;
+  SessConfig sess;
 };
 
 struct ChConfig {
@@ -47,6 +59,7 @@ struct ChConfig {
   SessConfig sess;        // independent mode
   float zeroA = 0, zeroW = 0;  // sensor offset with no load, subtracted after every read (docs/protocol.md §13.4)
   float tareA = 0, tareW = 0;  // a connected load that counts as 0: tared values for the limits (§13.5)
+  NextCfg next;                // Schedule Next Session (independent mode)
   bool disabled = false;       // channel disabled by an admin / manager (docs/protocol.md §15): no session, relay off
 };
 
@@ -72,6 +85,7 @@ struct MeterConfig {
   float temp_max = 0;         // over-temperature: any sensor above this (degC); 0 = off
   uint8_t temp_action = ACT_HOLD;
   bool tare_limits = true;    // the limits (max current, kWh) use the tared values
+  NextCfg next;               // Schedule Next Session (shared mode: kwh_max, kwh_action, sess)
   ChConfig ch[MC_MAX_CH];
 };
 

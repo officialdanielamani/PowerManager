@@ -118,6 +118,8 @@ def meter_summary(d, show_price=None, user=None):
         "synced": d.synced,
         "ongoing": [i for i in ongoing if i != "offline"],
         "session_desc": devconfig.describe_session(d.cfg or {}),
+        "next_at_local": (settings.fmt_ts((d.cfg or {}).get("next", {}).get("at"), with_seconds=False)
+                          if (d.cfg or {}).get("next") and not (d.is_mc and d.mc_mode == "independent") else None),
         "auto": bool((d.cfg or {}).get("auto")),
     }
     out["aux"] = _aux_summary(d, st) if allowed is None else []

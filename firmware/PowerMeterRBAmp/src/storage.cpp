@@ -51,7 +51,7 @@ static void checkFirmwareType() {
     static const char *KEYS[] = {"cfg", "s_sid", "s_start", "s_e0", "s_stat", "s_over", "s_end", "s_stop", "s_tare",
                                  "want", "tripped", "wantm", "tripm", "energy", "nch", "sidc", "started",
                                  "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6", "auxm",
-                                 "hw_act", "hw_try", "hw_boots", "hw_note"};  // hw_*: hardware profile (hwprofile.cpp)
+                                 "hw_act", "hw_try", "hw_boots", "hw_note", "nxd"};  // hw_*: hardware profile (hwprofile.cpp)
     for (const char *k : KEYS) pm.remove(k);
     Serial.printf("[store] firmware type changed (%s -> %s): old sessions / kWh / relay state cleared\n",
                   prev.c_str(), FW_TYPE);
@@ -160,13 +160,13 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 105) return false;  // other layout: use defaults, the server re-sends the config
+  if (b.version != 106) return false;  // other layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 105;
+  b.version = 106;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }
@@ -195,6 +195,13 @@ void saveSession(uint8_t i, const SessionState &s) {
   b.s = s;
   pm.putBytes(key, &b, sizeof(b));
 }
+// `at` of the last Schedule Next Session carried out per scope (a channel, the last entry = the whole meter): a configuration
+// from the server that still holds that schedule (it has not heard of it yet) must not run it again.
+void loadNextDone(uint32_t d[MC_MAX_CH + 1]) {
+  if (pm.getBytesLength("nxd") != sizeof(uint32_t) * (MC_MAX_CH + 1) || !pm.getBytes("nxd", d, sizeof(uint32_t) * (MC_MAX_CH + 1)))
+    for (int i = 0; i <= MC_MAX_CH; i++) d[i] = 0;
+}
+void saveNextDone(const uint32_t d[MC_MAX_CH + 1]) { pm.putBytes("nxd", d, sizeof(uint32_t) * (MC_MAX_CH + 1)); }
 uint32_t loadSidCounter() { return pm.getUInt("sidc", 0); }
 void saveSidCounter(uint32_t n) { pm.putUInt("sidc", n); }
 void loadFlags(uint16_t &wantMask, uint16_t &trippedMask) {

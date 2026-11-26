@@ -752,3 +752,15 @@ var PM = (function () {
   return {post: post, poll: poll, toast: toast, esc: esc, bindActions: bindActions, updateMeterCard: updateMeterCard, meterInfo: meterInfo,
           dashboard: dashboard, sessionTime: sessionTime, dur: dur};
 })();
+
+// Days-of-the-week picker (templates/meters/_week.html): "All days" ticks every day; a day's time is only editable while it is ticked.
+document.addEventListener('change', function (e) {
+  var t = e.target;
+  if (!t.classList) return;
+  var box = t.closest && t.closest('.pm-week');
+  if (!box) return;
+  if (t.classList.contains('pm-wk-all')) box.querySelectorAll('.pm-wk-day').forEach(function (c) { c.checked = t.checked; });
+  var days = box.querySelectorAll('.pm-wk-day');
+  box.querySelector('.pm-wk-all').checked = box.querySelectorAll('.pm-wk-day:checked').length === days.length;
+  days.forEach(function (c) { box.querySelector('.pm-wk-time[data-day=' + c.dataset.day + ']').disabled = !c.checked; });
+});

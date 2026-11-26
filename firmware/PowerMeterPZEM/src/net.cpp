@@ -319,6 +319,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (!strcmp(mode, "none")) m.sess_mode = SESS_NONE;
   else if (!strcmp(mode, "duration")) m.sess_mode = SESS_DURATION;
   else if (!strcmp(mode, "daily")) m.sess_mode = SESS_DAILY;
+  else if (!strcmp(mode, "weekly")) m.sess_mode = SESS_WEEKLY;
   else { err = "sess.mode"; return false; }
   int daily = s["daily_utc_min"] | 0;
   if (daily < 0 || daily > 1439) { err = "sess.daily_utc_min"; return false; }
@@ -327,6 +328,12 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (dur < 1 || dur > 525600) { err = "sess.dur_min"; return false; }
   m.dur_min = dur;
   m.auto_renew = s["auto"] | false;
+  for (JsonVariant v : s["wk"].as<JsonArray>()) {  // weekly: UTC minutes of the week
+    int w = v | -1;
+    if (w < 0 || w > 10079 || m.nwk >= 7) { err = "sess.wk"; return false; }
+    m.wk[m.nwk++] = w;
+  }
+  if (m.sess_mode == SESS_WEEKLY && !m.nwk) { err = "sess.wk"; return false; }
   JsonObject ch = c["ch"][0];
   float kwh = ch["kwh_max"] | 0.0f, amp = ch["amp_max"] | 0.0f;
   if (kwh < 0 || kwh > 100000) { err = "ch[0].kwh_max"; return false; }
@@ -380,6 +387,32 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (!strcmp(act, "hold")) m.kwh_action = KWH_HOLD;
   else if (!strcmp(act, "warn")) m.kwh_action = KWH_WARN;
   else m.kwh_action = KWH_END;
+  JsonObject nx = c["next"];  // Schedule Next Session (absent = none)
+  if (!nx.isNull() && (nx["at"] | 0u)) {
+    NextCfg &n = m.next;
+    float na = nx["amp_max"] | 0.0f, nk = nx["kwh_max"] | 0.0f;
+    if (na < 0 || na > SENSOR_AMP_RATING || nk < 0 || nk > 100000) { err = "next"; return false; }
+    n.at = nx["at"].as<uint32_t>();
+    n.amp_max = na;
+    n.kwh_max = nk;
+    const char *nact = nx["kwh_action"] | "";
+    n.kwh_action = !strcmp(nact, "hold") ? KWH_HOLD : !strcmp(nact, "warn") ? KWH_WARN : KWH_END;
+    JsonObject ns = nx["sess"];
+    const char *nm = ns["mode"] | "none";
+    n.sess_mode = !strcmp(nm, "duration") ? SESS_DURATION : !strcmp(nm, "daily") ? SESS_DAILY : !strcmp(nm, "weekly") ? SESS_WEEKLY : SESS_NONE;
+    int nd = ns["daily_utc_min"] | 0;
+    long ndur = ns["dur_min"] | 1440;
+    if (nd < 0 || nd > 1439 || ndur < 1 || ndur > 525600) { err = "next.sess"; return false; }
+    n.daily_utc_min = nd;
+    n.dur_min = ndur;
+    n.auto_renew = ns["auto"] | false;
+    for (JsonVariant v : ns["wk"].as<JsonArray>()) {
+      int w = v | -1;
+      if (w < 0 || w > 10079 || n.nwk >= 7) { err = "next.sess.wk"; return false; }
+      n.wk[n.nwk++] = w;
+    }
+    if (n.sess_mode == SESS_WEEKLY && !n.nwk) { err = "next.sess.wk"; return false; }
+  }
   m.amp_max = amp;
   const char *aerr = nullptr;  // AUX relays: names + automation (applied with the rest in applyConfig)
   if (!auxrelay::parse(c["aux"].as<JsonArrayConst>(), c["tz_min"] | 0, aerr)) {
@@ -430,6 +463,7 @@ static String pairBody(const PairRequest &r) {
   body["hw"] = HW_NAME;
   body["proto"] = PROTO_VERSION;
   JsonObject caps = body["caps"].to<JsonObject>();
+  caps["next"] = 1;  // carries out Schedule Next Session itself, also offline (docs/protocol.md §3)
   caps["kind"] = METER_KIND;  // "ac" / "dc": the server sets the meter type from this
   caps["sensor"] = METER_DC ? "pzem017" : "pzem004t";
   caps["channels"] = SENSOR_CHANNELS;

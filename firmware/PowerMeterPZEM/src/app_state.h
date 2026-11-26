@@ -5,7 +5,7 @@
 #include "freertos/semphr.h"
 
 enum KwhAction : uint8_t { KWH_END = 0, KWH_HOLD = 1, KWH_WARN = 2 };
-enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
+enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2, SESS_WEEKLY = 3 };
 // ENDED = ended early by the voltage or tamper protection (relay off until renewed).
 enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, SESS_ENDED = 3 };
 // Voltage / tamper protection: run as usual, relay off while the problem lasts, or end the session.
@@ -23,6 +23,21 @@ enum NetStatus : uint8_t {
   NET_ONLINE             // WebSocket up and hello done
 };
 
+// Schedule Next Session (docs/protocol.md §3 `next`): new limits and session details that replace the current ones at `at` (epoch).
+// The meter carries it out on its own clock, also while it is offline; at == 0: none.
+struct NextCfg {
+  uint32_t at = 0;
+  float amp_max = 0;
+  float kwh_max = 0;
+  uint8_t kwh_action = 0;
+  SessMode sess_mode = SESS_NONE;
+  uint16_t daily_utc_min = 0;
+  uint8_t nwk = 0;
+  uint16_t wk[7] = {0};
+  uint32_t dur_min = 1440;
+  bool auto_renew = false;
+};
+
 struct MeterConfig {
   uint32_t ver = 0;
   uint16_t report_s = 60;  // send to the server every ... s
@@ -30,8 +45,11 @@ struct MeterConfig {
   uint16_t offline_off_min = 0;  // 0 = disabled
   SessMode sess_mode = SESS_NONE;
   uint16_t daily_utc_min = 0;
+  uint8_t nwk = 0;         // weekly: reset times as UTC minutes of the week (Monday 00:00 UTC = 0), see weekly.h
+  uint16_t wk[7] = {0};
   uint32_t dur_min = 1440;
   bool auto_renew = false;
+  NextCfg next;       // Schedule Next Session
   float kwh_max = 0;  // channel 0; 0 = unlimited
   // What happens when kwh_max is reached:
   //   KWH_END  relay off and the session ends now (even if time is left)       [default]

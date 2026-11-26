@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import kind_badge %}
+{% from "meters/_week.html" import week_picker %}
 {% block title %}Configure {{ d.name }} · PowerManager{% endblock %}
 {% set f = form %}
 {% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
@@ -10,6 +11,41 @@
   <div class="form-check"><input class="form-check-input" type="radio" name="{{ name }}" id="{{ name }}_{{ key }}" value="{{ key }}" {{ 'checked' if current == key }}>
     <label class="form-check-label small" for="{{ name }}_{{ key }}">{{ label }}{% if key == default %} <span class="text-body-secondary">(default)</span>{% endif %}</label></div>
   {% endfor %}
+{%- endmacro %}
+{% macro next_panel(id, ch, nx, c, rt, amp, sfx, fa, fk, fc) -%}
+        {# Schedule Next Session: new limits + session details that replace the current ones at a set time #}
+        {% set nv = nx or c %}{% set ndm = nv.get('dur_min', 1440) %}{% set nsm = nv.get('sess_mode', 'none') %}
+        <div class="mt-2 pm-next" {{ 'data-mc="independent"'|safe if ch is not none }} data-ch="{{ '' if ch is none else ch }}" data-sfx="{{ sfx }}" data-fa="{{ fa }}" data-fk="{{ fk }}" data-fc="{{ fc }}" data-at="{{ nx.at if nx else '' }}" data-url="{{ url_for('meters.next_session', pk=d.id) }}">
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <div class="form-check form-switch mb-0"><input class="form-check-input pm-next-on" type="checkbox" role="switch" id="nx_on_{{ id }}" {{ 'checked' if nx }}><label class="form-check-label small fw-semibold" for="nx_on_{{ id }}">Schedule Next Session</label></div>
+            <span class="small text-body-secondary pm-next-count"></span>
+          </div>
+          <div class="pm-next-panel border rounded p-2 mt-2 {{ '' if nx else 'd-none' }}">
+            <div class="small text-body-secondary mb-2">These values replace the ones above at the set time (the running session ends then).</div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              {% if amp %}<div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Max</span><input class="form-control pm-nx-amp_max" type="number" step="0.01" min="0" max="{{ amp_rating }}" value="{{ nv.get('amp_max', 0) }}"><span class="input-group-text">A</span></div>
+              {% if rt %}<span class="small text-body-secondary">clamp {{ '%g'|format(rt) }} A</span>{% endif %}{% endif %}
+              <div class="input-group input-group-sm" style="width:190px"><span class="input-group-text">kWh</span><input class="form-control pm-nx-kwh_max" type="number" step="0.001" min="0" max="100000" value="{{ nv.get('kwh_max', 0) }}"><span class="input-group-text">max</span></div>
+              <select class="form-select form-select-sm w-auto pm-nx-kwh_action">{% for k, label in kwh_actions.items() %}<option value="{{ k }}" {{ 'selected' if nv.get('kwh_action', 'hold') == k }}>{{ label }}</option>{% endfor %}</select>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+              <select class="form-select form-select-sm w-auto pm-nx-sess_mode"><option value="none" {{ 'selected' if nsm == 'none' }}>No time limit</option><option value="duration" {{ 'selected' if nsm == 'duration' }}>Duration</option><option value="daily" {{ 'selected' if nsm == 'daily' }}>Every day at</option><option value="weekly" {{ 'selected' if nsm == 'weekly' }}>Days of the week</option></select>
+              <span class="d-flex gap-1 pm-nx-dur"><input class="form-control form-control-sm pm-nx-dur_d" style="width:70px" type="number" min="0" max="365" value="{{ ndm // 1440 }}" title="days"><input class="form-control form-control-sm pm-nx-dur_h" style="width:60px" type="number" min="0" max="23" value="{{ (ndm % 1440) // 60 }}" title="hours"><input class="form-control form-control-sm pm-nx-dur_m" style="width:60px" type="number" min="0" max="59" value="{{ ndm % 60 }}" title="minutes"><span class="small align-self-center">d / h / min</span></span>
+              <span class="pm-nx-daily"><input class="form-control form-control-sm pm-nx-daily_at" type="time" value="{{ nv.get('daily_at', '00:00') }}"></span>
+              <span class="pm-nx-weekbox">{{ week_picker('', nv.get('week'), false) }}</span>
+              <div class="form-check mb-0"><input class="form-check-input pm-nx-auto" type="checkbox" id="nx_auto_{{ id }}" {{ 'checked' if nv.get('auto') }}><label class="form-check-label small" for="nx_auto_{{ id }}">Auto renew</label></div>
+            </div>
+            <div class="mt-2 small fw-semibold">This will be set on</div>
+            <div class="d-flex flex-wrap align-items-center gap-3 mt-1">
+              <div class="form-check form-check-inline mb-0 d-flex align-items-center gap-1"><input class="form-check-input mt-0" type="radio" name="nxw_{{ id }}" value="rel" id="nxw_rel_{{ id }}" checked><label class="form-check-label" for="nxw_rel_{{ id }}">Next</label>
+                <input class="form-control form-control-sm pm-nx-d" style="width:62px" type="number" min="0" max="366" value="0" title="days"><span>:</span><input class="form-control form-control-sm pm-nx-h" style="width:58px" type="number" min="0" max="23" value="0" title="hours"><span>:</span><input class="form-control form-control-sm pm-nx-m" style="width:58px" type="number" min="0" max="59" value="30" title="minutes"><span class="text-body-secondary">DD:HH:MM</span></div>
+              <div class="form-check form-check-inline mb-0 d-flex align-items-center gap-1"><input class="form-check-input mt-0" type="radio" name="nxw_{{ id }}" value="cal" id="nxw_cal_{{ id }}"><label class="form-check-label" for="nxw_cal_{{ id }}">On</label>
+                <input class="form-control form-control-sm pm-nx-date" style="width:200px" type="datetime-local"></div>
+            </div>
+            <div class="mt-2 d-flex flex-wrap align-items-center gap-2"><button type="button" class="btn btn-sm btn-primary pm-nx-save"><i class="bi bi-calendar-check me-1"></i>Save</button>
+              <span class="small pm-nx-msg"></span></div>
+          </div>
+        </div>
 {%- endmacro %}
 {% block content %}
 <h1 class="h4 mb-1">{{ d.name }} {{ kind_badge(d.kind) }}</h1>
@@ -163,6 +199,7 @@
         <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_none" value="none" {{ 'checked' if mode == 'none' }}><label class="form-check-label" for="m_none">None</label></div>
         <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_dur" value="duration" {{ 'checked' if mode == 'duration' }}><label class="form-check-label" for="m_dur">Duration</label></div>
         <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_daily" value="daily" {{ 'checked' if mode == 'daily' }}><label class="form-check-label" for="m_daily">Every day at</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_weekly" value="weekly" {{ 'checked' if mode == 'weekly' }}><label class="form-check-label" for="m_weekly">Days of the week</label></div>
       </div>
       <div class="row g-2 mb-2" data-mode="duration">
         <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="365" name="dur_d" value="{{ val('dur_d', dur_d) }}"><span class="input-group-text">days</span></div></div>
@@ -172,9 +209,12 @@
       <div class="mb-2" data-mode="daily">
         <div class="input-group input-group-sm" style="max-width:240px"><input class="form-control" type="time" name="daily_at" value="{{ val('daily_at', cfg.daily_at) }}"><span class="input-group-text">{{ tz_label() }}</span></div>
       </div>
+      <div class="mb-2" data-mode="weekly">{{ week_picker('', cfg.get('week')) }}</div>
       <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="auto" id="auto" {{ chk('auto', cfg.auto) }}>
         <label class="form-check-label" for="auto">Auto renew session</label>
         <div class="form-text">Off: when the session ends the relay stays OFF until [Renew Now].</div></div>
+      {% if d.is_mc %}{{ next_panel('m', none, cfg.get('next'), cfg, none, false, '', '', 'kwh_max', 'kwh_action') }}
+      {% else %}{{ next_panel('m', none, cfg.get('next'), cfg, none, true, '', 'amp_max_0', 'kwh_max_0', 'kwh_action_0') }}{% endif %}
       </div>
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="offline_off" id="offline_off" {{ chk('offline_off', cfg.offline_off) }}>
@@ -262,46 +302,16 @@
           <select class="form-select form-select-sm w-auto" name="kwh_action_{{ i }}" title="When the kWh limit is reached">
             {% for k, label in kwh_actions.items() %}<option value="{{ k }}" {{ 'selected' if val('kwh_action_' ~ i, c.get('kwh_action', 'hold')) == k }}>{{ label }}</option>{% endfor %}</select>
           <select class="form-select form-select-sm w-auto" name="sess_mode_{{ i }}" data-chmode="{{ i }}" title="Session time limit">
-            <option value="none" {{ 'selected' if sm == 'none' }}>No time limit</option><option value="duration" {{ 'selected' if sm == 'duration' }}>Duration</option><option value="daily" {{ 'selected' if sm == 'daily' }}>Every day at</option></select>
+            <option value="none" {{ 'selected' if sm == 'none' }}>No time limit</option><option value="duration" {{ 'selected' if sm == 'duration' }}>Duration</option><option value="daily" {{ 'selected' if sm == 'daily' }}>Every day at</option><option value="weekly" {{ 'selected' if sm == 'weekly' }}>Days of the week</option></select>
           <span class="d-flex gap-1" data-chsess="{{ i }}" data-for="duration">
             <input class="form-control form-control-sm" style="width:70px" type="number" min="0" max="365" name="dur_d_{{ i }}" value="{{ val('dur_d_' ~ i, dm // 1440) }}" title="days">
             <input class="form-control form-control-sm" style="width:60px" type="number" min="0" max="23" name="dur_h_{{ i }}" value="{{ val('dur_h_' ~ i, (dm % 1440) // 60) }}" title="hours">
             <input class="form-control form-control-sm" style="width:60px" type="number" min="0" max="59" name="dur_m_{{ i }}" value="{{ val('dur_m_' ~ i, dm % 60) }}" title="minutes"><span class="small align-self-center">d / h / min</span></span>
           <span data-chsess="{{ i }}" data-for="daily"><input class="form-control form-control-sm" type="time" name="daily_at_{{ i }}" value="{{ val('daily_at_' ~ i, c.get('daily_at', '00:00')) }}"></span>
+          <span data-chsess="{{ i }}" data-for="weekly">{{ week_picker('_' ~ i, c.get('week')) }}</span>
           <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="auto_{{ i }}" id="auto_{{ i }}" {{ chk('auto_' ~ i, c.get('auto')) }}><label class="form-check-label small" for="auto_{{ i }}">Auto renew</label></div>
         </div>
-        {# Schedule Next Session (independent mode): new limits + session details that replace these at a set time #}
-        {% set nx = c.get('next') %}{% set nv = nx or c %}{% set ndm = nv.get('dur_min', 1440) %}{% set nsm = nv.get('sess_mode', 'none') %}
-        <div class="mt-2 pm-next" data-mc="independent" data-ch="{{ i }}" data-at="{{ nx.at if nx else '' }}" data-url="{{ url_for('meters.next_session', pk=d.id) }}">
-          <div class="d-flex flex-wrap align-items-center gap-2">
-            <div class="form-check form-switch mb-0"><input class="form-check-input pm-next-on" type="checkbox" role="switch" id="nx_on_{{ i }}" {{ 'checked' if nx }}><label class="form-check-label small fw-semibold" for="nx_on_{{ i }}">Schedule Next Session</label></div>
-            <span class="small text-body-secondary pm-next-count"></span>
-          </div>
-          <div class="pm-next-panel border rounded p-2 mt-2 {{ '' if nx else 'd-none' }}">
-            <div class="small text-body-secondary mb-2">These values replace the ones above at the set time (the running session ends then).</div>
-            <div class="d-flex flex-wrap align-items-center gap-2">
-              <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Max</span><input class="form-control pm-nx-amp_max" type="number" step="0.01" min="0" max="{{ amp_rating }}" value="{{ nv.get('amp_max', 0) }}"><span class="input-group-text">A</span></div>
-              {% if rt %}<span class="small text-body-secondary">clamp {{ '%g'|format(rt) }} A</span>{% endif %}
-              <div class="input-group input-group-sm" style="width:190px"><span class="input-group-text">kWh</span><input class="form-control pm-nx-kwh_max" type="number" step="0.001" min="0" max="100000" value="{{ nv.get('kwh_max', 0) }}"><span class="input-group-text">max</span></div>
-              <select class="form-select form-select-sm w-auto pm-nx-kwh_action">{% for k, label in kwh_actions.items() %}<option value="{{ k }}" {{ 'selected' if nv.get('kwh_action', 'hold') == k }}>{{ label }}</option>{% endfor %}</select>
-            </div>
-            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-              <select class="form-select form-select-sm w-auto pm-nx-sess_mode"><option value="none" {{ 'selected' if nsm == 'none' }}>No time limit</option><option value="duration" {{ 'selected' if nsm == 'duration' }}>Duration</option><option value="daily" {{ 'selected' if nsm == 'daily' }}>Every day at</option></select>
-              <span class="d-flex gap-1 pm-nx-dur"><input class="form-control form-control-sm pm-nx-dur_d" style="width:70px" type="number" min="0" max="365" value="{{ ndm // 1440 }}" title="days"><input class="form-control form-control-sm pm-nx-dur_h" style="width:60px" type="number" min="0" max="23" value="{{ (ndm % 1440) // 60 }}" title="hours"><input class="form-control form-control-sm pm-nx-dur_m" style="width:60px" type="number" min="0" max="59" value="{{ ndm % 60 }}" title="minutes"><span class="small align-self-center">d / h / min</span></span>
-              <span class="pm-nx-daily"><input class="form-control form-control-sm pm-nx-daily_at" type="time" value="{{ nv.get('daily_at', '00:00') }}"></span>
-              <div class="form-check mb-0"><input class="form-check-input pm-nx-auto" type="checkbox" id="nx_auto_{{ i }}" {{ 'checked' if nv.get('auto') }}><label class="form-check-label small" for="nx_auto_{{ i }}">Auto renew</label></div>
-            </div>
-            <div class="mt-2 small fw-semibold">This will be set on</div>
-            <div class="d-flex flex-wrap align-items-center gap-3 mt-1">
-              <div class="form-check form-check-inline mb-0 d-flex align-items-center gap-1"><input class="form-check-input mt-0" type="radio" name="nxw_{{ i }}" value="rel" id="nxw_rel_{{ i }}" checked><label class="form-check-label" for="nxw_rel_{{ i }}">Next</label>
-                <input class="form-control form-control-sm pm-nx-d" style="width:62px" type="number" min="0" max="366" value="0" title="days"><span>:</span><input class="form-control form-control-sm pm-nx-h" style="width:58px" type="number" min="0" max="23" value="0" title="hours"><span>:</span><input class="form-control form-control-sm pm-nx-m" style="width:58px" type="number" min="0" max="59" value="30" title="minutes"><span class="text-body-secondary">DD:HH:MM</span></div>
-              <div class="form-check form-check-inline mb-0 d-flex align-items-center gap-1"><input class="form-check-input mt-0" type="radio" name="nxw_{{ i }}" value="cal" id="nxw_cal_{{ i }}"><label class="form-check-label" for="nxw_cal_{{ i }}">On</label>
-                <input class="form-control form-control-sm pm-nx-date" style="width:200px" type="datetime-local"></div>
-            </div>
-            <div class="mt-2 d-flex flex-wrap align-items-center gap-2"><button type="button" class="btn btn-sm btn-primary pm-nx-save"><i class="bi bi-calendar-check me-1"></i>Save</button>
-              <span class="small pm-nx-msg"></span></div>
-          </div>
-        </div>
+        {{ next_panel(i, i, c.get('next'), c, rt, true, '_' ~ i, 'amp_max_' ~ i, 'kwh_max_' ~ i, 'kwh_action_' ~ i) }}
       </div>
       {% endfor %}
     </div></div>
@@ -552,7 +562,7 @@
 <script>
 (function () {
   var actionUrl = "{{ url_for('meters.action', pk=d.id) }}", infoUrl = "{{ url_for('meters.configure', pk=d.id) }}";   // after a save: back to this page (the same tab is reopened)
-  // ---- Schedule Next Session (per channel, independent mode)
+  // ---- Schedule Next Session (a channel in Independent mode, or the whole meter)
   (function () {
     var skew = {{ server_time }} - Date.now() / 1000;
     function pad(n) { return String(n).padStart(2, '0'); }
@@ -561,11 +571,13 @@
       return Math.floor(s / 86400) + 'd ' + pad(Math.floor(s % 86400 / 3600)) + ':' + pad(Math.floor(s % 3600 / 60)) + ':' + pad(s % 60);
     }
     document.querySelectorAll('.pm-next').forEach(function (box) {
-      var ch = +box.dataset.ch, on = box.querySelector('.pm-next-on'), panel = box.querySelector('.pm-next-panel');
+      var ch = box.dataset.ch === '' ? null : +box.dataset.ch, sfx = box.dataset.sfx, on = box.querySelector('.pm-next-on'), panel = box.querySelector('.pm-next-panel');
       var count = box.querySelector('.pm-next-count'), msg = box.querySelector('.pm-nx-msg');
       var q = function (c) { return box.querySelector('.pm-nx-' + c); };
       var form = document.getElementById('cfgForm');
-      var cur = function (n) { return form.elements[n + '_' + ch]; };
+      var cur = function (n) { return form.elements[n + sfx]; };      // session fields: sess_mode, dur_d ... (suffix _<channel>)
+      var lim = function (k) { return form.elements[box.dataset[k]]; };   // limits: max A, kWh, action (names differ per meter type)
+      var weekBox = box.querySelector('.pm-week');
       function tick() {
         var at = +box.dataset.at;
         count.textContent = at ? 'Starts in ' + left(at) + (at - (Date.now() / 1000 + skew) <= 0 ? ' (applying…)' : '') : '';
@@ -574,11 +586,27 @@
         var m = q('sess_mode').value;
         box.querySelector('.pm-nx-dur').classList.toggle('d-none', m !== 'duration');
         box.querySelector('.pm-nx-daily').classList.toggle('d-none', m !== 'daily');
+        box.querySelector('.pm-nx-weekbox').classList.toggle('d-none', m !== 'weekly');
+      }
+      function weekFromForm() {   // the Days of the week picked above -> the panel
+        weekBox.querySelectorAll('.pm-wk-day').forEach(function (c) {
+          var src = form.elements['wk_' + c.dataset.day + sfx], t = form.elements['wk_' + c.dataset.day + '_at' + sfx];
+          c.checked = !!(src && src.checked);
+          var ti = weekBox.querySelector('.pm-wk-time[data-day=' + c.dataset.day + ']');
+          ti.value = t && t.value ? t.value : '00:00'; ti.disabled = !c.checked;
+        });
+        weekBox.querySelector('.pm-wk-all').checked = weekBox.querySelectorAll('.pm-wk-day:checked').length === 7;
+      }
+      function weekValue() {
+        var w = {};
+        weekBox.querySelectorAll('.pm-wk-day:checked').forEach(function (c) { w[c.dataset.day] = weekBox.querySelector('.pm-wk-time[data-day=' + c.dataset.day + ']').value; });
+        return w;
       }
       function fillFromCurrent() {   // a new schedule starts from the values above
-        q('amp_max').value = cur('amp_max').value; q('kwh_max').value = cur('kwh_max').value; q('kwh_action').value = cur('kwh_action').value;
+        if (q('amp_max')) q('amp_max').value = lim('fa').value;
+        q('kwh_max').value = lim('fk').value; q('kwh_action').value = lim('fc').value;
         q('sess_mode').value = cur('sess_mode').value; q('dur_d').value = cur('dur_d').value; q('dur_h').value = cur('dur_h').value;
-        q('dur_m').value = cur('dur_m').value; q('daily_at').value = cur('daily_at').value; q('auto').checked = cur('auto').checked; vis();
+        q('dur_m').value = cur('dur_m').value; q('daily_at').value = cur('daily_at').value; q('auto').checked = cur('auto').checked; weekFromForm(); vis();
       }
       on.addEventListener('change', function () {
         panel.classList.toggle('d-none', !on.checked);
@@ -595,8 +623,8 @@
       box.querySelector('.pm-nx-save').addEventListener('click', function () {
         var cal = box.querySelector('input[value=cal]').checked;
         var body = {action: 'set', ch: ch, when: cal ? 'cal' : 'rel', d: q('d').value, h: q('h').value, m: q('m').value, date: q('date').value,
-                    amp_max: q('amp_max').value, kwh_max: q('kwh_max').value, kwh_action: q('kwh_action').value, sess_mode: q('sess_mode').value,
-                    dur_d: q('dur_d').value, dur_h: q('dur_h').value, dur_m: q('dur_m').value, daily_at: q('daily_at').value, auto: q('auto').checked ? 'on' : ''};
+                    amp_max: q('amp_max') ? q('amp_max').value : '', kwh_max: q('kwh_max').value, kwh_action: q('kwh_action').value, sess_mode: q('sess_mode').value,
+                    dur_d: q('dur_d').value, dur_h: q('dur_h').value, dur_m: q('dur_m').value, daily_at: q('daily_at').value, week: weekValue(), auto: q('auto').checked ? 'on' : ''};
         msg.textContent = '';
         PM.post(box.dataset.url, body).then(function (r) {
           if (!r.ok) { msg.className = 'small pm-nx-msg text-danger'; msg.textContent = (r.errors || ['Failed']).join(' '); return; }

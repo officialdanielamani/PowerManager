@@ -83,3 +83,17 @@ static bool parse(JsonObject c, M &m, String &err) {
   return true;
 }
 ''')
+
+# Config parsing (sessions incl. weekly, Schedule Next Session `next`): rbAmp parseSess/parseNext and the whole PZEM parseConfig
+rb = net[net.index("static uint8_t action3("):net.index("// Multi-channel config (docs/multichannel.md)")]
+open(os.path.join(out, "rb_parse_snippet.cpp"), "w", encoding="utf-8").write('''#include "Arduino.h"
+#include <ArduinoJson.h>
+#include "app_state.h"
+''' + rb)
+pzfull = pz[pz.index("static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {"):pz.index("// ------------------------------------------------------------------ pairing")]
+open(os.path.join(out, "pzem_parse_snippet.cpp"), "w", encoding="utf-8").write('''#include "Arduino.h"
+#include <ArduinoJson.h>
+#include "app_state.h"
+#define SENSOR_AMP_RATING 100
+namespace auxrelay { bool parse(JsonArrayConst, int, const char *&) { return true; } }
+''' + pzfull)

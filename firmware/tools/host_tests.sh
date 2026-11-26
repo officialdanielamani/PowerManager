@@ -7,7 +7,8 @@
 #   5. sensor check collector + zero / tare helpers (src/sensorcheck.h, shared by both sketches)
 #   6. I2C layer against fakes (relay board unplugged / power loss / plugged in later; stuck bus freed)
 #   7. OTA firmware tag scanner + partition layout hash (src/otatag.h)
-#   8. MQTT link: the firmware's mqttlink.cpp against a real broker and the server's bridge
+#   8. weekly session reset times (src/weekly.h)
+#   9. MQTT link: the firmware's mqttlink.cpp against a real broker and the server's bridge
 # Needs g++, OpenSSL headers (libssl-dev) and `pip install -r server/requirements-dev.txt`.
 #   firmware/tools/host_tests.sh [path to ArduinoJson/src]
 set -e
@@ -26,5 +27,6 @@ bash firmware/tools/hwprofile_test/run.sh "$AJ"
 bash firmware/tools/syntax_check/run.sh "$AJ"
 bash firmware/tools/sensorcheck_test/run.sh
 bash firmware/tools/ota_test/run.sh
+g++ -std=c++17 -Ifirmware/PowerMeterRBAmp/src firmware/tools/weekly_test.cpp -o /tmp/weekly_test && /tmp/weekly_test
 TAIL=1 bash firmware/tools/i2c_test/run.sh
 $PY firmware/tools/mqttlink_test/run.py "$AJ"

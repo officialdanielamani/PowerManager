@@ -16,6 +16,7 @@
 #include "sessstats.h"
 #include "temp.h"
 #include "timekeep.h"
+#include "weekly.h"
 
 namespace control {
 
@@ -156,6 +157,10 @@ uint32_t nextReset() {
     if (timekeep::valid())  // started while time was unknown: estimate from millis
       return timekeep::now() - (millis() - g.sess.startMs) / 1000 + c.dur_min * 60;
     return 0;
+  }
+  if (c.sess_mode == SESS_WEEKLY && timekeep::valid()) {
+    uint32_t start = g.sess.start ? g.sess.start : timekeep::now() - (millis() - g.sess.startMs) / 1000;
+    return weeklyNext(start, c.wk, c.nwk);
   }
   if (c.sess_mode == SESS_DAILY && timekeep::valid()) {
     uint32_t start = g.sess.start ? g.sess.start : timekeep::now() - (millis() - g.sess.startMs) / 1000;
@@ -326,11 +331,21 @@ bool resetTrip(const char *src, const char *by) {
   return true;
 }
 
+static uint32_t nextDone_ = 0;  // `at` of the last Schedule Next Session carried out (storage.cpp loadNextDone)
+static bool nextDoneLoaded_ = false;
+static void loadDone() {
+  if (nextDoneLoaded_) return;
+  nextDone_ = store::loadNextDone();
+  nextDoneLoaded_ = true;
+}
+
 void applyConfig(const MeterConfig &c) {
   auxrelay::commit();  // AUX names + automation (staged by net parseConfig)
   StateLock l;
   g.cfg = c;
-  store::saveConfig(c);
+  loadDone();
+  if (g.cfg.next.at && g.cfg.next.at <= nextDone_) g.cfg.next = NextCfg();  // already carried out: a stale copy
+  store::saveConfig(g.cfg);
   // kWh limit raised (or removed) while the session was held at the old limit ("relay off until the session
   // ends"): the session continues. A session that already ENDED stays ended: use Renew to start a new one.
   double used = sessionKwhLimit();
@@ -626,8 +641,38 @@ void relayTest(bool on) {
 
 static void writeRelays(bool force);
 
+// Schedule Next Session (docs/protocol.md §3): at the set time the new limits and session details replace the current ones, the
+// running session ends and, with Auto renew, a new one starts on them. This meter's clock decides, so it also happens while the
+// meter is offline; the event is sent when it is back and the server then follows.
+static void checkNext() {
+  // caller holds StateLock. Needs a valid clock (NTP or RTC); without one it waits.
+  NextCfg &n = g.cfg.next;
+  if (!n.at || !timekeep::valid() || timekeep::now() < n.at) return;
+  loadDone();
+  nextDone_ = n.at;
+  store::saveNextDone(nextDone_);
+  g.cfg.amp_max = n.amp_max;
+  g.cfg.kwh_max = n.kwh_max;
+  g.cfg.kwh_action = n.kwh_action;
+  g.cfg.sess_mode = n.sess_mode;
+  g.cfg.daily_utc_min = n.daily_utc_min;
+  g.cfg.nwk = n.nwk;
+  for (uint8_t i = 0; i < 7; i++) g.cfg.wk[i] = n.wk[i];
+  g.cfg.dur_min = n.dur_min;
+  g.cfg.auto_renew = n.auto_renew;
+  uint32_t at = n.at;
+  bool autoRenew = n.auto_renew;
+  g.cfg.next = NextCfg();
+  store::saveConfig(g.cfg);
+  if (autoRenew) renew("next", false);  // the old session ends, the new one starts on the new settings
+  else stopSession(STOP_MANUAL);          // ends; the relay stays off until Renew
+  emitEvent("next_session", [](JsonObject o, void *p) { o["at"] = *(uint32_t *)p; }, &at);
+  bump();
+}
+
 static void checkRules(bool firstPass) {
   StateLock l;
+  checkNext();
   // No session starts on its own after pairing: the admin starts the first one with Renew.
 
   // Over-current (latched until reset).

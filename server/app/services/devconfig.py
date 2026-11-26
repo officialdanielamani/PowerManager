@@ -81,7 +81,46 @@ def kwh_action(ch_cfg):
     return DEFAULT_KWH_ACTION
 
 
-SESSION_MODES = ("none", "duration", "daily")
+SESSION_MODES = ("none", "duration", "daily", "weekly")
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+WEEKDAY_NAMES = {"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday", "fri": "Friday", "sat": "Saturday", "sun": "Sunday"}
+
+
+def _hhmm(raw):
+    """'8:5' / '08:05' -> '08:05', None when it is not a time."""
+    try:
+        h, m = str(raw or "").strip().split(":")[:2]
+        if 0 <= int(h) <= 23 and 0 <= int(m) <= 59:
+            return f"{int(h):02d}:{int(m):02d}"
+    except ValueError:
+        pass
+    return None
+
+
+def parse_week(form, sfx, errors, label, needed):
+    """Days of the week with their own reset time: checkbox wk_<day><sfx> + time wk_<day>_at<sfx> -> {"mon": "08:00", ...}."""
+    week = {}
+    for d in WEEKDAYS:
+        if form.get(f"wk_{d}{sfx}") not in ("on", "1", "true", True):
+            continue
+        t = _hhmm(form.get(f"wk_{d}_at{sfx}"))
+        if t is None:
+            errors.append(f"{label}{WEEKDAY_NAMES[d]}: time must be HH:MM")
+            t = "00:00"
+        week[d] = t
+    if needed and not week:
+        errors.append(f"{label}Pick at least one day of the week")
+    return week
+
+
+def week_utc_minutes(week):
+    """{"mon": "08:00"} in the display time zone -> sorted UTC minutes of the week (Monday 00:00 UTC = 0) for the meter."""
+    out = set()
+    for i, d in enumerate(WEEKDAYS):
+        t = _hhmm((week or {}).get(d))
+        if t:
+            out.add(settings.local_week_to_utc(i, t))
+    return sorted(out)
 
 
 def channel_count(device):
@@ -107,6 +146,7 @@ def default_cfg(n_channels=1):
         "sess_mode": "none",
         "dur_min": 1440,
         "daily_at": "00:00",
+        "week": {},
         "auto": False,
         "ch": [{"kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION, "amp_max": 0.0} for _ in range(n_channels)],
         "volt_min": 0.0,           # 0 = no lower limit
@@ -150,7 +190,7 @@ def hw_label(sig):
 
 def _mc_channel_default():
     return {"name": "", "amp_max": 0.0, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION,
-            "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "auto": False, "disabled": False}
+            "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "week": {}, "auto": False, "disabled": False}
 
 
 def default_for(device):
@@ -247,6 +287,7 @@ def _parse_sess(form, sfx, errors, label):
     except (ValueError, AssertionError):
         errors.append(f"{label}Daily reset time must be HH:MM")
         out["daily_at"] = "00:00"
+    out["week"] = parse_week(form, sfx, errors, label, out["sess_mode"] == "weekly")
     out["auto"] = form.get("auto" + sfx) == "on"
     return out
 
@@ -315,6 +356,7 @@ def parse_form(form, device):
         cfg["daily_at"] = f"{int(h):02d}:{int(m):02d}"
     except (ValueError, AssertionError):
         errors.append("Daily reset time must be HH:MM")
+    cfg["week"] = parse_week(form, "", errors, "", cfg["sess_mode"] == "weekly")
     cfg["auto"] = form.get("auto") == "on"
 
     rating = amp_rating(device)
@@ -348,17 +390,43 @@ def parse_form(form, device):
         _parse_mc(form, device, cfg, errors)
     if aux_count(device):
         cfg["aux"] = auxcfg.parse_form(form, aux_count(device), errors, device)
+    prev_next = (device.cfg or {}).get("next")
+    if prev_next:
+        cfg["next"] = prev_next   # a scheduled next session (single channel / shared mode) is not part of this form: keep it
     return cfg, errors
 
 
 def _sess_doc(c):
     sess_mode = c.get("sess_mode", "none")
+    wk = week_utc_minutes(c.get("week")) if sess_mode == "weekly" else []
+    if sess_mode == "weekly" and not wk:
+        sess_mode = "none"
     sess = {"mode": sess_mode, "auto": bool(c.get("auto"))}
+    if sess_mode == "weekly":
+        sess["wk"] = wk
     if sess_mode == "daily":
         sess["daily_utc_min"] = settings.local_hhmm_to_utc_minute(c.get("daily_at", "00:00"))
     if sess_mode == "duration":
         sess["dur_min"] = int(c.get("dur_min", 1440))
     return sess
+
+
+def next_doc(n, amp=True):
+    """Schedule Next Session for the meter (docs/protocol.md §3): when (epoch) and the settings that replace the current ones."""
+    if not n or not n.get("at"):
+        return None
+    doc = {"at": int(n["at"]), "kwh_max": float(n.get("kwh_max", 0) or 0), "kwh_action": n.get("kwh_action", DEFAULT_KWH_ACTION),
+           "sess": _sess_doc(n)}
+    if amp:
+        doc["amp_max"] = float(n.get("amp_max", 0) or 0)
+    return doc
+
+
+def _with_next(doc, n, amp=True):
+    nd = next_doc(n, amp)
+    if nd:
+        doc["next"] = nd
+    return doc
 
 
 def _calib_doc(calib, i):
@@ -396,10 +464,12 @@ def to_device(cfg, ver, calib=None):
             "summary": bool(cfg.get("summary")),
             "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
                     "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
-                    "dis": bool(c.get("disabled")), "sess": _sess_doc(c), **_calib_doc(calib, i)} for i, c in enumerate(cfg.get("ch", []))],
+                    "dis": bool(c.get("disabled")), "sess": _sess_doc(c), **_calib_doc(calib, i),
+                    **({"next": nd} if (nd := next_doc(c.get("next"))) else {})} for i, c in enumerate(cfg.get("ch", []))],
             "tare_limits": bool(cfg.get("tare_limits", True)),
             "aux": auxcfg.to_device(cfg.get("aux")),
             "tz_min": auxcfg.tz_minutes(),
+            **({"next": nd} if (nd := next_doc(cfg.get("next"), amp=False)) else {}),
         }}
     sess = _sess_doc(cfg)
     return {
@@ -425,12 +495,19 @@ def to_device(cfg, ver, calib=None):
             ],
             "aux": auxcfg.to_device(cfg.get("aux")),
             "tz_min": auxcfg.tz_minutes(),
+            **({"next": nd} if (nd := next_doc(cfg.get("next"))) else {}),
         },
     }
 
 
 def describe_session(cfg):
     mode = cfg.get("sess_mode", "none")
+    if mode == "weekly":
+        w = cfg.get("week") or {}
+        times = {w[d] for d in WEEKDAYS if d in w}
+        if len(times) == 1:
+            return ("Every day" if len(w) == 7 else ", ".join(d.capitalize() for d in WEEKDAYS if d in w)) + f" at {times.pop()}"
+        return ", ".join(f"{d.capitalize()} {w[d]}" for d in WEEKDAYS if d in w) or "No time limit"
     if mode == "daily":
         return f"Every day at {cfg.get('daily_at', '00:00')}"
     if mode == "duration":

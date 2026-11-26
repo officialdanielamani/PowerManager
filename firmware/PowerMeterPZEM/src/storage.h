@@ -40,6 +40,8 @@ void clearSecret();
 bool loadConfig(MeterConfig &c);
 void saveConfig(const MeterConfig &c);
 
+uint32_t loadNextDone();
+void saveNextDone(uint32_t at);
 void loadSession(SessionState &s);
 void saveSession(const SessionState &s);
 

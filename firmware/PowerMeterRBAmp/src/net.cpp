@@ -313,14 +313,35 @@ static bool parseSess(JsonObject s, SessConfig &out, String &err, const char *fi
   if (!strcmp(mode, "none")) out.mode = SESS_NONE;
   else if (!strcmp(mode, "duration")) out.mode = SESS_DURATION;
   else if (!strcmp(mode, "daily")) out.mode = SESS_DAILY;
+  else if (!strcmp(mode, "weekly")) out.mode = SESS_WEEKLY;
   else { err = field; return false; }
   int daily = s["daily_utc_min"] | 0;
   long dur = s["dur_min"] | 1440;
   if (daily < 0 || daily > 1439 || dur < 1 || dur > 525600) { err = field; return false; }
   out.daily_utc_min = daily;
+  out.nwk = 0;
+  for (JsonVariant v : s["wk"].as<JsonArray>()) {  // weekly: UTC minutes of the week
+    int w = v | -1;
+    if (w < 0 || w > 10079 || out.nwk >= 7) { err = field; return false; }
+    out.wk[out.nwk++] = w;
+  }
+  if (out.mode == SESS_WEEKLY && !out.nwk) { err = field; return false; }
   out.dur_min = dur;
   out.auto_renew = s["auto"] | false;
   return true;
+}
+
+// Schedule Next Session of the meter or of a channel (absent = none).
+static bool parseNext(JsonObject n, NextCfg &out, String &err, const char *field) {
+  out = NextCfg();
+  if (n.isNull() || !(n["at"] | 0u)) return true;
+  float amp = n["amp_max"] | 0.0f, k = n["kwh_max"] | 0.0f;
+  if (amp < 0 || amp > 400 || k < 0 || k > 100000) { err = field; return false; }
+  out.at = n["at"].as<uint32_t>();
+  out.amp_max = amp;
+  out.kwh_max = k;
+  out.kwh_action = kwhAction(n["kwh_action"] | "hold");
+  return parseSess(n["sess"], out.sess, err, field);
 }
 
 // Multi-channel config (docs/multichannel.md). Rejected as a whole if anything is out of range.
@@ -370,6 +391,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (tmax < 0 || tmax > 125) { err = "temp.max"; return false; }
   m.temp_max = tmax;
   m.temp_action = action3(tp["action"] | "hold");
+  if (!parseNext(c["next"], m.next, err, "next")) return false;
   for (JsonObject ch : c["ch"].as<JsonArray>()) {
     int i = ch["i"] | -1;
     if (i < 0 || i >= MC_MAX_CH) continue;
@@ -382,6 +404,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
     cc.kwh_max = k;
     cc.kwh_action = kwhAction(ch["kwh_action"] | "hold");
     if (!parseSess(ch["sess"], cc.sess, err, "ch.sess")) return false;
+    if (!parseNext(ch["next"], cc.next, err, "ch.next")) return false;
     // Zero and tare of this channel (docs/protocol.md §13): amps 0-400, watts 0-100000
     float za = ch["zero"]["a"] | 0.0f, zw = ch["zero"]["w"] | 0.0f, ta = ch["tare"]["a"] | 0.0f, tw = ch["tare"]["w"] | 0.0f;
     if (za < 0 || za > 400 || zw < 0 || zw > 100000 || ta < 0 || ta > 400 || tw < 0 || tw > 100000) { err = "ch.zero_tare"; return false; }
@@ -449,6 +472,7 @@ static void fillCaps(JsonObject caps) {
   caps["drdy"] = PIN_DRDY >= 0;
   caps["aux"] = auxrelay::count();  // AUX relays (relays no channel uses)
   ota::capsJson(caps["ota"].to<JsonObject>());  // firmware update over the air (docs/protocol.md §14)
+  caps["next"] = 1;                 // carries out Schedule Next Session itself, also offline (docs/protocol.md §3)
   caps["hw_cfg"] = 1;               // hardware profile can be sent by the server (docs/protocol.md §12)
   caps["hw_limits"].to<JsonObject>()["gpio"] = hw::RELAY_GPIO_COUNT;
   if (temp::hasHumidity()) caps["hum"] = true;

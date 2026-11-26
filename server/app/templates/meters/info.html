@@ -73,7 +73,7 @@
           {% set ka = c.get('kwh_action') or ('end' if c.get('kwh_end', true) else 'warn') %}<div class="small text-body-secondary">{{ {'end': 'At the limit: power off, session ends', 'hold': 'At the limit: power off, session ends at its time limit', 'warn': 'At the limit: warning only'}[ka] }}</div>{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</dd>
         {% endif %}
         {% if price[1] is not none %}<dt class="col-6">Session cost</dt><dd class="col-6 fw-semibold" data-field="cost">{{ m.cost or '–' }}</dd>{% endif %}
-        <dt class="col-6">Session restarts</dt><dd class="col-6">{{ m.session_desc }}{% if m.next_reset and (m.auto or not m.sess_ended) %}<br><span class="text-body-secondary">next: <span data-field="next_reset">{{ m.next_reset }}</span></span>{% endif %}</dd>
+        <dt class="col-6">Session restarts</dt><dd class="col-6">{{ m.session_desc }}{% if m.next_reset and (m.auto or not m.sess_ended) %}<br><span class="text-body-secondary">next: <span data-field="next_reset">{{ m.next_reset }}</span></span>{% endif %}{% if m.next_at_local %}<br><span class="text-body-secondary"><i class="bi bi-calendar-event me-1"></i>new session settings on {{ m.next_at_local }}</span>{% endif %}</dd>
         <dt class="col-6">Session started</dt><dd class="col-6" data-field="sess_started">–</dd>
         <dt class="col-6">Time elapsed</dt><dd class="col-6 fw-semibold" data-field="sess_elapsed">–</dd>
         <dt class="col-6">Time left</dt><dd class="col-6 fw-semibold" data-field="sess_left">–</dd>

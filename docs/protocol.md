@@ -184,6 +184,7 @@ Items are sent oldest first, at most **50 items per message**. After sending, th
 | `tamper_open` / `tamper_close` | Panel switch. With Tamper Protection on, `tamper_open` carries `action` |
 | `sensor_error` / `sensor_ok` | No valid reading for `sensor.timeout_s`: `{"kind": "no_reply"\|"bad", "after_s": 10, "action": "hold"}`; `sensor_ok` = first valid reading again |
 | `session_end` summary | The meter adds `"sum": {"n": 3600, "v": [min, max, avg], "a": [...], "w": [...]}` (shared multi-channel session: total current / power of all channels) |
+| `next_session` | The meter carried out a **Schedule Next Session** itself (`at` = the scheduled epoch, `ch`? in Independent mode). It may arrive long after it happened (the meter was offline: events are buffered). The server then copies the scheduled values into its own configuration without sending anything; if it holds no such schedule (cleared or changed meanwhile) it sends the meter its current configuration, which puts the meter back |
 | `quota_cleared` | The kWh limit was raised (or removed) while the session was held at the old limit: the session continues (`kwh`, `max`, `ch`?) |
 | `temp_high` / `temp_ok` | A temperature sensor went above `temp.max`: `i` (sensor, 0 = T1), `c` (°C), `max`, `action`; `temp_ok` = every sensor back 5 °C below the limit (`i`, `c`), or the limit was switched off (`disabled`) |
 | `voltage_out` / `voltage_ok` | Voltage left / returned to the operating range: `v`, `min`, `max`, `dir` (`low`/`high`), `action` |
@@ -243,10 +244,13 @@ The server sends the whole config every time (no partial updates).
 | `report_s` | 10–3600 | 60 | Send buffered readings to the server every … s (events go right away) |
 | `read_s` | 5–`report_s` | = `report_s` | Record a reading every … s. Example: `read_s` 10 + `report_s` 60 = 6 readings sent together once a minute. Missing (older server) = one reading per send |
 | `offline_off_min` | 0–1440 | 0 | 0 = disabled |
-| `sess.mode` | `daily` / `duration` / `none` | `none` | `none` = no time limit |
+| `sess.mode` | `weekly` / `daily` / `duration` / `none` | `none` | `none` = no time limit |
 | `sess.daily_utc_min` | 0–1439 | – | Local reset time converted to UTC by the server. Example: 01:00 at UTC+08:00 → 17:00 UTC → `1020` |
+| `sess.wk` | list of 1–7 integers, 0–10079 | – | `weekly` mode: reset times as **UTC minutes of the week**, Monday 00:00 UTC = 0 (Wednesday 18:30 UTC = 2·1440 + 1110). The server converts the chosen days + times of its time zone (using the offset of the moment it builds the config, like `daily_utc_min`). The session ends at the first of these times after it started (`src/weekly.h`, host test `tools/weekly_test.cpp`). The meter rejects `weekly` without a time |
 | `sess.dur_min` | 1–525600 | – | Duration mode; UI enters days/hours/minutes |
 | `sess.auto` | bool | false | |
+| `next` | object | absent | **Schedule Next Session** of the whole meter (single-channel meter, or Shared mode of a multi-channel meter): `{"at": epoch, "kwh_max", "kwh_action", "amp_max"?, "sess": {…as `sess`}}`. At `at` (epoch, the **meter's clock**: NTP or RTC) the values replace the current ones (`amp_max` only for a single-channel meter; in Shared mode only `kwh_max`, `kwh_action` and `sess`), the running session ends and, with `sess.auto`, a new one starts on them (end reason `next`; without `auto` the session just ends, relay off until Renew). Then the meter drops the schedule, remembers its `at` in NVS (a configuration that still carries that `at` is not run again) and sends the event `next_session`. **It runs while the meter is offline**; without a valid clock it waits for one. A schedule that is already past when the meter receives it (or when its clock becomes valid) runs at once. Announced with `caps.next: 1` |
+| `ch[].next` | object | absent | The same for one channel of a meter in Independent mode (`amp_max` included) |
 | `ch[].kwh_max` | 0–100000 | 0 | 0 = unlimited |
 | `ch[].kwh_action` | `warn` / `hold` / `end` | `hold` | What happens at `kwh_max`. **warn** = *Session run as usual* (`quota` event once + `sess.over`, power stays on). **hold** = *Off relay, but session continue* (relay OFF until the session ends at its time limit or is renewed). **end** = *End session* now (relay OFF until renewed). |
 | `volt.min`, `volt.max` | 0–400 V | 0 | Operating voltage range; 0 = no limit on that side; min < max |

@@ -361,7 +361,7 @@ static void hState() {
   c["kwh_action"] = KA[g.cfg.kwh_action % 3];
   c["amp_max"] = num4(g.cfg.amp_max);
   c["auto"] = g.cfg.auto_renew;
-  c["mode"] = g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
+  c["mode"] = g.cfg.sess_mode == SESS_WEEKLY ? "weekly" : g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
   c["offline_off_min"] = g.cfg.offline_off_min;
   static const char *PA[] = {"run", "hold", "end"};
   c["tare_a"] = num4(g.cfg.tare_a);

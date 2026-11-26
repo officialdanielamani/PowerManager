@@ -33,7 +33,8 @@ def check_disconnected():
 def uses_local_time(cfg):
     """Config that the meter evaluates in local time: daily session resets, AUX schedules."""
     cfg = cfg or {}
-    return (cfg.get("sess_mode") == "daily" or any((c or {}).get("sess_mode") == "daily" for c in cfg.get("ch") or [])
+    return (cfg.get("sess_mode") in ("daily", "weekly") or any((c or {}).get("sess_mode") in ("daily", "weekly") for c in cfg.get("ch") or [])
+            or cfg.get("next") or any((c or {}).get("next") for c in cfg.get("ch") or [])
             or any((a or {}).get("mode") == "schedule" for a in cfg.get("aux") or []))
 
 

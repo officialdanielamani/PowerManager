@@ -17,6 +17,7 @@
 #include "sessstats.h"
 #include "temp.h"
 #include "timekeep.h"
+#include "weekly.h"
 
 namespace control {
 
@@ -190,6 +191,10 @@ uint32_t nextReset(uint8_t slot) {
     if (timekeep::valid()) return timekeep::now() - (millis() - s.startMs) / 1000 + c.dur_min * 60;
     return 0;
   }
+  if (c.mode == SESS_WEEKLY && timekeep::valid()) {
+    uint32_t start = s.start ? s.start : timekeep::now() - (millis() - s.startMs) / 1000;
+    return weeklyNext(start, c.wk, c.nwk);
+  }
   if (c.mode == SESS_DAILY && timekeep::valid()) {
     uint32_t start = s.start ? s.start : timekeep::now() - (millis() - s.startMs) / 1000;
     uint32_t day = start - start % 86400;
@@ -198,6 +203,20 @@ uint32_t nextReset(uint8_t slot) {
     return t;
   }
   return 0;
+}
+
+// Schedule Next Session already carried out (see storage.cpp loadNextDone): a stale copy in a new configuration is dropped.
+static uint32_t nextDone_[MC_MAX_CH + 1];
+static bool nextDoneLoaded_ = false;
+static void dropDoneNext(MeterConfig &c) {
+  // caller holds StateLock
+  if (!nextDoneLoaded_) {
+    store::loadNextDone(nextDone_);
+    nextDoneLoaded_ = true;
+  }
+  if (c.next.at && c.next.at <= nextDone_[MC_MAX_CH]) c.next = NextCfg();
+  for (uint8_t i = 0; i < MC_MAX_CH; i++)
+    if (c.ch[i].next.at && c.ch[i].next.at <= nextDone_[i]) c.ch[i].next = NextCfg();
 }
 
 static bool durationElapsedNoClock(uint8_t slot) {
@@ -439,7 +458,8 @@ void applyConfig(const MeterConfig &c) {
   } else {
     g.cfg = c;
   }
-  store::saveConfig(c);
+  dropDoneNext(g.cfg);
+  store::saveConfig(g.cfg);
   // A channel that has just been disabled: its session ends (independent mode; in shared mode the one session goes on for the
   // other channels), its relay goes off and does not come back by itself when the channel is enabled again.
   for (uint8_t i = 0; i < g.nch && i < MC_MAX_CH; i++) {
@@ -995,8 +1015,62 @@ static void noteRelaySwitch(uint8_t ch, const char *block) {
   }
 }
 
+// Schedule Next Session (docs/protocol.md §3): at the set time the new limits and session details replace the current ones, the
+// running session ends and, with Auto renew, a new one starts on them. This meter's clock decides, so it also happens while the
+// meter is offline; the event is sent when it is back and the server then follows.
+struct NextCtx {
+  int8_t ch;
+  uint32_t at;
+};
+static void runNext(int8_t ch) {
+  // caller holds StateLock
+  NextCfg n = ch >= 0 ? g.cfg.ch[ch].next : g.cfg.next;
+  uint8_t slot = ch >= 0 ? ch : 0;
+  if (!nextDoneLoaded_) {
+    store::loadNextDone(nextDone_);
+    nextDoneLoaded_ = true;
+  }
+  nextDone_[ch >= 0 ? ch : MC_MAX_CH] = n.at;
+  store::saveNextDone(nextDone_);
+  if (ch >= 0) {
+    ChConfig &cc = g.cfg.ch[ch];
+    cc.amp_max = n.amp_max;
+    cc.kwh_max = n.kwh_max;
+    cc.kwh_action = n.kwh_action;
+    cc.sess = n.sess;
+    cc.next = NextCfg();
+  } else {
+    g.cfg.kwh_max = n.kwh_max;
+    g.cfg.kwh_action = n.kwh_action;
+    g.cfg.sess = n.sess;
+    g.cfg.next = NextCfg();
+  }
+  store::saveConfig(g.cfg);
+  if (n.sess.auto_renew) renewSlot(slot, "next", false);  // the old session ends, the new one starts on the new settings
+  else stopSlot(slot, STOP_MANUAL);                          // ends; the relay stays off until Renew
+  NextCtx ctx = {ch, n.at};
+  emitEvent("next_session", [](JsonObject o, void *p) {
+    NextCtx *c = (NextCtx *)p;
+    if (c->ch >= 0) o["ch"] = c->ch;
+    o["at"] = c->at;
+  }, &ctx);
+  bump();
+}
+static void checkNext() {
+  // caller holds StateLock. Needs a valid clock (NTP or RTC); without one it waits.
+  if (!timekeep::valid()) return;
+  uint32_t t = timekeep::now();
+  if (indep()) {
+    for (uint8_t i = 0; i < g.nch && i < MC_MAX_CH; i++)
+      if (g.cfg.ch[i].next.at && t >= g.cfg.ch[i].next.at) runNext(i);
+  } else if (g.cfg.next.at && t >= g.cfg.next.at) {
+    runNext(-1);
+  }
+}
+
 static void checkRules(bool firstPass) {
   StateLock l;
+  checkNext();
   uint8_t slots = sessSlots();
   // No session starts on its own after pairing: the admin starts the first one(s) with Renew.
 

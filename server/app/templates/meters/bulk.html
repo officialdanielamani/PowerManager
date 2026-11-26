@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "meters/_week.html" import week_picker %}
 {% block title %}Bulk Configuration · PowerManager{% endblock %}
 {% set f = form %}
 {% macro val(name, default) -%}{{ f.get(name) if f else default }}{%- endmacro %}
@@ -94,6 +95,7 @@
         <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_none" value="none" {{ 'checked' if mode == 'none' }}><label class="form-check-label" for="m_none">None</label></div>
         <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_dur" value="duration" {{ 'checked' if mode == 'duration' }}><label class="form-check-label" for="m_dur">Duration</label></div>
         <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_daily" value="daily" {{ 'checked' if mode == 'daily' }}><label class="form-check-label" for="m_daily">Every day at</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="sess_mode" id="m_weekly" value="weekly" {{ 'checked' if mode == 'weekly' }}><label class="form-check-label" for="m_weekly">Days of the week</label></div>
       </div>
       <div class="row g-2 mb-2" data-mode="duration">
         <div class="col"><div class="input-group input-group-sm"><input class="form-control" type="number" min="0" max="365" name="dur_d" value="{{ val('dur_d', dur_d) }}"><span class="input-group-text">days</span></div></div>
@@ -103,6 +105,7 @@
       <div class="mb-2" data-mode="daily">
         <div class="input-group input-group-sm" style="max-width:240px"><input class="form-control" type="time" name="daily_at" value="{{ val('daily_at', cfg.daily_at) }}"><span class="input-group-text">{{ tz_label() }}</span></div>
       </div>
+      <div class="mb-2" data-mode="weekly">{{ week_picker('', cfg.get('week')) }}</div>
       <div class="form-check"><input class="form-check-input" type="checkbox" name="auto" id="auto" {{ chk('auto', cfg.auto) }}><label class="form-check-label" for="auto">Auto renew session</label></div>
     {% endcall %}
 

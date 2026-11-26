@@ -74,4 +74,13 @@ for f in net_snippet glue_snippet pzem_net_snippet pzem_cfg_snippet; do
   fi
 done
 
+for pair in "rb_parse_snippet:PowerMeterRBAmp" "pzem_parse_snippet:PowerMeterPZEM"; do
+  f=${pair%%:*}; sk=${pair##*:}
+  if out=$($CXX -I "$ROOT/firmware/$sk/src" -I "$ROOT/firmware/$sk" "$W/$f.cpp" 2>&1); then
+    echo "ok    $f (config parsing: weekly sessions, Schedule Next Session)"
+  else
+    echo "FAIL  $f"; echo "$out" | grep -E "error" | head -5; fail=1
+  fi
+done
+
 [ $fail = 0 ] && echo "ESP32 syntax checks passed" || { echo "ESP32 syntax checks FAILED"; exit 1; }
