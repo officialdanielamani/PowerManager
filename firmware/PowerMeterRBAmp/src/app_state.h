@@ -18,7 +18,8 @@ enum StopReason : uint8_t {
   STOP_MODE = 6,    // the configuration mode changed (Shared <-> Independent)
   STOP_TEMP = 7,    // over-temperature protection
   STOP_HW = 8,      // restart for a new hardware profile (hwprofile.h)
-  STOP_OTA = 9      // firmware update over the air (ota.h)
+  STOP_OTA = 9,     // firmware update over the air (ota.h)
+  STOP_CHDIS = 10   // the channel was disabled in the configuration
 };
 // Sensor problem: no reply on I2C, or a reply that is not valid (module error / no valid result).
 enum SensorErr : uint8_t { SENS_OK = 0, SENS_NO_REPLY = 1, SENS_BAD = 2 };
@@ -46,6 +47,7 @@ struct ChConfig {
   SessConfig sess;        // independent mode
   float zeroA = 0, zeroW = 0;  // sensor offset with no load, subtracted after every read (docs/protocol.md §13.4)
   float tareA = 0, tareW = 0;  // a connected load that counts as 0: tared values for the limits (§13.5)
+  bool disabled = false;       // channel disabled by an admin / manager (docs/protocol.md §15): no session, relay off
 };
 
 struct MeterConfig {

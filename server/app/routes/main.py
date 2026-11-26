@@ -175,6 +175,7 @@ def _mc_summary(d, base, show_price, allowed=None):
              "w": rd.get("w"), "a": rd.get("a"), "pf": rd.get("pf"), "e": rd.get("e"),
              "relay_on": bool(rl.get("on")), "relay_block": rl.get("block"), "tripped": bool(rl.get("tripped")),
              "amp_max": (ccfg[i].get("amp_max") if i < len(ccfg) else 0) or 0,
+             "disabled": bool(ccfg[i].get("disabled")) if i < len(ccfg) else False,
              "reversed": bool(((st.get("clamp_rev") or {}).get(str(i)) or {}).get("flag")),
              "tare": {"a": tr[0], "w": tr[1]} if tr else None,
              "a_tared": round(tare_svc.amps(rd.get("a"), tr), 3) if tr and rd.get("a") is not None else rd.get("a"),

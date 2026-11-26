@@ -385,6 +385,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
     // Zero and tare of this channel (docs/protocol.md §13): amps 0-400, watts 0-100000
     float za = ch["zero"]["a"] | 0.0f, zw = ch["zero"]["w"] | 0.0f, ta = ch["tare"]["a"] | 0.0f, tw = ch["tare"]["w"] | 0.0f;
     if (za < 0 || za > 400 || zw < 0 || zw > 100000 || ta < 0 || ta > 400 || tw < 0 || tw > 100000) { err = "ch.zero_tare"; return false; }
+    cc.disabled = ch["dis"] | false;  // channel disabled (docs/protocol.md §15)
     cc.zeroA = za;
     cc.zeroW = zw;
     cc.tareA = ta;

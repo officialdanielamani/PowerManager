@@ -352,3 +352,7 @@ The Info page shows them as `Event: ON while No Wi-Fi OR Tamper OR the session i
 After **Save** (any tab) the page returns to the Configuration page (the same tab is reopened), not to the meter Info page.
 
 **rbAmp modules found** (Update Device I/O): when the page opens (and with *Read now* / *Scan Address*) the meter scans the bus and sends, for every rbAmp it finds, its identity (variant UI1 … UI7 / I1 … I3, number of current inputs, voltage input, version, uptime, result valid / error) and one live reading: voltage and Hz, and A / W / PF of every input. The rbAmp board chips show the variant next to *found*. A found module that is not in the profile is marked *not in the profile*. (`res.modules` of the `i2c_scan` ack, protocol §12.)
+
+## Disable a channel (multi-channel meters)
+
+*Configuration → Channels*: the **Disable** box of a channel (admin / manager). Saved and sent like the other settings. The channel's session ends (independent mode; in shared mode the shared session continues and the channel is frozen), its relay is off, and it cannot be started or renewed. On the **Info** page every user who sees the meter gets a grey card with the badge **Disabled** and no ON / Renew buttons. Untick the box to enable it again (then press Renew to start a new session). This is separate from *Disable meter*.

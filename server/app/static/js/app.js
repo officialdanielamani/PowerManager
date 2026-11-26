@@ -60,7 +60,7 @@ var PM = (function () {
                 ended_tamper: ['danger', 'Session ended (tamper)'], ended_sensor: ['danger', 'Session ended (sensor error)'], ended_temp: ['danger', 'Session ended (temperature)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
                 disabled: ['dark', 'Disabled'], none: ['warning', 'No session (Renew to start)'],
                 independent_mixed: ['info', 'Per channel'], ended_stopped: ['secondary', 'Session ended (End)'],
-                ended_mode: ['secondary', 'Session ended (mode changed)']};
+                ended_mode: ['secondary', 'Session ended (mode changed)'], ended_ch_disabled: ['dark', 'Session ended (channel disabled)']};
   var INCIDENT = {power: '<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>',
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
@@ -143,6 +143,12 @@ var PM = (function () {
         sess = '<div class="small mt-2"><span class="badge text-bg-' + s[0] + '">' + esc(s[1]) + '</span> ' +
           (c.sid ? '#' + c.sid + ' · ' : '') + fmt(c.kwh, 3) + ' / ' + (c.kwh_max || '∞') + ' kWh' + (c.cost ? ' · ' + esc(c.cost) : '') +
           '<div class="text-body-secondary">' + esc(c.session_desc || '') + (c.next_reset ? ' · next reset ' + esc(c.next_reset) : '') + '</div></div>';
+      }
+      if (c.disabled) {   // disabled by an admin / manager: grey, no session, no buttons (not the same as a disabled meter)
+        return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100 bg-body-tertiary" style="opacity:.75">' +
+          '<div class="d-flex align-items-center gap-2"><span class="fw-semibold text-truncate">' + esc(c.name) + '</span><span class="ms-auto"><span class="badge text-bg-dark">Disabled</span></span></div>' +
+          '<div class="d-flex flex-wrap gap-3 small mt-1 text-body-secondary"><span><span class="fs-5 fw-semibold">' + (c.w == null ? '–' : c.w) + '</span> W</span><span>' + fmt(c.a, 3) + ' A</span><span>' + fmt(c.e, 3) + ' kWh total</span></div>' +
+          '<div class="small text-body-secondary mt-1">This channel is disabled: no session, relay off.</div></div></div>';
       }
       return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100">' +
         '<div class="d-flex align-items-center gap-2"><span class="fw-semibold text-truncate">' + esc(c.name) + '</span>' + revBadge(c) + '<span class="ms-auto">' + chBadge(c) + '</span></div>' +

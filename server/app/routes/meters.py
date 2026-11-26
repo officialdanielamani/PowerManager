@@ -569,6 +569,7 @@ def action(pk):
             "session_expired": "Relay ON blocked: session ended. Renew the session first.",
             "no_session": "Relay ON blocked: no session yet. Press Renew Now to start one.",
             "tripped": "Relay ON blocked: over-current trip. Reset the trip first.",
+            "ch_disabled": "This channel is disabled (Configuration → Channels): no session, no relay.",
             "offline": "The device is offline.",
         }
         return jsonify(ok=False, error=err, message=messages.get(err, err)), 409
@@ -927,7 +928,7 @@ def _hms(secs):
 
 END_REASONS = {"quota": "kWh limit", "expired": "Time limit", "manual": "Renew Now", "voltage": "Voltage out of range",
                "tamper": "Tamper", "sensor": "Sensor error", "temp": "Temperature too high", "next": "Next session started",
-               "disabled": "Disabled", "stopped": "End", "mode": "Mode changed", "hardware": "Hardware changed"}
+               "disabled": "Disabled", "ch_disabled": "Channel disabled", "stopped": "End", "mode": "Mode changed", "hardware": "Hardware changed"}
 
 
 @bp.get("/<int:pk>/sessions/summary.csv")

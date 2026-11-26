@@ -135,7 +135,7 @@ def hw_label(sig):
 
 def _mc_channel_default():
     return {"name": "", "amp_max": 0.0, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION,
-            "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "auto": False}
+            "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "auto": False, "disabled": False}
 
 
 def default_for(device):
@@ -186,7 +186,7 @@ def fit_channels(device):
         base = default_for(device)
         base.update({k: v for k, v in cfg.items() if k != "ch"})
         cfg = base
-        chans = [dict(_mc_channel_default(), **{k: c.get(k) for k in ("amp_max", "kwh_max", "kwh_action") if k in c})
+        chans = [dict(_mc_channel_default(), **{k: c.get(k) for k in ("amp_max", "kwh_max", "kwh_action", "disabled") if k in c})
                  for c in chans]
     chans = (chans + [_mc_channel_default() for _ in range(n)])[:n]
     cfg["ch"] = chans
@@ -253,6 +253,7 @@ def _parse_mc(form, device, cfg, errors):
         if any(ch in c["name"] for ch in "<>\"'&"):
             errors.append(f"{label}name: letters, numbers and spaces only")
             c["name"] = ""
+        c["disabled"] = form.get(f"ch_off_{i}") == "on"   # channel disabled (docs/protocol.md §15)
         c["amp_max"] = _num(form, f"amp_max_{i}", float, 0, rating, f"{label}max A", errors, 0.0)
         c["kwh_max"] = _num(form, f"kwh_max_{i}", float, 0, 100000, f"{label}max kWh", errors, 0.0)
         a = form.get(f"kwh_action_{i}", DEFAULT_KWH_ACTION)
@@ -377,7 +378,7 @@ def to_device(cfg, ver, calib=None):
             "summary": bool(cfg.get("summary")),
             "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
                     "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
-                    "sess": _sess_doc(c), **_calib_doc(calib, i)} for i, c in enumerate(cfg.get("ch", []))],
+                    "dis": bool(c.get("disabled")), "sess": _sess_doc(c), **_calib_doc(calib, i)} for i, c in enumerate(cfg.get("ch", []))],
             "tare_limits": bool(cfg.get("tare_limits", True)),
             "aux": auxcfg.to_device(cfg.get("aux")),
             "tz_min": auxcfg.tz_minutes(),

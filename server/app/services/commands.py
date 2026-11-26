@@ -21,11 +21,22 @@ def session_state(device, ch=None):
     return st.get("sess") or {}
 
 
+def channel_disabled(device, ch):
+    """The channel is disabled by an admin / manager (Configuration -> Channels), different from a disabled meter."""
+    try:
+        c = ((device.cfg or {}).get("ch") or [])[int(ch)]
+    except (TypeError, ValueError, IndexError):
+        return False
+    return bool(c.get("disabled"))
+
+
 def relay_block_reason(device, ch=None):
     """Why relay ON is not allowed right now (server-side check), or None."""
     if device.disabled_at:
         return "disabled"
     st = device.last_state or {}
+    if ch is not None and device.is_mc and channel_disabled(device, ch):
+        return "ch_disabled"
     if ch is not None and device.is_mc:
         relays = [r for r in st.get("relay") or [] if r.get("i") == ch]
         if relays and relays[0].get("tripped"):
@@ -67,6 +78,9 @@ def issue(device, c, params=None, user=None):
         reason = relay_block_reason(device, params.get("ch"))
         if reason:
             return None, reason
+    if c == "renew" and params.get("ch") is not None and device.is_mc and device.mc_mode == "independent" \
+            and channel_disabled(device, params.get("ch")):
+        return None, "ch_disabled"
     online = hub.is_online(device.id)
     if (c == "send_now" or c in NEEDS_WATCHER) and not online:
         return None, "offline"

@@ -264,3 +264,31 @@ def test_reversed_clamp_warning(app, admin, mc):
         tel(5, t + 180, 640)  # turned over
         assert "1" not in d.last_state["clamp_rev"]
         assert admin.get(f"/meters/{mc}/live").get_json()["clamp_rev"] == []
+
+
+def test_disable_channel(app, admin, mc):
+    """A channel disabled by an admin / manager (not the whole meter): config to the meter, blocked commands, Info badge."""
+    r = admin.post(f"/meters/{mc}/configure", data=_form(mode="independent", ch_off_1="on"))
+    assert r.status_code in (200, 302)
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        assert d.cfg["ch"][1]["disabled"] is True and not d.cfg["ch"][0]["disabled"]
+        doc = devconfig.to_device(d.cfg, 1)["cfg"]
+        assert doc["ch"][1]["dis"] is True and doc["ch"][0]["dis"] is False
+        d.last_state = {"mode": "independent", "relay": [{"i": 0}, {"i": 1}], "sessions": [{"ch": 0, "sid": 1, "status": "active"}, {"ch": 1, "sid": 2, "status": "active"}]}
+        db.session.commit()
+    # relay ON and Renew of the disabled channel are refused; the other channel works
+    on = admin.post(f"/meters/{mc}/action", json={"action": "relay_on", "ch": 1}).get_json()
+    assert not on["ok"] and on["error"] == "ch_disabled"
+    rn = admin.post(f"/meters/{mc}/action", json={"action": "renew", "ch": 1}).get_json()
+    assert not rn["ok"] and rn["error"] == "ch_disabled"
+    assert admin.post(f"/meters/{mc}/action", json={"action": "renew", "ch": 0}).get_json()["ok"]
+    assert admin.post(f"/meters/{mc}/action", json={"action": "relay_off", "ch": 1}).get_json()["ok"]   # OFF is harmless
+    # every user who sees the meter gets the flag (Info badge)
+    chs = admin.get(f"/api/ui/meters").get_json()["meters"][0]["channels"]
+    assert chs[1]["disabled"] is True and chs[0]["disabled"] is False
+    # enabled again
+    admin.post(f"/meters/{mc}/configure", data=_form(mode="independent"))
+    with app.app_context():
+        assert not db.session.get(Device, mc).cfg["ch"][1]["disabled"]
+    assert admin.post(f"/meters/{mc}/action", json={"action": "renew", "ch": 1}).get_json()["ok"]

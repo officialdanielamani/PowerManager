@@ -697,3 +697,10 @@ without the Arduino IDE.
 
 ### 14.7 Open points
 The USB way (14.8) needs HTTPS (reverse proxy) or `localhost`: to be tested behind the reverse proxy. `MAX_CONTENT_LENGTH` is 80 MB (a reverse proxy must allow uploads of that size, e.g. nginx `client_max_body_size`); the files live in the instance folder (`instance/firmware/<id>/`); a signature on the image (more than SHA-256) is a later option.
+
+## 15. Disabled channel (multi-channel meters) — firmware / server 1.1.0
+
+An admin / manager can **disable a channel** (Configuration → Channels → *Disable*). This is not the same as a disabled meter (the meter keeps running, its other channels are not affected).
+- Config: `cfg.ch[i].dis` (bool, default false).
+- Meter: when a channel becomes disabled its relay goes off and `wantOn` is cleared (it does not come back by itself when the channel is enabled again); in **independent** mode its session ends at once (`session_end`, reason `ch_disabled`); in **shared** mode the one session goes on for the other channels and the disabled channel is simply frozen (relay off, no start). While disabled: relay ON is refused (`ch_disabled`), a `renew` for that channel does nothing, auto renew skips it, and `state.relay[i].block = "ch_disabled"`. The channel is still measured.
+- Server: `commands.issue` refuses `relay` ON (any mode) and `renew` with a channel (independent mode) for a disabled channel with the error `ch_disabled`; every user who can see the meter gets `channels[i].disabled` and the Info page shows a grey card with the badge **Disabled** and no buttons.

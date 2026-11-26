@@ -275,6 +275,7 @@ static const char *stopReasonName(uint8_t why) {
     case STOP_TEMP: return "temp";
     case STOP_HW: return "hw_change";
     case STOP_OTA: return "restart";
+    case STOP_CHDIS: return "ch_disabled";
     default: return "disabled";
   }
 }
@@ -297,6 +298,7 @@ static void stopAll(StopReason why) {
 static void renewSlot(uint8_t slot, const char *reason, bool autoRenew) {
   // caller holds StateLock
   if (g.disabled) return;  // a disabled meter has no sessions
+  if (indep() && slot < MC_MAX_CH && g.cfg.ch[slot].disabled) return;  // a disabled channel has none either
   if (g.sess[slot].sid) endSession(slot, reason);  // no-op if a limit already ended it
   startSession(slot, autoRenew);
 }
@@ -354,6 +356,7 @@ bool setRelay(uint8_t ch, bool on, const char *src, const char *&err) {
   if (on) {
     SessStatus st = g.sess[slotOf(ch)].status;
     if (g.disabled) err = "disabled";
+    else if (g.cfg.ch[ch].disabled) err = "ch_disabled";
     else if (g.ch[ch].tripped) err = "tripped";
     else if (!g.sess[slotOf(ch)].sid) err = "no_session";
     else if (st == SESS_QUOTA) err = "quota_exceeded";
@@ -416,6 +419,8 @@ bool resetTrip(int8_t ch, const char *src, const char *by) {
 void applyConfig(const MeterConfig &c) {
   auxrelay::commit();  // AUX names + automation (staged by net parseConfig)
   StateLock l;
+  bool wasDisabled[MC_MAX_CH];
+  for (uint8_t i = 0; i < MC_MAX_CH; i++) wasDisabled[i] = g.cfg.ch[i].disabled;
   if (c.mode != g.cfg.mode) {
     // Shared <-> Independent: the running session(s) end; press Renew to start in the new mode.
     stopAll(STOP_MODE);
@@ -433,6 +438,16 @@ void applyConfig(const MeterConfig &c) {
     g.cfg = c;
   }
   store::saveConfig(c);
+  // A channel that has just been disabled: its session ends (independent mode; in shared mode the one session goes on for the
+  // other channels), its relay goes off and does not come back by itself when the channel is enabled again.
+  for (uint8_t i = 0; i < g.nch && i < MC_MAX_CH; i++) {
+    if (!g.cfg.ch[i].disabled || wasDisabled[i]) continue;
+    if (indep()) stopSlot(i, STOP_CHDIS);
+    if (g.ch[i].wantOn) {
+      g.ch[i].wantOn = false;
+      saveFlags();
+    }
+  }
   // kWh limit raised (or removed) while a session was held at the old limit ("relay off until the session
   // ends"): that session continues. A session that already ENDED stays ended: use Renew to start a new one.
   for (uint8_t i = 0; i < sessSlots(); i++) {
@@ -1071,7 +1086,8 @@ static void checkRules(bool firstPass) {
     SessStatus st = g.sess[slotOf(i)].status;
     const char *block = meterBlock;
     if (!block) {
-      if (c.tripped) block = "tripped";
+      if (g.cfg.ch[i].disabled) block = "ch_disabled";  // disabled channel: relay off, whatever the session says
+      else if (c.tripped) block = "tripped";
       else if (!g.sess[slotOf(i)].sid) block = "no_session";  // first session not started yet (Renew)
       else if (st == SESS_QUOTA) block = "quota";
       else if (st == SESS_EXPIRED) block = "expired";
