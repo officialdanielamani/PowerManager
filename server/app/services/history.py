@@ -344,3 +344,29 @@ def delete_range(device_pk, start, end):
                               RollupDirty.bucket_start <= end).delete(synchronize_session=False))
     return n
 
+
+
+def combine(datas):
+    """Several query() results of the same range (one per channel) -> the total of the channels: current, power, energy
+    added up per time (voltage = the first channel's), stats worked out from the summed points."""
+    by_t = {}
+    for d in datas:
+        for p in d["points"]:
+            key = round(p["t"], 1)
+            q = by_t.setdefault(key, {"t": p["t"]})
+            for f in ("a", "w", "a_min", "a_max", "w_min", "w_max", "kwh", "kwh_cum"):
+                if p.get(f) is not None:
+                    q[f] = round(q.get(f, 0) + p[f], 4)
+            for f in ("v", "v_min", "v_max"):
+                if p.get(f) is not None and f not in q:
+                    q[f] = p[f]
+    pts = [by_t[k] for k in sorted(by_t)]
+    stats = {}
+    for f in ("v", "a", "w"):
+        vals = [p[f] for p in pts if p.get(f) is not None]
+        stats[f] = {"min": _r(min(vals)) if vals else None, "max": _r(max(vals)) if vals else None,
+                    "avg": _r(sum(vals) / len(vals)) if vals else None}
+    kw = [d["stats"].get("kwh") for d in datas if d["stats"].get("kwh") is not None]
+    stats["kwh"] = _r(sum(kw), 4) if kw else None
+    stats["n"] = max([d["stats"].get("n") or 0 for d in datas] or [0])
+    return {"points": pts, "stats": stats}

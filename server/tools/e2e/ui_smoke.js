@@ -146,6 +146,16 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   const text = await page.inputValue('#gText');
   check(/\{\s*1,\s+3,\s+SCT_30A,\s+1,\s+3 \}/.test(text), 'config.h has the relay board + output columns (CH3 = relay board 1, output 3)');
 
+  // ---------------- Historical data: several channels and their total
+  await page.goto(base + '/meters/' + pk);
+  await page.waitForSelector('#chPickBtn');
+  await page.click('#chPickBtn');
+  await page.click('#chAll');
+  await page.check('#chTotal');
+  await page.waitForSelector('#stats:has-text("Total")', { timeout: 15000 });
+  check((await page.textContent('#chPickBtn')).includes('channels') && (await page.textContent('#chPickBtn')).includes('total'), 'history: channels picker shows the selection + total');
+  check((await page.textContent('#stats')).includes('CH1') && (await page.textContent('#stats')).includes('Total'), 'history: stats table has every selected channel and the total');
+
   // ---------------- AUX relay: up to 3 conditions (OR) and "save returns to the configuration"
   await page.goto(base + '/meters/' + pk + '/configure');
   await page.click('[data-tab=aux]');

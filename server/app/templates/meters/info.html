@@ -110,7 +110,15 @@
       {% endfor %}
     </div>
     {% if channels|length > 1 %}
-    <select class="form-select form-select-sm w-auto" id="chSel">{% for c in channels %}<option value="{{ c.idx }}">{{ c.label }}</option>{% endfor %}</select>
+    <div class="dropdown" id="chPick">
+      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" id="chPickBtn" title="Channels in the chart">{{ channels[0].label }}</button>
+      <div class="dropdown-menu p-2" style="min-width:220px">
+        {% for c in channels %}<label class="dropdown-item d-flex align-items-center gap-2 mb-0"><input type="checkbox" class="form-check-input mt-0 ch-cb" value="{{ c.idx }}" {{ 'checked' if loop.first }}>{{ c.label }}</label>{% endfor %}
+        <div class="d-flex gap-1 px-2 py-1"><button type="button" class="btn btn-sm btn-outline-secondary py-0" id="chAll">All</button><button type="button" class="btn btn-sm btn-outline-secondary py-0" id="chNone">Clear</button></div>
+        <hr class="dropdown-divider">
+        <label class="dropdown-item d-flex align-items-center gap-2 mb-0"><input type="checkbox" class="form-check-input mt-0" id="chTotal">Total of the selected channels</label>
+      </div>
+    </div>
     {% endif %}
     <div class="d-none align-items-center gap-1" id="customRange">
       <input type="datetime-local" class="form-control form-control-sm" id="fromIn">

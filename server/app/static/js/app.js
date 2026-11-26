@@ -528,14 +528,15 @@ var PM = (function () {
     }, 60000);
 
     // history
-    var state = {range: '1d', series: 'w', from: '', to: '', ch: 0};
+    var state = {range: '1d', series: 'w', from: '', to: '', chs: [0], total: false};
+    var chColors = ['#0d6efd', '#fd7e14', '#198754', '#dc3545', '#6f42c1', '#20c997', '#d63384', '#6c757d', '#0dcaf0', '#ffc107', '#6610f2', '#795548', '#009688', '#e83e8c', '#17a2b8', '#343a40'];
     var chart = null, last = null;
     var colors = {w: '#0d6efd', a: '#fd7e14', v: '#198754', kwh: '#6f42c1'};
     var units = {w: 'W', a: 'A', v: 'V', kwh: 'kWh'};
     var tempColors = ['#dc3545', '#20c997', '#6610f2', '#fd7e14', '#0dcaf0', '#d63384', '#6c757d', '#198754'];
 
     function query() {
-      var q = 'range=' + state.range + '&ch=' + state.ch + (tared ? '&tared=1' : '');
+      var q = 'range=' + state.range + '&ch=' + state.chs.join(',') + (state.total ? '&total=1' : '') + (tared ? '&tared=1' : '');
       if (state.range === 'custom') {
         q += '&from=' + encodeURIComponent(state.from) + '&to=' + encodeURIComponent(state.to);
         if (state.startTs && state.endTs) q += '&start_ts=' + state.startTs + '&end_ts=' + state.endTs;
@@ -571,8 +572,45 @@ var PM = (function () {
       var md = p(d.getUTCDate()) + '/' + p(d.getUTCMonth() + 1);
       return span <= 86400 ? hm : (span <= 7 * 86400 ? md + ' ' + hm : md + '/' + d.getUTCFullYear());
     }
+    function drawMulti() {   // several channels and / or their total
+      var s = state.series, span = last.end - last.start, off = last.tz_offset_s;
+      var lines = last.series.map(function (x, i) { return {name: x.name, pts: x.points, stats: x.stats, color: chColors[x.ch % chColors.length]}; });
+      if (last.total) lines.push({name: 'Total', pts: last.total.points, stats: last.total.stats, color: '#000000', total: true});
+      var all = {};
+      lines.forEach(function (l) { l.pts.forEach(function (p) { all[Math.round(p.t * 10) / 10] = p.t; }); });
+      var keys = Object.keys(all).map(Number).sort(function (a, b) { return a - b; });
+      var labels = keys.map(function (k) { return label(all[k], span, off); }), datasets;
+      function series(l, f) { var m = {}; l.pts.forEach(function (p) { m[Math.round(p.t * 10) / 10] = p[f]; }); return keys.map(function (k) { return m[k] == null ? null : m[k]; }); }
+      if (s === 'v') lines = lines.slice(0, 1);   // one voltage for the whole meter
+      var bars = s === 'kwh' && last.source !== 'raw';
+      datasets = lines.map(function (l) {
+        var f = s === 'kwh' ? (last.source === 'raw' ? 'kwh_cum' : 'kwh') : s;
+        var ds = {label: l.name + (s === 'kwh' ? ' (kWh)' : ' (' + units[s] + ')'), data: series(l, f), borderColor: l.color, backgroundColor: l.color + (bars ? 'cc' : '22'), pointRadius: 0,
+                  borderWidth: l.total ? 3 : 2, tension: .2, spanGaps: true};
+        if (bars) ds.type = l.total ? 'line' : 'bar';
+        return ds;
+      });
+      if (chart) chart.destroy();
+      chart = new Chart(document.getElementById('chart'), {
+        type: 'line', data: {labels: labels, datasets: datasets},
+        options: {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'index', intersect: false},
+                  scales: {x: {ticks: {maxTicksLimit: 10, autoSkip: true}}, y: {beginAtZero: s !== 'v'}},
+                  plugins: {legend: {display: true, labels: {boxWidth: 12}}}}
+      });
+      var html = '<div class="col-12"><div class="table-responsive"><table class="table table-sm mb-1"><thead><tr><th></th><th>Power W (min · avg · max)</th><th>Current A (min · avg · max)</th><th>Energy kWh</th></tr></thead><tbody>';
+      lines.concat(s === 'v' ? [] : []).forEach(function (l) {
+        var st = l.stats || {}, w = st.w || {}, a = st.a || {};
+        html += '<tr' + (l.total ? ' class="fw-semibold"' : '') + '><td><span class="badge" style="background:' + l.color + '">&nbsp;</span> ' + esc(l.name) + '</td><td>' + fmt(w.min, 1) + ' · ' + fmt(w.avg, 1) + ' · ' + fmt(w.max, 1) + '</td><td>' +
+          fmt(a.min, 3) + ' · ' + fmt(a.avg, 3) + ' · ' + fmt(a.max, 3) + '</td><td>' + fmt(st.kwh, 3) + '</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+      if (last.cost) html += '<div class="col-12 small">Energy of the selected channels: <b>' + fmt((last.stats || {}).kwh, 3) + '</b> kWh · <b>' + esc(last.cost) + '</b></div>';
+      document.getElementById('stats').innerHTML = html;
+      document.getElementById('rangeLabel').textContent = last.start_local + ' → ' + last.end_local + ' (' + {raw: 'raw', h: 'hourly', d: 'daily'}[last.source] + ')';
+    }
     function draw() {
       if (!last) return;
+      if (last.multi && state.series !== 'temp' && state.series !== 'hum') return drawMulti();
       var s = state.series, span = last.end - last.start, off = last.tz_offset_s;
       var pts = last.points, labels = pts.map(function (p) { return label(p.t, span, off); });
       var datasets;
@@ -643,8 +681,22 @@ var PM = (function () {
         b.classList.add('active'); state.series = b.dataset.series; draw();
       });
     });
-    var chSel = document.getElementById('chSel');
-    if (chSel) chSel.addEventListener('change', function () { state.ch = +chSel.value; load(); });
+    var chPick = document.getElementById('chPick');
+    if (chPick) {   // channels of the chart: any number of them, and / or their total
+      var cbs = chPick.querySelectorAll('.ch-cb'), tot = document.getElementById('chTotal');
+      var apply = function () {
+        state.chs = Array.prototype.filter.call(cbs, function (c) { return c.checked; }).map(function (c) { return +c.value; });
+        if (!state.chs.length) { state.chs = [+cbs[0].value]; cbs[0].checked = true; }
+        state.total = tot.checked;
+        var names = Array.prototype.filter.call(cbs, function (c) { return c.checked; }).map(function (c) { return c.parentNode.textContent.trim(); });
+        document.getElementById('chPickBtn').textContent = (names.length > 2 ? names.length + ' channels' : names.join(', ')) + (state.total ? ' + total' : '');
+        load();
+      };
+      cbs.forEach(function (c) { c.addEventListener('change', apply); });
+      tot.addEventListener('change', apply);
+      document.getElementById('chAll').addEventListener('click', function () { cbs.forEach(function (c) { c.checked = true; }); apply(); });
+      document.getElementById('chNone').addEventListener('click', function () { cbs.forEach(function (c, i) { c.checked = i === 0; }); tot.checked = false; apply(); });
+    }
     load();
     setInterval(function () { if (state.range === '1h' || state.range === '1d') load(); }, 60000);
   }

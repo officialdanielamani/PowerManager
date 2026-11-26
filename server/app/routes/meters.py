@@ -799,10 +799,26 @@ def history_delete(pk):
 def history_json(pk):
     device = access.device_for_current_user(pk, allow_removed=True)
     start, end = _range_args(device)
-    ch = _channel_arg(device)
-    data = history.query(device.id, ch, start, end)
-    if request.args.get("tared") == "1":
-        data = history.apply_tare(data, tare_svc.offsets(device, ch))
+    chs = _channels_arg(device)
+    want_total = request.args.get("total") == "1"
+    ch = chs[0]
+    tared = request.args.get("tared") == "1"
+    if len(chs) > 1 or want_total:   # several channels and / or their total (multi-channel Info page)
+        series, datas = [], []
+        for c in chs:
+            one = history.query(device.id, c, start, end)
+            if tared:
+                one = history.apply_tare(one, tare_svc.offsets(device, c))
+            datas.append(one)
+            series.append({"ch": c, "name": device.channel_name(c), "points": one["points"], "stats": one["stats"]})
+        data = {"multi": True, "source": datas[0]["source"], "start": start, "end": end, "series": series,
+                "total": history.combine(datas) if want_total else None, "points": [], "stats": {}}
+        kw = [d["stats"].get("kwh") for d in datas if d["stats"].get("kwh") is not None]
+        data["stats"] = {"kwh": round(sum(kw), 4) if kw else None}
+    else:
+        data = history.query(device.id, ch, start, end)
+        if tared:
+            data = history.apply_tare(data, tare_svc.offsets(device, ch))
     data["temps"] = history.temps(device.id, start, end)
     data["start_local"] = settings.fmt_ts(start, False)
     data["end_local"] = settings.fmt_ts(end, False)
@@ -812,6 +828,23 @@ def history_json(pk):
     data["cost"] = (settings.money(kwh * price, currency)
                     if access.can_price(current_user) and price is not None and kwh is not None else None)
     return jsonify(data)
+
+
+def _channels_arg(device):
+    """?ch=0,2,3 of the history request: the channels (a viewer limited to some channels gets only those)."""
+    allowed = access.allowed_channels(current_user, device)
+    n = max(1, devconfig.channel_count(device))
+    chs = []
+    for part in str(request.args.get("ch", "")).split(","):
+        if part.strip().isdigit() and int(part) < n and int(part) not in chs:
+            chs.append(int(part))
+    if allowed is not None:
+        chs = [c for c in chs if c in allowed]
+        if not chs:
+            chs = [min(allowed)] if not request.args.get("ch") else []
+        if not chs:
+            abort(404)
+    return chs or [0]
 
 
 def _channel_arg(device):
