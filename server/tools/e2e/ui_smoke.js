@@ -168,7 +168,7 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.selectOption('[name=aux_ev_src_0]', 'wifi');
   await page.selectOption('[name=aux_ev_src_0_1]', 'tamper').catch(() => {});
   await page.selectOption('[name=aux_ev_src_0_2]', 'session');
-  await page.click('#saveBtn, button:has-text("Save")');
+  await page.click('form button.btn-primary.ms-auto:has-text("Save")');
   await page.waitForTimeout(3000);
   await page.waitForURL(/\/configure/, { timeout: 20000 });
   await page.waitForTimeout(1500);
