@@ -27,27 +27,6 @@ def _add_column(table, ddl):
         log.info("Migration: added %s.%s", table, name)
 
 
-def _migrate_tare():
-    """The single-channel tare used to live in the config (tare_a / tare_w): it becomes the tare of channel 0."""
-    import json
-    cols = _columns("device")
-    if cols is None or "calib" not in cols:
-        return
-    for pk, cfg, calib in db.session.execute(text("SELECT id, cfg, calib FROM device")).fetchall():
-        try:
-            cfg, calib = json.loads(cfg or "{}"), json.loads(calib or "{}")
-        except ValueError:
-            continue
-        a, w = float(cfg.get("tare_a") or 0), float(cfg.get("tare_w") or 0)
-        if (a or w) and "0" not in calib:
-            calib["0"] = {"tare": {"a": a, "w": w, "at": 0}, "by": "migration"}
-            for k in ("tare_a", "tare_w"):
-                cfg.pop(k, None)
-            db.session.execute(text("UPDATE device SET calib = :c, cfg = :g WHERE id = :i"),
-                               {"c": json.dumps(calib), "g": json.dumps(cfg), "i": pk})
-            log.info("Migration: tare of device %s moved to its channel 0", pk)
-
-
 def run():
     """Upgrade a 1.0 database."""
     _add_column("notification_rule", "channels JSON")
@@ -64,5 +43,4 @@ def run():
     # zero / tare per channel, sensor checks
     _add_column("device", "calib JSON NOT NULL DEFAULT '{}'")
     _add_column("device", "last_check JSON NOT NULL DEFAULT '{}'")
-    _migrate_tare()
     db.session.commit()

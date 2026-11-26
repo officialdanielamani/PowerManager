@@ -146,7 +146,7 @@ Types: `kwh_exceeded`, `voltage_range`, `sensor_error`, `session_renew`, `max_am
 `id, device_fk, user_fk, type, ts, message, read`. One row per receiving user, so each user has their own list and unread count. A **cooldown** per (device, user, type) — 10 min, only for `max_amp`, `panel_open`, `no_voltage` — stops repeated spam.
 
 ### Schema upgrades
-`app/migrations.py` upgrades an existing database in place at start-up (e.g. new user columns, `notification.user_fk`, per-user `notification_rule`; old rules and Telegram chat ID are given to the admin).
+`app/migrations.py` upgrades an existing database in place at start-up (only the columns added since 1.0.0; the system is experimental, so there is no upgrade path from older databases: start with a new `instance/` folder when a column is missing).
 
 ### `command`
 `id, device_fk, c, params (JSON), created_by, created_at, sent_at, acked_at, ok, err`. Queued while the device is offline (see protocol §2.3).

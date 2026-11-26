@@ -127,9 +127,6 @@ class Device(db.Model):
     link_key = db.Column(db.String(64))
     link_up = db.Column(db.Integer, nullable=False, default=0)
     via_fk = db.Column(db.Integer)  # gateway (device pk) of the last mesh connection
-    # Legacy (before per-channel zero / tare): not used any more, kept so old databases keep their columns.
-    tare_a = db.Column(db.Float, nullable=False, default=0.0)
-    tare_w = db.Column(db.Float, nullable=False, default=0.0)
     # Zero and tare per channel (docs/protocol.md §13): {"<ch>": {"zero": {"a","w","at"}, "tare": {...}, "by": user}}.
     calib = db.Column(db.JSON, nullable=False, default=dict)
     # Last sensor check per channel: {"<ch>": {"state": running|done|failed, "ref", "at", "stats", "why"}}.

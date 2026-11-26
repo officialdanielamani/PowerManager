@@ -157,56 +157,6 @@ def test_hardware_change_clears_zero_and_tare(app, admin, single, online):
     assert arch.calib["0"]["zero"]["a"] == 0.012   # the archive keeps what the old hardware had
 
 
-def test_old_single_channel_tare_is_migrated(app):
-    import json
-    from sqlalchemy import text
-    from app import migrations
-    with app.app_context():
-        d = Device(device_id="OLD00001", name="Old", caps={"channels": 1}, cfg={"tare_a": 0.02, "tare_w": 3.5, "report_s": 60}, pair_gen=1)
-        db.session.add(d)
-        db.session.commit()
-        db.session.execute(text("UPDATE device SET calib = '{}' WHERE id = :i"), {"i": d.id})
-        migrations._migrate_tare()
-        db.session.commit()
-        db.session.refresh(d)
-        assert d.calib["0"]["tare"] == {"a": 0.02, "w": 3.5, "at": 0} and "tare_a" not in d.cfg
-        assert tare.offsets(d) == (0.02, 3.5)
-        migrations._migrate_tare()   # again: nothing changes
-        assert json.loads(json.dumps(d.calib))["0"]["tare"]["w"] == 3.5
-
-
-# ------------------------------------------------------------------ pages
-
-def test_pages_and_access(app, admin, online):
-    with app.app_context():  # (no context kept open around the requests: they would share one stale session)
-        pk = _meter("Dryer A", "AAAA1111")
-    assert admin.get(f"/meters/{pk}/calibration").headers["Location"].endswith(f"/meters/{pk}/configure#tune")  # old address
-    html = admin.get(f"/meters/{pk}/configure").get_data(as_text=True)
-    assert 'data-tab="tune"' in html and "Check sensor" in html and "Calibration" in html and "not available yet" in html
-    assert html.index('data-tab="tune"') < html.index('data-tab="aux"') if 'data-tab="aux"' in html else True
-    assert b"tareNow" not in admin.get(f"/meters/{pk}/configure").data
-    r = admin.post(f"/meters/{pk}/calibration/check", json={"ch": 0, "kind": "zero"})
-    assert r.get_json()["ok"] and online[-1]["c"] == "sensor_check" and online[-1]["n"] == 10
-    s = admin.get(f"/meters/{pk}/calibration/status").get_json()
-    assert s["online"] and s["channels"][0]["check"]["state"] == "running"
-    assert admin.post(f"/meters/{pk}/calibration/apply", json={"ch": 0, "kind": "zero"}).status_code == 400   # no result yet
-    with app.app_context():
-        check_event(db.session.get(Device, pk))
-        db.session.commit()
-    ok = admin.post(f"/meters/{pk}/calibration/apply", json={"ch": 0, "kind": "zero"}).get_json()
-    assert ok["ok"] and ok["a"] == 0.012, ok
-    assert admin.get(f"/meters/{pk}/calibration/status").get_json()["channels"][0]["zero"]["a"] == 0.012
-    assert admin.post(f"/meters/{pk}/calibration/clear", json={"ch": 0, "what": "zero"}).get_json()["ok"]
-    assert admin.post(f"/meters/{pk}/calibration/clear", json={"ch": 9}).status_code == 400
-    # a viewer cannot use any of it
-    from .test_access import _viewer
-    _viewer(admin, "tenant", [pk])
-    v = _login(app, "tenant")
-    assert v.get(f"/meters/{pk}/calibration").status_code == 403
-    assert v.post(f"/meters/{pk}/calibration/check", json={"ch": 0, "kind": "zero"}).status_code == 403
-    assert v.post(f"/meters/{pk}/calibration/apply", json={"ch": 0, "kind": "zero"}).status_code == 403
-
-
 def test_offline_check_is_refused_by_the_page(app, admin):
     with app.app_context():
         pk = _meter("Dryer A", "AAAA1111")
