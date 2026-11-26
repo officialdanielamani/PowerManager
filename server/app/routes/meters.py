@@ -16,6 +16,7 @@ from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer
                       PairingCode, Rollup, RollupDirty, Session, Temperature, now)
 from ..services import access, auxcfg, commands, devconfig, mqtt_bridge, history, hub, incidents, ingest, lifecycle, notify, settings, validation
 from ..services import calib as calib_svc
+from ..services import nextsession
 from ..services import tare as tare_svc
 from .decorators import staff_required
 from .device_api import ensure_device_defaults
@@ -127,6 +128,23 @@ def calibration_clear(pk):
 
 
 # ------------------------------------------------------------------ configure
+
+@bp.post("/<int:pk>/next-session")
+@staff_required
+def next_session(pk):
+    """Schedule Next Session of a channel (Configuration -> Channels): action set | clear."""
+    device = _device(pk)
+    body = request.get_json(silent=True) or {}
+    ch = body.get("ch")
+    ch = int(ch) if str(ch).isdigit() else None
+    if body.get("action") == "clear":
+        ok = nextsession.clear(device, ch) if ch is not None else False
+        return jsonify(ok=True, cleared=ok)
+    info, errors = nextsession.schedule(device, ch, body, current_user)
+    if errors:
+        return jsonify(ok=False, errors=errors), 400
+    return jsonify(ok=True, next=info, server_time=now())
+
 
 def _push_config(device):
     msg = {"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted, device.calib)}
@@ -331,6 +349,7 @@ def configure(pk):
                            n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
+                           server_time=now(),
                            calib_view=calib_svc.view(device), calib_online=hub.is_online(device.id), calib_limits=_calib_limits(),
                            form=request.form if errors else None)
 

@@ -274,6 +274,9 @@ def _parse_mc(form, device, cfg, errors):
         a = form.get(f"kwh_action_{i}", DEFAULT_KWH_ACTION)
         c["kwh_action"] = a if a in KWH_ACTIONS else DEFAULT_KWH_ACTION
         c.update(_parse_sess(form, f"_{i}", errors, label))
+        prev = ((device.cfg or {}).get("ch") or [])
+        if i < len(prev) and prev[i].get("next"):
+            c["next"] = prev[i]["next"]   # a scheduled next session is not part of this form: keep it
         chans.append(c)
     cfg["ch"] = chans
     cfg["tare_limits"] = form.get("tare_limits") == "on"

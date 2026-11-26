@@ -156,6 +156,7 @@ var PM = (function () {
         '<div class="d-flex flex-wrap gap-3 small mt-1"><span><span class="fs-5 fw-semibold">' + (c.w == null ? '–' : c.w) + '</span> W</span><span>' + fmt(c.a, 3) + ' A</span><span>PF ' + fmt(c.pf, 2) + '</span>' +
         '<span class="text-body-secondary">' + fmt(c.e, 3) + ' kWh total</span>' + (c.amp_max ? '<span class="text-body-secondary">max ' + c.amp_max + ' A</span>' : '') + '</div>' +
         (c.relay_block && !c.relay_on ? '<div class="small text-body-secondary">Off: ' + esc(c.relay_block) + '</div>' : '') + sess +
+        (c.next_at ? '<div class="small text-body-secondary mt-1"><i class="bi bi-calendar-event me-1"></i>New session settings on ' + esc(c.next_at_local) + '</div>' : '') +
         (admin ? '<div class="d-flex flex-wrap gap-1 mt-2">' +
           (blocked ? '<button class="btn btn-sm btn-success" disabled title="Blocked until the session is renewed / trip is reset"><i class="bi bi-toggle-on me-1"></i>ON</button>'
                    : btn('relay_on', 'btn-success', 'bi-toggle-on', 'ON')) +

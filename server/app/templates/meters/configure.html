@@ -198,7 +198,8 @@
       <div class="input-group" style="max-width:340px">
         <span class="input-group-text">Min</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_min" value="{{ val('volt_min', cfg.get('volt_min', 0)) }}">
         <span class="input-group-text">Max</span><input class="form-control" type="number" step="0.1" min="0" max="400" name="volt_max" value="{{ val('volt_max', cfg.get('volt_max', 0)) }}">
-        <span class="input-group-text">V</span></div>
+        <span class="input-group-text">V</span>
+        {% if d.kind != 'dc' %}<button type="button" class="btn btn-outline-secondary" id="voltDefault">Set to Default</button>{% endif %}</div>
       <div class="form-text">0 = no limit on that side. Out of range = 3 s in a row; back in range = 10 s in a row. No {{ d.kind|upper }} supply at all is reported as "No voltage", not here.</div>
       {{ action_radios('volt_action', val('volt_action', cfg.get('volt_action', 'hold')), protect_actions, 'hold', 'If out of range') }}
       <hr>
@@ -268,6 +269,38 @@
             <input class="form-control form-control-sm" style="width:60px" type="number" min="0" max="59" name="dur_m_{{ i }}" value="{{ val('dur_m_' ~ i, dm % 60) }}" title="minutes"><span class="small align-self-center">d / h / min</span></span>
           <span data-chsess="{{ i }}" data-for="daily"><input class="form-control form-control-sm" type="time" name="daily_at_{{ i }}" value="{{ val('daily_at_' ~ i, c.get('daily_at', '00:00')) }}"></span>
           <div class="form-check mb-0"><input class="form-check-input" type="checkbox" name="auto_{{ i }}" id="auto_{{ i }}" {{ chk('auto_' ~ i, c.get('auto')) }}><label class="form-check-label small" for="auto_{{ i }}">Auto renew</label></div>
+        </div>
+        {# Schedule Next Session (independent mode): new limits + session details that replace these at a set time #}
+        {% set nx = c.get('next') %}{% set nv = nx or c %}{% set ndm = nv.get('dur_min', 1440) %}{% set nsm = nv.get('sess_mode', 'none') %}
+        <div class="mt-2 pm-next" data-mc="independent" data-ch="{{ i }}" data-at="{{ nx.at if nx else '' }}" data-url="{{ url_for('meters.next_session', pk=d.id) }}">
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <div class="form-check form-switch mb-0"><input class="form-check-input pm-next-on" type="checkbox" role="switch" id="nx_on_{{ i }}" {{ 'checked' if nx }}><label class="form-check-label small fw-semibold" for="nx_on_{{ i }}">Schedule Next Session</label></div>
+            <span class="small text-body-secondary pm-next-count"></span>
+          </div>
+          <div class="pm-next-panel border rounded p-2 mt-2 {{ '' if nx else 'd-none' }}">
+            <div class="small text-body-secondary mb-2">These values replace the ones above at the set time (the running session ends then).</div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <div class="input-group input-group-sm" style="width:170px"><span class="input-group-text">Max</span><input class="form-control pm-nx-amp_max" type="number" step="0.01" min="0" max="{{ amp_rating }}" value="{{ nv.get('amp_max', 0) }}"><span class="input-group-text">A</span></div>
+              {% if rt %}<span class="small text-body-secondary">clamp {{ '%g'|format(rt) }} A</span>{% endif %}
+              <div class="input-group input-group-sm" style="width:190px"><span class="input-group-text">kWh</span><input class="form-control pm-nx-kwh_max" type="number" step="0.001" min="0" max="100000" value="{{ nv.get('kwh_max', 0) }}"><span class="input-group-text">max</span></div>
+              <select class="form-select form-select-sm w-auto pm-nx-kwh_action">{% for k, label in kwh_actions.items() %}<option value="{{ k }}" {{ 'selected' if nv.get('kwh_action', 'hold') == k }}>{{ label }}</option>{% endfor %}</select>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+              <select class="form-select form-select-sm w-auto pm-nx-sess_mode"><option value="none" {{ 'selected' if nsm == 'none' }}>No time limit</option><option value="duration" {{ 'selected' if nsm == 'duration' }}>Duration</option><option value="daily" {{ 'selected' if nsm == 'daily' }}>Every day at</option></select>
+              <span class="d-flex gap-1 pm-nx-dur"><input class="form-control form-control-sm pm-nx-dur_d" style="width:70px" type="number" min="0" max="365" value="{{ ndm // 1440 }}" title="days"><input class="form-control form-control-sm pm-nx-dur_h" style="width:60px" type="number" min="0" max="23" value="{{ (ndm % 1440) // 60 }}" title="hours"><input class="form-control form-control-sm pm-nx-dur_m" style="width:60px" type="number" min="0" max="59" value="{{ ndm % 60 }}" title="minutes"><span class="small align-self-center">d / h / min</span></span>
+              <span class="pm-nx-daily"><input class="form-control form-control-sm pm-nx-daily_at" type="time" value="{{ nv.get('daily_at', '00:00') }}"></span>
+              <div class="form-check mb-0"><input class="form-check-input pm-nx-auto" type="checkbox" id="nx_auto_{{ i }}" {{ 'checked' if nv.get('auto') }}><label class="form-check-label small" for="nx_auto_{{ i }}">Auto renew</label></div>
+            </div>
+            <div class="mt-2 small fw-semibold">This will be set on</div>
+            <div class="d-flex flex-wrap align-items-center gap-3 mt-1">
+              <div class="form-check form-check-inline mb-0 d-flex align-items-center gap-1"><input class="form-check-input mt-0" type="radio" name="nxw_{{ i }}" value="rel" id="nxw_rel_{{ i }}" checked><label class="form-check-label" for="nxw_rel_{{ i }}">Next</label>
+                <input class="form-control form-control-sm pm-nx-d" style="width:62px" type="number" min="0" max="366" value="0" title="days"><span>:</span><input class="form-control form-control-sm pm-nx-h" style="width:58px" type="number" min="0" max="23" value="0" title="hours"><span>:</span><input class="form-control form-control-sm pm-nx-m" style="width:58px" type="number" min="0" max="59" value="30" title="minutes"><span class="text-body-secondary">DD:HH:MM</span></div>
+              <div class="form-check form-check-inline mb-0 d-flex align-items-center gap-1"><input class="form-check-input mt-0" type="radio" name="nxw_{{ i }}" value="cal" id="nxw_cal_{{ i }}"><label class="form-check-label" for="nxw_cal_{{ i }}">On</label>
+                <input class="form-control form-control-sm pm-nx-date" style="width:200px" type="datetime-local"></div>
+            </div>
+            <div class="mt-2 d-flex flex-wrap align-items-center gap-2"><button type="button" class="btn btn-sm btn-primary pm-nx-save"><i class="bi bi-calendar-check me-1"></i>Save</button>
+              <span class="small pm-nx-msg"></span></div>
+          </div>
         </div>
       </div>
       {% endfor %}
@@ -519,6 +552,66 @@
 <script>
 (function () {
   var actionUrl = "{{ url_for('meters.action', pk=d.id) }}", infoUrl = "{{ url_for('meters.configure', pk=d.id) }}";   // after a save: back to this page (the same tab is reopened)
+  // ---- Schedule Next Session (per channel, independent mode)
+  (function () {
+    var skew = {{ server_time }} - Date.now() / 1000;
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function left(at) {
+      var s = Math.max(0, Math.round(at - (Date.now() / 1000 + skew)));
+      return Math.floor(s / 86400) + 'd ' + pad(Math.floor(s % 86400 / 3600)) + ':' + pad(Math.floor(s % 3600 / 60)) + ':' + pad(s % 60);
+    }
+    document.querySelectorAll('.pm-next').forEach(function (box) {
+      var ch = +box.dataset.ch, on = box.querySelector('.pm-next-on'), panel = box.querySelector('.pm-next-panel');
+      var count = box.querySelector('.pm-next-count'), msg = box.querySelector('.pm-nx-msg');
+      var q = function (c) { return box.querySelector('.pm-nx-' + c); };
+      var form = document.getElementById('cfgForm');
+      var cur = function (n) { return form.elements[n + '_' + ch]; };
+      function tick() {
+        var at = +box.dataset.at;
+        count.textContent = at ? 'Starts in ' + left(at) + (at - (Date.now() / 1000 + skew) <= 0 ? ' (applying…)' : '') : '';
+      }
+      function vis() {
+        var m = q('sess_mode').value;
+        box.querySelector('.pm-nx-dur').classList.toggle('d-none', m !== 'duration');
+        box.querySelector('.pm-nx-daily').classList.toggle('d-none', m !== 'daily');
+      }
+      function fillFromCurrent() {   // a new schedule starts from the values above
+        q('amp_max').value = cur('amp_max').value; q('kwh_max').value = cur('kwh_max').value; q('kwh_action').value = cur('kwh_action').value;
+        q('sess_mode').value = cur('sess_mode').value; q('dur_d').value = cur('dur_d').value; q('dur_h').value = cur('dur_h').value;
+        q('dur_m').value = cur('dur_m').value; q('daily_at').value = cur('daily_at').value; q('auto').checked = cur('auto').checked; vis();
+      }
+      on.addEventListener('change', function () {
+        panel.classList.toggle('d-none', !on.checked);
+        if (on.checked && !box.dataset.at) fillFromCurrent();
+        if (!on.checked && box.dataset.at) {   // OFF: the current settings go on as usual
+          PM.post(box.dataset.url, {action: 'clear', ch: ch}).then(function (r) {
+            if (r.ok) { box.dataset.at = ''; tick(); PM.toast('Scheduled session settings removed', 'success'); }
+            else { on.checked = true; panel.classList.remove('d-none'); PM.toast('Could not remove it', 'danger'); }
+          });
+        }
+      });
+      q('sess_mode').addEventListener('change', vis);
+      q('date').addEventListener('input', function () { box.querySelector('input[value=cal]').checked = true; });
+      box.querySelector('.pm-nx-save').addEventListener('click', function () {
+        var cal = box.querySelector('input[value=cal]').checked;
+        var body = {action: 'set', ch: ch, when: cal ? 'cal' : 'rel', d: q('d').value, h: q('h').value, m: q('m').value, date: q('date').value,
+                    amp_max: q('amp_max').value, kwh_max: q('kwh_max').value, kwh_action: q('kwh_action').value, sess_mode: q('sess_mode').value,
+                    dur_d: q('dur_d').value, dur_h: q('dur_h').value, dur_m: q('dur_m').value, daily_at: q('daily_at').value, auto: q('auto').checked ? 'on' : ''};
+        msg.textContent = '';
+        PM.post(box.dataset.url, body).then(function (r) {
+          if (!r.ok) { msg.className = 'small pm-nx-msg text-danger'; msg.textContent = (r.errors || ['Failed']).join(' '); return; }
+          box.dataset.at = r.next.at; skew = r.server_time - Date.now() / 1000; tick();
+          msg.className = 'small pm-nx-msg text-success'; msg.textContent = 'Saved: will be set on ' + r.next.at_local;
+        });
+      });
+      vis(); tick(); setInterval(tick, 1000);
+    });
+  })();
+  var vd = document.getElementById('voltDefault');   // Malaysia: 230 V +10 % / -6 %
+  if (vd) vd.addEventListener('click', function () {
+    var f = document.getElementById('cfgForm');
+    f.elements.volt_min.value = '216.2'; f.elements.volt_max.value = '253';
+  });
   // ---- Tune: zero / tare per channel (docs/protocol.md §13); calibration is greyed out until it exists
   (function () {
     var BASE = "{{ url_for('meters.calibration', pk=d.id) }}";
