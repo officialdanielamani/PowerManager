@@ -278,7 +278,7 @@ class Session(db.Model):
     ended_at = db.Column(db.Integer)
     kwh_used = db.Column(db.Float, nullable=False, default=0.0)
     kwh_max = db.Column(db.Float, nullable=False, default=0.0)
-    end_reason = db.Column(db.String(10))  # quota | expired | manual
+    end_reason = db.Column(db.String(16))  # quota | expired | manual
     auto = db.Column(db.Boolean, nullable=False, default=False)
     # Electricity price locked in when the session starts (Settings -> Server -> Price).
     price_per_kwh = db.Column(db.Float)
@@ -336,7 +336,9 @@ class NotificationRule(db.Model):
     user_fk = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
     type = db.Column(db.String(20), primary_key=True)
     enabled = db.Column(db.Boolean, nullable=False, default=False)
-    param = db.Column(db.Integer)
+    param = db.Column(db.Integer)           # threshold: % / minutes / degC, depending on the type
+    channels = db.Column(db.JSON)           # multi-channel (independent): the channels this applies to (null = all)
+    fired = db.Column(db.JSON, nullable=False, default=dict)  # threshold notifications already sent (re-armed when the value recovers)
 
 
 class Notification(db.Model):

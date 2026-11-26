@@ -7,23 +7,38 @@ import re
 
 from . import auxcfg, settings
 
-NOTIFY_TYPES = [
-    ("kwh_exceeded", "Device exceeded kWh"),
-    ("voltage_range", "Voltage out of range"),
-    ("session_renew", "Session renewed"),
-    ("max_amp", "Max amp (trip)"),
-    ("panel_open", "Panel open"),
-    ("no_voltage", "No voltage"),
-    ("sensor_error", "Sensor error (no reading)"),
-    ("temp_high", "Temperature too high"),
-    ("ups", "UPS power (mains failed / back)"),
-    ("disconnected", "Device disconnected for"),
-    ("reconnected", "Device reconnected"),
-    ("meter_status", "Meter status (disabled / enabled / unsynced / synced / removed)"),
-    ("reboot_pending", "Meter restart (hardware change / firmware update)"),
+# Notification options per meter and user, in the groups of the page. opts: ch = can be limited to channels (independent mode),
+# param = (unit, min, max, default) threshold, needs = hardware the meter must report (caps), mc = multi-channel meters only.
+NOTIFY_GROUPS = [
+    ("Limits", [
+        ("session_renew", "Session renewed", {"ch": True}),
+        ("session_end", "Session ended", {"ch": True}),
+        ("kwh_exceeded", "Exceeded kWh limit", {"ch": True}),
+        ("kwh_remaining", "Remaining % of the session kWh", {"ch": True, "param": ("%", 1, 99, 10)}),
+        ("time_remaining", "Remaining time of the session", {"ch": True, "param": ("hh:mm", 1, 1440 * 30, 60)}),
+        ("max_amp", "Max amp (trip)", {"ch": True}),
+        ("voltage_range", "Voltage out of range", {}),
+    ]),
+    ("Device Info", [
+        ("panel_open", "Panel open", {"needs": "tamper"}),
+        ("ups", "UPS power", {"needs": "ups"}),
+        ("battery_low", "Battery percentage below", {"needs": "battery", "param": ("%", 1, 99, 20)}),
+        ("temp_high", "Temperature above", {"needs": "temp", "param": ("°C", -40, 125, 50)}),
+        ("sensor_error", "Sensor error", {}),
+        ("no_voltage", "No voltage", {}),
+    ]),
+    ("Device Status", [
+        ("meter_status", "Change of device status", {}),
+        ("channel_status", "Change of a channel in the device status", {"mc": True}),
+        ("reboot_pending", "Device restart (hardware change / firmware update)", {}),
+        ("disconnected", "Device disconnected for", {"param": ("min", 1, 1440, 5)}),
+        ("reconnected", "Device reconnected", {}),
+    ]),
 ]
+NOTIFY_TYPES = [(t, label) for _g, items in NOTIFY_GROUPS for t, label, _o in items]
+NOTIFY_OPTS = {t: o for _g, items in NOTIFY_GROUPS for t, _l, o in items}
 # Types that are on for every account until the account switches them off.
-NOTIFY_DEFAULT_ON = {"meter_status", "temp_high", "ups", "reboot_pending"}
+NOTIFY_DEFAULT_ON = {"meter_status", "channel_status", "temp_high", "ups", "reboot_pending"}
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
 MIN_FW = (1, 1, 0)  # oldest meter firmware this server works with (both sketches)

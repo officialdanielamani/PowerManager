@@ -209,6 +209,8 @@ static void startSession(bool autoRenew) {
   bump();
 }
 
+static float batPct_ = NAN;  // battery % (BATTERY_ENABLE), measured every 5 s: AUX rules and the state sent to the server ("bat")
+
 static void endSession(const char *reason) {
   // caller holds StateLock. Sends session_end once per session.
   if (g.sess.ended) return;
@@ -383,6 +385,7 @@ void stateJson(JsonObject o) {
   if (g.sess.status == SESS_ENDED)
     s["end_reason"] = stopReasonName(g.sess.stopReason);
   if (g.disabled) o["disabled"] = true;
+  if (battery::enabled() && !isnan(batPct_)) o["bat"] = (int)batPct_;
   if (g.voltOut) o["volt_out"] = true;
   if (g.tempHigh) o["temp_high"] = true;
   if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
@@ -773,19 +776,26 @@ static void writeRelays(bool force) {
   }
 }
 
+static void batteryTick() {
+  if (!battery::enabled()) return;
+  static uint32_t atMs = 0;
+  static float sent = NAN;
+  if (!isnan(batPct_) && millis() - atMs < 5000) return;
+  atMs = millis();
+  batPct_ = battery::percent(battery::volts());
+  if (isnan(sent) || fabsf(batPct_ - sent) >= 2) {  // the server notices a low battery: send the state when it moved
+    sent = batPct_;
+    StateLock l;
+    bump();
+  }
+}
+
 // AUX relay automation: live values of the measured line for the event rules.
 static void auxTick() {
+  batteryTick();
   if (!auxrelay::count()) return;
   auxrelay::Inputs in;
-  if (battery::enabled()) {  // battery % for the AUX event rules, measured every 5 s
-    static uint32_t batAtMs = 0;
-    static float batPct = NAN;
-    if (isnan(batPct) || millis() - batAtMs > 5000) {
-      batAtMs = millis();
-      batPct = battery::percent(battery::volts());
-    }
-    in.batPct = batPct;
-  }
+  in.batPct = batPct_;
   {
     StateLock l;
     in.nch = 1;

@@ -42,14 +42,25 @@ struct Dev {
 };
 static std::map<uint8_t, Dev> bus;
 static int regWrites = 0;
+static bool flood = false;   // an rbAmp on the bus: empty addresses ACK writes and answer reads with other data
 
 namespace i2cbus {
 void begin() {}
 bool writeReg(uint8_t addr, uint8_t reg, uint8_t val) {
   auto it = bus.find(addr);
-  if (it == bus.end() || !it->second.present) return false;
+  if (it == bus.end() || !it->second.present) return flood;   // flood: acknowledged, nothing there
   it->second.reg[reg & 0x1F] = val;
   regWrites++;
+  return true;
+}
+bool readRegs(uint8_t addr, uint8_t reg, uint8_t *buf, size_t n) {
+  auto it = bus.find(addr);
+  if (it == bus.end() || !it->second.present) {
+    if (!flood) return false;
+    for (size_t i = 0; i < n; i++) buf[i] = 0x0D;   // what the rbAmp module returns
+    return true;
+  }
+  for (size_t i = 0; i < n; i++) buf[i] = it->second.reg[(reg + i) & 0x1F];
   return true;
 }
 bool writeRaw(uint8_t addr, const uint8_t *d, size_t) {
@@ -110,6 +121,15 @@ int main() {
   CHECK(relays::write(0));
   CHECK(bus[0x20].outputs() == 0 && bus[0x21].outputs() == 0 && (bus[0x22].reg[0] & 0x0F) == 0x0F);
   printf("OFF stays OFF ok\n");
+
+  // 5. an rbAmp makes every address ACK: a board that is NOT there must still be reported missing (direction registers read back)
+  bus[0x21].present = false;
+  flood = true;
+  CHECK(!relays::write(on) && !relays::ok());
+  bus[0x21].present = true; bus[0x21].reset();
+  CHECK(relays::write(on) && relays::ok());     // plugged in again: fine, also during the flood
+  flood = false;
+  printf("ACK flood: a missing relay board is still detected ok\n");
 
   if (failures) { printf("%d check(s) FAILED\n", failures); return 1; }
   printf("all relay recovery checks passed\n");

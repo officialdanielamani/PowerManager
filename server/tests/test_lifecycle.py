@@ -215,7 +215,7 @@ def test_meter_status_notification_default_on(app, admin):
         pk = d.id
     # no saved choice: on by default
     html = admin.get(f"/meters/{pk}/notifications").get_data(as_text=True)
-    assert 'name="notify_meter_status"' in html and "Meter status" in html
+    assert 'name="notify_meter_status"' in html and "Change of device status" in html
     assert admin.post(f"/meters/{pk}/action", json={"action": "disable"}).get_json()["ok"]
     assert admin.post(f"/meters/{pk}/action", json={"action": "enable"}).get_json()["ok"]
     with app.app_context():

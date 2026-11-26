@@ -10,16 +10,30 @@
   <div class="card-header fw-semibold">My notifications for this meter</div>
   <div class="card-body">
     <p class="small text-body-secondary">These options are <strong>only for your account ({{ current_user.username }})</strong>. Every user picks their own, so nobody gets notifications they did not ask for.</p>
-    {% for r in rules %}
-    <div class="d-flex align-items-center gap-2 py-2 border-bottom">
-      <div class="form-check form-switch mb-0 flex-grow-1">
-        <input class="form-check-input" type="checkbox" role="switch" name="notify_{{ r.type }}" id="n_{{ r.type }}" {{ 'checked' if r.enabled }}>
-        <label class="form-check-label" for="n_{{ r.type }}">{{ r.label }}</label>
+    {% for g in groups %}
+    <div class="fw-semibold mt-3 mb-1">{{ g.name }}</div>
+    {% for r in g.rows if r.supported %}
+    <div class="py-2 border-bottom">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" role="switch" name="notify_{{ r.type }}" id="n_{{ r.type }}" {{ 'checked' if r.enabled }}>
+          <label class="form-check-label" for="n_{{ r.type }}">{{ r.label }}</label>
+        </div>
+        {% if r.unit == 'hh:mm' %}
+        <div class="input-group input-group-sm" style="width:130px"><input class="form-control" name="notify_{{ r.type }}_param" value="{{ r.hhmm }}" pattern="[0-9]{1,3}:[0-5][0-9]" title="hours:minutes, e.g. 1:30" inputmode="numeric"><span class="input-group-text">hh:mm</span></div>
+        {% elif r.unit %}
+        <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="{{ r.lo }}" max="{{ r.hi }}" name="notify_{{ r.type }}_param" value="{{ r.param }}"><span class="input-group-text">{{ r.unit }}</span></div>
+        {% endif %}
+        {% if r.type == 'kwh_remaining' %}<span class="small text-body-secondary">left of the session limit</span>{% endif %}
+        {% if r.type == 'time_remaining' %}<span class="small text-body-secondary">left of the session time</span>{% endif %}
       </div>
-      {% if r.type == 'disconnected' %}
-      <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="1" max="1440" name="notify_disconnected_min" value="{{ r.param }}"><span class="input-group-text">min</span></div>
+      {% if r.channels %}
+      <div class="small mt-1 ms-4 text-body-secondary">Channels:
+        {% for c, name in r.channels %}<span class="form-check form-check-inline mb-0 ms-2"><input class="form-check-input" type="checkbox" name="notify_{{ r.type }}_ch" value="{{ c }}" id="n_{{ r.type }}_{{ c }}" {{ 'checked' if c in r.picked }}><label class="form-check-label" for="n_{{ r.type }}_{{ c }}">{{ name }}</label></span>{% endfor %}
+      </div>
       {% endif %}
     </div>
+    {% endfor %}
     {% endfor %}
     <div class="small text-body-secondary mt-3">
       Delivered in the <a href="{{ url_for('main.notifications') }}">Notifications</a> page{% if telegram %}{% if has_chat %} and to your Telegram{% else %}. Add your Telegram chat ID in <a href="{{ url_for('settings.index', tab='account') }}">Settings → Account</a> to also get them on Telegram{% endif %}{% endif %}.

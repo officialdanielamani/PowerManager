@@ -219,6 +219,8 @@ struct SessCtx {
 // channel's own). RAM only, sent with session_end.
 static SessStats stats_[MC_MAX_CH];
 
+static float batPct_ = NAN;  // battery % (BATTERY_ENABLE), measured every 5 s: AUX rules and the state sent to the server ("bat")
+
 static void startSession(uint8_t slot, bool autoRenew) {
   // caller holds StateLock
   SessionState &s = g.sess[slot];
@@ -517,6 +519,7 @@ void stateJson(JsonObject o) {
   if (ups::enabled()) o["ups"] = g.ups;
   o["ac"] = g.ac;
   if (g.disabled) o["disabled"] = true;
+  if (battery::enabled() && !isnan(batPct_)) o["bat"] = (int)batPct_;
   if (g.voltOut) o["volt_out"] = true;
   if (g.tempHigh) o["temp_high"] = true;
   if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
@@ -1138,20 +1141,27 @@ static void checkRules(bool firstPass) {
   }
 }
 
+static void batteryTick() {
+  if (!battery::enabled()) return;
+  static uint32_t atMs = 0;
+  static float sent = NAN;
+  if (!isnan(batPct_) && millis() - atMs < 5000) return;
+  atMs = millis();
+  batPct_ = battery::percent(battery::volts());
+  if (isnan(sent) || fabsf(batPct_ - sent) >= 2) {  // the server notices a low battery: send the state when it moved
+    sent = batPct_;
+    StateLock l;
+    bump();
+  }
+}
+
 // AUX relay automation: live values for the event rules (per channel; kWh balance and session of the
 // session that governs the channel: the shared one, or the channel's own in independent mode).
 static void auxTick() {
+  batteryTick();
   if (!auxrelay::count()) return;
   auxrelay::Inputs in;
-  if (battery::enabled()) {  // battery % for the AUX event rules, measured every 5 s
-    static uint32_t batAtMs = 0;
-    static float batPct = NAN;
-    if (isnan(batPct) || millis() - batAtMs > 5000) {
-      batAtMs = millis();
-      batPct = battery::percent(battery::volts());
-    }
-    in.batPct = batPct;
-  }
+  in.batPct = batPct_;
   {
     StateLock l;
     in.nch = g.nch < auxrelay::MAX_CH ? g.nch : auxrelay::MAX_CH;

@@ -161,8 +161,8 @@ var PM = (function () {
                    : btn('relay_on', 'btn-success', 'bi-toggle-on', 'ON')) +
           btn('relay_off', 'btn-outline-secondary', 'bi-toggle-off', 'OFF') +
           (c.tripped ? btn('reset_trip', 'btn-outline-danger', 'bi-shield-check', 'Reset Trip') : '') +
-          (ind ? btn('renew', 'btn-outline-primary', 'bi-arrow-repeat', 'Renew', 'Start a new session on ' + c.name + '?') +
-                 btn('end', 'btn-outline-danger', 'bi-stop-circle', 'End', 'End the session of ' + c.name + ' now? Its relay stays off until renewed.') : '') +
+          (ind ? btn('renew', 'btn-outline-primary', 'bi-arrow-repeat', 'Renew Now', 'Start a new session on ' + c.name + '?') +
+                 btn('end', 'btn-outline-danger', 'bi-stop-circle', 'End session', 'End the session of ' + c.name + ' now? Its relay stays off until renewed.') : '') +
           '</div>' : '') + '</div></div>';
     }).join('') + '</div>';
   }

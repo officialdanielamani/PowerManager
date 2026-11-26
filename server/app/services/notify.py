@@ -19,8 +19,15 @@ COOLDOWN_S = 600
 COOLDOWN_TYPES = {"max_amp", "panel_open", "no_voltage"}
 
 
-def subscribers(device, ntype):
-    """(user, rule) pairs that want `ntype` for this meter and may still see it. For default-on
+def _wants_channel(device, rule, ch):
+    """A rule limited to some channels (independent mode) only applies to those. No channel given / no limit = applies."""
+    if rule is None or rule.channels is None or ch is None or not device.is_mc:
+        return True
+    return int(ch) in [int(c) for c in rule.channels]
+
+
+def subscribers(device, ntype, ch=None):
+    """(user, rule) pairs that want `ntype` (for channel `ch`) on this meter and may still see it. For default-on
     types (devconfig.NOTIFY_DEFAULT_ON) an account without a saved choice counts as subscribed."""
     from .devconfig import NOTIFY_DEFAULT_ON
     out = []
@@ -28,22 +35,23 @@ def subscribers(device, ntype):
         rules = {r.user_fk: r for r in NotificationRule.query.filter_by(device_fk=device.id, type=ntype).all()}
         for user in User.query.order_by(User.id).all():
             r = rules.get(user.id)
-            if (r is None or r.enabled) and user.is_enabled and access.can_view(user, device):
+            if (r is None or r.enabled) and user.is_enabled and access.can_view(user, device) and _wants_channel(device, r, ch):
                 out.append((user, r))
         return out
     for r in NotificationRule.query.filter_by(device_fk=device.id, type=ntype, enabled=True).all():
         user = db.session.get(User, r.user_fk)
-        if user is not None and user.is_enabled and access.can_view(user, device):
+        if user is not None and user.is_enabled and access.can_view(user, device) and _wants_channel(device, r, ch):
             out.append((user, r))
     return out
 
 
-def notify(device, ntype, message, only_user=None, subs=None, name=None):
+def notify(device, ntype, message, only_user=None, subs=None, name=None, ch=None):
     """Create a notification for every account subscribed to `ntype` on this meter.
-    `subs` / `name`: subscribers and meter name taken before the meter's data was removed."""
+    `subs` / `name`: subscribers and meter name taken before the meter's data was removed.
+    `ch`: the channel the message is about (users who limited the option to other channels are skipped)."""
     created = []
     text = f"[{name or device.name}] {message}"
-    for user, _rule in (subs if subs is not None else subscribers(device, ntype)):
+    for user, _rule in (subs if subs is not None else subscribers(device, ntype, ch)):
         if only_user is not None and user.id != only_user.id:
             continue
         if ntype in COOLDOWN_TYPES:

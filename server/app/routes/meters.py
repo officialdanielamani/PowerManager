@@ -14,7 +14,7 @@ from ..extensions import db
 from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, User,
                       PairingCode, Rollup, RollupDirty, Session, Temperature, now)
-from ..services import access, auxcfg, commands, devconfig, mqtt_bridge, history, hub, incidents, ingest, lifecycle, settings, validation
+from ..services import access, auxcfg, commands, devconfig, mqtt_bridge, history, hub, incidents, ingest, lifecycle, notify, settings, validation
 from ..services import calib as calib_svc
 from ..services import tare as tare_svc
 from .decorators import staff_required
@@ -134,14 +134,33 @@ def _push_config(device):
 
 
 def _rules(device, user):
+    """The notification page: groups of options with this user's choices. Options for hardware the meter does not have are left out
+    (the page shows them disabled), channel limits only for independent multi-channel meters."""
     rules = {r.type: r for r in NotificationRule.query.filter_by(device_fk=device.id, user_fk=user.id).all()}
-    out = []
-    for ntype, label in devconfig.NOTIFY_TYPES:
-        r = rules.get(ntype)
-        on = bool(r.enabled) if r else ntype in devconfig.NOTIFY_DEFAULT_ON
-        out.append({"type": ntype, "label": label, "enabled": on,
-                    "param": (r.param if r and r.param else devconfig.DISCONNECTED_DEFAULT_MIN)})
-    return out
+    caps = device.caps or {}
+    have = {"tamper": bool(caps.get("tamper")), "ups": bool(caps.get("ups")), "battery": bool(caps.get("battery")),
+            "temp": bool(caps.get("temp")) or bool((device.last_reading or {}).get("t"))}
+    indep = device.is_mc and device.mc_mode == "independent"
+    allowed = access.allowed_channels(user, device)
+    chans = [(i, device.channel_name(i)) for i in range(devconfig.channel_count(device)) if allowed is None or i in allowed] if indep else []
+    groups = []
+    for gname, items in devconfig.NOTIFY_GROUPS:
+        rows = []
+        for ntype, label, opts in items:
+            if opts.get("mc") and not device.is_mc:
+                continue
+            r = rules.get(ntype)
+            on = bool(r.enabled) if r else ntype in devconfig.NOTIFY_DEFAULT_ON
+            unit, lo, hi, dflt = opts.get("param", (None, 0, 0, 0))
+            param = r.param if r and r.param else dflt
+            needs = opts.get("needs")
+            rows.append({"type": ntype, "label": label, "enabled": on, "param": param, "unit": unit, "lo": lo, "hi": hi,
+                         "hhmm": f"{int(param) // 60}:{int(param) % 60:02d}" if unit == "hh:mm" else None,
+                         "supported": have.get(needs, True) if needs else True,
+                         "channels": chans if (opts.get("ch") and chans) else [],
+                         "picked": [c for c, _n in chans] if (r is None or r.channels is None) else [int(c) for c in r.channels]})
+        groups.append({"name": gname, "rows": rows})
+    return groups
 
 
 def _viewers():
@@ -268,7 +287,12 @@ def configure(pk):
             device.currency, device.price_per_kwh = currency, price
             device.positive_only = form.get("positive_only") == "on"
             config_changed = cfg != device.cfg
+            was_off = {i for i, c in enumerate((device.cfg or {}).get("ch") or []) if c.get("disabled")}
             device.cfg = cfg
+            for i, c in enumerate(cfg.get("ch") or []):   # a channel was disabled / enabled: "channel status" notification
+                if bool(c.get("disabled")) != (i in was_off):
+                    notify.notify(device, "channel_status",
+                                  f"{device.channel_name(i)} {'disabled' if c.get('disabled') else 'enabled'} by {current_user.username}", ch=i)
             if owner != device.owner_fk:
                 old = db.session.get(User, device.owner_fk) if device.owner_fk else None
                 transfer_owner(device, owner)
@@ -404,22 +428,50 @@ def notifications(pk):
     device = access.device_for_current_user(pk)
     if request.method == "POST":
         form = request.form
-        disc_min = (form.get("notify_disconnected_min") or "5").strip()
-        if not disc_min.isdigit() or not 1 <= int(disc_min) <= 1440:
-            flash("Disconnected minutes must be 1–1440", "danger")
-            return redirect(url_for("meters.notifications", pk=pk))
-        for ntype, _label in devconfig.NOTIFY_TYPES:
+        errors = []
+        indep = device.is_mc and device.mc_mode == "independent"
+        allowed = access.allowed_channels(current_user, device)
+        n_ch = devconfig.channel_count(device)
+        for ntype, _label, opts in [(t, l, o) for _g, items in devconfig.NOTIFY_GROUPS for t, l, o in items]:
             r = db.session.get(NotificationRule, (device.id, current_user.id, ntype))
             if r is None:
                 r = NotificationRule(device_fk=device.id, user_fk=current_user.id, type=ntype)
                 db.session.add(r)
             r.enabled = form.get(f"notify_{ntype}") == "on"
-            if ntype == "disconnected":
-                r.param = int(disc_min)
+            if "param" in opts:
+                unit, lo, hi, dflt = opts["param"]
+                raw = (form.get(f"notify_{ntype}_param") or (form.get("notify_disconnected_min") if ntype == "disconnected" else "") or "").strip()
+                try:
+                    if not raw:
+                        val = r.param or dflt   # not sent: keep the value
+                    elif unit == "hh:mm":
+                        h, m = raw.split(":")
+                        val = int(h) * 60 + int(m)
+                    else:
+                        val = int(raw)
+                    if not lo <= val <= hi:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    if r.enabled:
+                        errors.append(f"{_label}: enter a value from {lo} to {hi} {unit if unit != 'hh:mm' else '(hh:mm, at least 0:01)'}")
+                    val = r.param or dflt
+                if val != r.param:
+                    r.fired = {}   # a new threshold: the notification can be sent again
+                r.param = val
+            if opts.get("ch") and indep:
+                picked = [int(c) for c in form.getlist(f"notify_{ntype}_ch") if str(c).isdigit() and int(c) < n_ch
+                          and (allowed is None or int(c) in allowed)]
+                every = [i for i in range(n_ch) if allowed is None or i in allowed]
+                r.channels = None if sorted(picked) == every else sorted(picked)
+        if errors:
+            db.session.rollback()
+            for e in errors:
+                flash(e, "danger")
+            return redirect(url_for("meters.notifications", pk=pk))
         db.session.commit()
         flash("Your notification options for this meter were saved.", "success")
         return redirect(url_for("meters.notifications", pk=pk))
-    return render_template("meters/notifications.html", d=device, rules=_rules(device, current_user),
+    return render_template("meters/notifications.html", d=device, groups=_rules(device, current_user),
                            telegram=settings.get("telegram_enabled") == "1",
                            has_chat=bool(current_user.telegram_chat_id))
 

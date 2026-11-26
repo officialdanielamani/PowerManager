@@ -48,6 +48,8 @@ def _migrate_tare():
 
 
 def run():
+    _add_column("notification_rule", "channels JSON")
+    _add_column("notification_rule", "fired JSON NOT NULL DEFAULT '{}'")
     # firmware type / OTA state of the meter (docs/protocol.md §14)
     _add_column("device", "fw_type VARCHAR(24) NOT NULL DEFAULT ''")
     _add_column("device", "ota JSON NOT NULL DEFAULT '{}'")

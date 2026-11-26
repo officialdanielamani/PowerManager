@@ -504,7 +504,7 @@ HANDLERS = {
 
 def _apply_state(device, state):
     keys = ("relay", "tripped", "tamper", "ups", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor", "aux",
-            "temp_high")
+            "temp_high", "bat")
     clean = {k: state[k] for k in keys if k in state}
     merged = dict(device.last_state or {})
     if "relay" in state:  # a full state: flags that are only sent while true are cleared when missing
@@ -616,7 +616,7 @@ def process_event(device, ev):
     if e == "overcurrent":
         incidents.open_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                 detail={"a": d.get("val"), "limit": _r4(_f(d.get("limit"))), "ch": ev.ch})
-        notify.notify(device, "max_amp", f"{_chp(device, ev)}Over-current trip: {d.get('val')} A")
+        notify.notify(device, "max_amp", f"{_chp(device, ev)}Over-current trip: {d.get('val')} A", ch=ev.ch)
     elif e == "trip_reset":
         incidents.close_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
@@ -659,6 +659,7 @@ def process_event(device, ev):
         incidents.open_incident(device.id, "sensor", ev.ts, event=ev, estimated=est,
                                 detail={"kind": kind, "after_s": d.get("after_s"), "action": d.get("action")})
         why = ("garbled replies (wiring / noise)" if kind == "bad"
+               else "sensor not responding (sensor or wiring fault)" if device.is_mc
                else "sensor not responding (sensor or wiring fault, or no "
                + ("DC supply" if device.kind == "dc" else "AC power") + ")")
         what = {"end": "session ended", "hold": "relay off until readings return"}.get(d.get("action"), "power kept on")
@@ -706,12 +707,12 @@ def process_event(device, ev):
                 s = _session(device, sid)
                 if s.ended_at is None:
                     s.ended_at, s.end_reason = ev.ts, "quota"  # kWh used: from session_end (raw)
-            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit reached ({kwh} kWh): power off, session ended")
+            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit reached ({kwh} kWh): power off, session ended", ch=ev.ch)
         elif action == "hold":
             notify.notify(device, "kwh_exceeded",
-                          f"{pre}Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed")
+                          f"{pre}Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed", ch=ev.ch)
         else:
-            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit exceeded ({kwh} kWh): power kept on")
+            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit exceeded ({kwh} kWh): power kept on", ch=ev.ch)
     elif e == "session_start":
         sid = d.get("sid")
         if isinstance(sid, int):
@@ -728,18 +729,26 @@ def process_event(device, ev):
                              .filter(Session.ended_at.isnot(None)).count() == 0)
         if not first:  # the very first session(s) after pairing are not a "renew"
             notify.notify(device, "session_renew",
-                          _chp(device, ev) + ("Session auto-renewed" if d.get("auto") else "Session renewed"))
+                          _chp(device, ev) + ("Session auto-renewed" if d.get("auto") else "Session renewed"), ch=ev.ch)
     elif e == "session_end":
         sid = d.get("sid")
         if isinstance(sid, int):
             s = _session(device, sid, mch)
             if s.ended_at is None:  # keep the first end (e.g. the kWh limit), not a later Renew
                 s.ended_at = ev.ts
-                s.end_reason = str(d.get("reason", ""))[:10] or None
+                s.end_reason = str(d.get("reason", ""))[:16] or None
             if d.get("kwh") is not None:  # always the raw kWh
                 s.kwh_used = _f(d.get("kwh")) or 0.0
             if isinstance(d.get("sum"), dict):  # min / max / avg of the session
                 s.stats = _session_stats(d["sum"])
+        reason = str(d.get("reason", ""))
+        if reason not in ("manual", "next", "auto", "daily"):  # a renew ends the old session too: that has its own notification
+            label = {"quota": "kWh limit reached", "expired": "time limit reached", "voltage": "voltage out of range",
+                     "tamper": "panel opened", "sensor": "sensor error", "temp": "temperature too high", "stopped": "ended by a user",
+                     "mode": "mode changed", "disabled": "meter disabled", "ch_disabled": "channel disabled",
+                     "hw_change": "hardware change", "restart": "restart"}.get(reason, reason or "ended")
+            kwh = d.get("kwh")
+            notify.notify(device, "session_end", f"{_chp(device, ev)}Session ended ({label})" + (f": {kwh} kWh" if kwh is not None else ""), ch=ev.ch)
     elif e == "server_back":
         last_off = (Incident.query
                     .filter_by(device_fk=device.id, type="offline")

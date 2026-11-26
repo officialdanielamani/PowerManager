@@ -356,3 +356,14 @@ After **Save** (any tab) the page returns to the Configuration page (the same ta
 ## Disable a channel (multi-channel meters)
 
 *Configuration → Channels*: the **Disable** box of a channel (admin / manager). Saved and sent like the other settings. The channel's session ends (independent mode; in shared mode the shared session continues and the channel is frozen), its relay is off, and it cannot be started or renewed. On the **Info** page every user who sees the meter gets a grey card with the badge **Disabled** and no ON / Renew buttons. Untick the box to enable it again (then press Renew to start a new session). This is separate from *Disable meter*.
+
+## Notification options (per meter and per user)
+
+Meter → *Notification Options*. Every account picks its own. Groups:
+- **Limits**: Session renewed, Session ended, Exceeded kWh limit, *Remaining [X] % of the session kWh*, *Remaining [hh:mm] of the session*, Max amp (trip), Voltage out of range. On an **independent** multi-channel meter the first six can be limited to chosen channels (all channels picked = no limit).
+- **Device Info**: Panel open, UPS power, *Battery percentage below [X] %*, *Temperature above [X] °C*, Sensor error, No voltage. Rows for hardware the meter does not report (tamper, UPS, battery, temperature sensor) are hidden.
+- **Device Status**: Change of device status, Change of a channel in the device status (multi-channel; a channel disabled / enabled), Device restart (hardware change / firmware update), *Device disconnected for [X] min*, Device reconnected.
+
+The thresholds (remaining kWh / time, battery, temperature) are worked out on the server every 30 s from the meter's live state; each is sent **once** and armed again when the value recovers or the session changes. *Session ended* is not sent for the end that a Renew causes (that is *Session renewed*).
+
+**No voltage** = the sensor module is detected and answers but there is no AC / DC to measure (rbAmp: voltage ~ 0 or "no result" after it had results; the module has its own 5 V supply). **Sensor error** = the meter cannot talk to the sensor or does not detect it (also a module error flag, garbled replies). The rbAmp is found and read by real data (product ID, readings), so neither depends on an ACK on the I2C bus; relay boards are checked by reading their direction registers back.

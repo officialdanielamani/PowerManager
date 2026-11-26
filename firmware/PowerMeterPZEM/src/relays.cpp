@@ -30,6 +30,12 @@ static uint8_t gpioFirst(uint8_t i) {
   return n;
 }
 
+// The two direction registers (reg, reg + 1) read back as 0x00: a real expander answers like that, an empty address does not.
+static bool readsZero(uint8_t addr, uint8_t reg) {
+  uint8_t d[2] = {0xFF, 0xFF};
+  return i2cbus::readRegs(addr, reg, d, 2) && d[0] == 0x00 && d[1] == 0x00;
+}
+
 static bool writeBoard(uint8_t i, uint16_t p) {
   const hw::RelayBoard &b = hw::RELAY_BOARD[i];
   if (b.driver == RELAY_GPIO) {
@@ -40,13 +46,16 @@ static bool writeBoard(uint8_t i, uint16_t p) {
   // XL9535 / MCP23017: the output state AND the direction (output) are sent every time, state first (no glitch). A
   // board that lost power, or was plugged in after the start, comes back as inputs: without the direction
   // registers its relays would never switch again until the meter restarts.
+  // An rbAmp on the bus ACKs EVERY address, so a write that was "acknowledged" does not prove the board is there: the direction
+  // registers are read back (they must be 0x00 = all outputs) and that is what counts.
   if (b.driver == RELAY_XL9535) {
     return i2cbus::writeReg(b.address, 0x02, (uint8_t)p) && i2cbus::writeReg(b.address, 0x03, (uint8_t)(p >> 8)) &&  // output ports 0 / 1
-           i2cbus::writeReg(b.address, 0x06, 0x00) && i2cbus::writeReg(b.address, 0x07, 0x00);                         // configuration: all outputs
+           i2cbus::writeReg(b.address, 0x06, 0x00) && i2cbus::writeReg(b.address, 0x07, 0x00) &&                      // configuration: all outputs
+           readsZero(b.address, 0x06);
   }
   if (b.driver == RELAY_MCP23017) {  // OLATA / OLATB (GPA = 1..8, GPB = 9..16), then IODIRA / IODIRB, IOCON.BANK = 0
     return i2cbus::writeReg(b.address, 0x14, (uint8_t)p) && i2cbus::writeReg(b.address, 0x15, (uint8_t)(p >> 8)) &&
-           i2cbus::writeReg(b.address, 0x00, 0x00) && i2cbus::writeReg(b.address, 0x01, 0x00);
+           i2cbus::writeReg(b.address, 0x00, 0x00) && i2cbus::writeReg(b.address, 0x01, 0x00) && readsZero(b.address, 0x00);
   }
   uint8_t v = (uint8_t)p;
   return i2cbus::writeRaw(b.address, &v, 1);  // PCF8574: the byte is the output state
@@ -92,12 +101,12 @@ bool begin() {
       i2cbus::begin();
       // Latches first (OLATA / OLATB), then IODIRA / IODIRB = outputs: no glitch when the pins switch from input.
       ok = i2cbus::writeReg(b.address, 0x14, (uint8_t)p) && i2cbus::writeReg(b.address, 0x15, (uint8_t)(p >> 8)) &&
-           i2cbus::writeReg(b.address, 0x00, 0x00) && i2cbus::writeReg(b.address, 0x01, 0x00);
+           i2cbus::writeReg(b.address, 0x00, 0x00) && i2cbus::writeReg(b.address, 0x01, 0x00) && readsZero(b.address, 0x00);
     } else if (b.driver == RELAY_XL9535) {
       i2cbus::begin();
       // Output values first, then make port 0 / port 1 outputs: no glitch when they switch from input.
       ok = i2cbus::writeReg(b.address, 0x02, (uint8_t)p) && i2cbus::writeReg(b.address, 0x03, (uint8_t)(p >> 8)) &&
-           i2cbus::writeReg(b.address, 0x06, 0x00) && i2cbus::writeReg(b.address, 0x07, 0x00);
+           i2cbus::writeReg(b.address, 0x06, 0x00) && i2cbus::writeReg(b.address, 0x07, 0x00) && readsZero(b.address, 0x06);
     } else {
       i2cbus::begin();
       ok = writeBoard(i, p);

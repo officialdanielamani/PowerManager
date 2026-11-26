@@ -435,6 +435,8 @@ channel uses are AUX relays as before.
 
 > **Which clamp value is true:** the module itself. `i2c_scan` returns for every rbAmp `modules[].ct` = the clamp rating (A) the module reports it uses (read back from `APPLIED_CT`); the Update Device I/O page shows it next to every input (red when the profile says something else). After a **live** clamp change the meter sends a fresh hello (new `caps.ratings`) and the server also updates `caps.ratings` from the profile at once; the Configuration page's "clamp N A" comes from `caps.ratings`.
 
+> **Battery in the state (1.1.0):** `state.bat` = battery percentage (integer, only with `caps.battery`), re-sent when it moved by 2 % or more; the server uses it for the "battery below X %" notification.
+
 ### 12.3 Commands (server → meter)
 
 | `c` | Params | Behaviour |

@@ -290,7 +290,9 @@ bool read(Sample &out) {
     return false;
   }
   static uint8_t rt[HWP_MAX_BOARDS][56];  // 0x86..0xBD of each board in one burst = one coherent window
+  static bool everValid = false;          // a valid result was seen since the start: "no result" now means "no AC", not a fault
   int8_t vBoard = -1;
+  bool noResult = false;
   for (uint8_t i = 0; i < hw::BOARDS; i++) {
     Board &b = boards[i];
     uint8_t st = 0, valid = 0, hz = 0;
@@ -305,9 +307,17 @@ bool read(Sample &out) {
       i2cbus::readRegs(b.addr, REG_RT_STATUS, &valid, 1);
       if (vBoard < 0 && b.volt) i2cbus::readRegs(b.addr, REG_AC_FREQ, &hz, 1);
     }
-    if ((st & 0x02) || !(valid & 0x01)) {  // module error / no valid result yet
+    if (st & 0x02) {  // the module reports an error of its own
       err = SENS_BAD;
       return false;
+    }
+    if (!(valid & 0x01)) {  // it answers but has no result
+      if (!everValid) {     // just started: not valid yet
+        err = SENS_BAD;
+        return false;
+      }
+      noResult = true;      // detected, talking, nothing to measure = no voltage (a sensor error is "cannot talk to it")
+      continue;
     }
     if (vBoard < 0 && b.volt) {
       vBoard = i;
@@ -315,6 +325,15 @@ bool read(Sample &out) {
       out.hz = hz;
     }
   }
+  if (noResult) {  // module detected but no reading: zeros (control sees U ~ 0 = no voltage, no sensor error)
+    out.v = 0;
+    out.hz = 0;
+    for (uint8_t c = 0; c < hw::NCH; c++) out.a[c] = out.w[c] = out.pf[c] = 0;
+    err = SENS_OK;
+    lostSinceMs = 0;
+    return true;
+  }
+  everValid = true;
   if (vBoard < 0) {
     out.v = 0;
     out.hz = 0;
