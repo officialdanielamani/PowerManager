@@ -2,6 +2,7 @@
 
 #include "../config.h"
 #include "hwmap.h"
+#include "relaymap.h"
 #include "i2cbus.h"
 
 namespace rbamp {
@@ -411,6 +412,69 @@ bool isRbamp(uint8_t addr) {
 static bool flooded_ = false;
 bool scanFlooded() { return flooded_; }
 
+// ---- proof of a part at an address while the bus ACKs everywhere (see scan)
+static uint8_t crc8(const uint8_t *d, uint8_t n, uint8_t init) {  // Sensirion: polynomial 0x31
+  uint8_t c = init;
+  for (uint8_t i = 0; i < n; i++) {
+    c ^= d[i];
+    for (uint8_t k = 0; k < 8; k++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x31) : (uint8_t)(c << 1);
+  }
+  return c;
+}
+static bool bcdOk(uint8_t v, uint8_t maxBcd) { return (v & 0x0F) <= 9 && (v >> 4) <= 9 && v <= maxBcd; }
+
+static bool verifyDs3231(uint8_t a) {
+  uint8_t t[7];
+  if (!i2cbus::readRegs(a, 0x00, t, 7)) return false;
+  bool h12 = t[2] & 0x40;
+  bool hourOk = h12 ? (bcdOk(t[2] & 0x1F, 0x12) && (t[2] & 0x1F) >= 1) : bcdOk(t[2] & 0x3F, 0x23);
+  return bcdOk(t[0] & 0x7F, 0x59) && bcdOk(t[1] & 0x7F, 0x59) && hourOk && t[3] >= 1 && t[3] <= 7 && bcdOk(t[4], 0x31) && t[4] >= 1 &&
+         bcdOk(t[5] & 0x1F, 0x12) && (t[5] & 0x1F) >= 1 && bcdOk(t[6], 0x99);
+}
+
+static bool verifySht(uint8_t a) {
+  uint8_t b[6];
+  if (a == 0x40) {  // SHT20: temperature, no hold; the CRC of the answer (init 0)
+    uint8_t cmd = 0xF3;
+    if (!i2cbus::writeRaw(a, &cmd, 1)) return false;
+    delay(95);
+    return i2cbus::readRaw(a, b, 3) && crc8(b, 2, 0x00) == b[2];
+  }
+  uint8_t st[2] = {0xF3, 0x2D};  // SHT3x: read the status register: 16 bits + CRC
+  if (i2cbus::writeRaw(a, st, 2)) {
+    delay(2);
+    if (i2cbus::readRaw(a, b, 3) && crc8(b, 2, 0xFF) == b[2]) return true;
+  }
+  uint8_t sn = 0x89;  // SHT4x: read the serial number: two words with a CRC each
+  if (i2cbus::writeRaw(a, &sn, 1)) {
+    delay(2);
+    if (i2cbus::readRaw(a, b, 6) && crc8(b, 2, 0xFF) == b[2] && crc8(b + 3, 2, 0xFF) == b[5]) return true;
+  }
+  return false;
+}
+
+// MCP23017 (GPINTENA) / XL9535 = TCA9535 (input polarity): register 0x04 of both stores a byte and does nothing to the relays.
+static bool verifyExpander(uint8_t a) {
+  uint8_t old = 0, back = 0;
+  if (!i2cbus::readRegs(a, 0x04, &old, 1)) return false;
+  bool ok = false;
+  for (uint8_t pat : {0xA5, 0x5A}) {
+    ok = i2cbus::writeReg(a, 0x04, pat) && i2cbus::readRegs(a, 0x04, &back, 1) && back == pat;
+    if (!ok) break;
+  }
+  i2cbus::writeReg(a, 0x04, old);
+  return ok;
+}
+
+static bool verifyFlooded(uint8_t a) {
+  i2cbus::Lock l;
+  if (a == 0x68) return verifyDs3231(a);
+  if (a >= 0x40 && a <= 0x46) return verifySht(a);
+  for (uint8_t k = 0; k < hw::RELAY_BOARD_COUNT; k++)  // a relay board that is in use as a PCF8574 would take the test bytes as its outputs
+    if (hw::RELAY_BOARD[k].address == a && hw::RELAY_BOARD[k].driver == RELAY_PCF8574) return false;
+  return verifyExpander(a);
+}
+
 // The addresses that answer. An rbAmp module ACKs EVERY address (seen on an SCT-UI7: 112 of 112 at 50 / 20 / 100 kHz, alone on
 // the bus), so an ACK alone proves nothing. When more than 16 addresses ACK, only those that also give a byte back when read
 // (register 0x03, as the rbAmp scanner does; a missing device only ACKs the write) are listed, and scanFlooded() is true.
@@ -429,17 +493,14 @@ uint8_t scan(uint8_t *found, uint8_t max) {
     for (uint8_t i = 0; i < na && n < max; i++)
       if (!(acks[i] >= 0x50 && acks[i] <= 0x57 && isRb[acks[i] - 0x50])) found[n++] = acks[i];
   } else {
-    // The bus answers everywhere and even reads can return data at addresses nobody has (the rbAmp module answers for them),
-    // so a generic list means nothing. List only the parts this meter can use (relay boards / expanders, SHT, DS3231) whose
-    // answer differs from what an unused address returns.
-    uint8_t phantom = 0;
-    bool hasPhantom = i2cbus::readRegs(0x1F, 0x03, &phantom, 1);
-    static const uint8_t CAND[] = {0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
-                                   0x40, 0x44, 0x45, 0x46, 0x68};
+    // The bus answers everywhere and even reads return data at addresses nobody has (the rbAmp module answers for them), so
+    // "a read worked" proves nothing either. List only the parts this meter can use that PROVE what they are with data an
+    // empty address cannot fake: a DS3231 with a valid BCD date and time, an SHT sensor with a valid CRC, an I/O expander that
+    // stores what is written to one of its registers. A PCF8574 relay board has no register to check and is not listed.
+    static const uint8_t CAND[] = {0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x40, 0x44, 0x45, 0x46, 0x68};
     for (uint8_t c : CAND) {
-      uint8_t b = 0;
       if (n >= max) break;
-      if ((i2cbus::readRegs(c, 0x03, &b, 1) || i2cbus::readRaw(c, &b, 1)) && !(hasPhantom && b == phantom)) found[n++] = c;
+      if (verifyFlooded(c)) found[n++] = c;
     }
   }
   return n;
