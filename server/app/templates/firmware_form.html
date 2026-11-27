@@ -11,8 +11,20 @@
   <div class="mb-3"><label class="form-label">Version</label><input class="form-control" name="version" maxlength="24" value="{{ vals.version }}" placeholder="read from the file when empty">
     <div class="form-text">The version, firmware type and hardware are read from the firmware file itself. A different version here is only a label.</div></div>
   <div class="mb-3"><label class="form-label">Upload .zip file{% if fw %} <span class="text-body-secondary">(optional: only to replace the file)</span>{% endif %}</label>
-    <input class="form-control" type="file" name="zip" accept=".zip" {{ '' if fw else 'required' }}>
+    <input class="form-control" type="file" name="zip" id="zipFile" accept=".zip" {{ '' if fw else 'required' }}>
+    <div class="form-text text-warning d-none" id="zipBig"></div>
     <div class="form-text">The zip of the Arduino IDE export (<em>Sketch → Export Compiled Binary</em>): <code>*.ino.bin</code>, <code>*.bootloader.bin</code>, <code>*.partitions.bin</code>, <code>boot_app0.bin</code>, <code>flash_args</code> ...</div></div>
   <button class="btn btn-primary">Save</button> <a class="btn btn-outline-secondary" href="{{ url_for('main.firmware') }}">Back</a>
 </div></form>
+<script>
+(function () {   // a big upload through a reverse proxy / tunnel can fail (ERR_HTTP2_PROTOCOL_ERROR): keep the zip small
+  var f = document.getElementById('zipFile'), w = document.getElementById('zipBig');
+  if (!f) return;
+  f.addEventListener('change', function () {
+    var mb = f.files[0] ? f.files[0].size / 1048576 : 0;
+    w.classList.toggle('d-none', mb < 25);
+    if (mb >= 25) w.textContent = 'This zip is ' + mb.toFixed(0) + ' MB. Only the .bin files and flash_args are needed: remove the .elf, .map and .merged.bin files and zip again. Big uploads can fail behind a reverse proxy or tunnel (ERR_HTTP2_PROTOCOL_ERROR, upload limit or timeout).';
+  });
+})();
+</script>
 {% endblock %}

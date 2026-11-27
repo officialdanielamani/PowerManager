@@ -705,7 +705,7 @@ without the Arduino IDE.
 - **Notifications:** none (nobody is told about a USB flash, there is no meter connection); the audit log entry is the record.
 
 ### 14.7 Open points
-The USB way (14.8) needs HTTPS (reverse proxy) or `localhost`: to be tested behind the reverse proxy. `MAX_CONTENT_LENGTH` is 80 MB (a reverse proxy must allow uploads of that size, e.g. nginx `client_max_body_size`); the files live in the instance folder (`instance/firmware/<id>/`); a signature on the image (more than SHA-256) is a later option.
+The USB way (14.8) needs HTTPS (reverse proxy) or `localhost`: to be tested behind the reverse proxy. `MAX_CONTENT_LENGTH` is 80 MB (a reverse proxy must allow uploads of that size, e.g. nginx `client_max_body_size 100m` with `proxy_request_buffering off` and a long `proxy_read_timeout`; Cloudflare caps a request at 100 MB; a failed big upload shows `ERR_HTTP2_PROTOCOL_ERROR` in the browser. Zip only the `.bin` files and `flash_args`: the form warns above 25 MB); the files live in the instance folder (`instance/firmware/<id>/`); a signature on the image (more than SHA-256) is a later option.
 
 ## 15. Disabled channel (multi-channel meters) — firmware / server 1.1.0
 
