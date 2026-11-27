@@ -123,21 +123,20 @@ static void setModels(Board &b, uint8_t bi) {
       if (i2cbus::readRegs(b.addr, REG_ERROR, &e, 1) && e)
         Serial.printf("[rbamp] B%u input %u: CT model %u rejected (error 0x%02X)\n", bi + 1, in + 1, want, e);
     } else {
+      // Inputs 4..7 (rbAmp docs, field 15 of the channel window, firmware 1.4.18+): select (15 << 4) | input, then the model
+      // code in 0x3C and zeros in 0x3D..0x3F, FOUR separate one-byte writes (the module has no burst write); it applies the
+      // model with the last one (0x3F). RAM only: the save below keeps it. REG_ERROR is read right after.
       i2cbus::Lock l;
       i2cbus::writeReg(b.addr, REG_CH_SELECT, (uint8_t)((F_CT_MODEL << 4) | in));
-      i2cbus::writeReg(b.addr, REG_CH_DATA, want);  // RAM, applies at once
-      delay(2);
+      i2cbus::writeReg(b.addr, REG_CH_DATA + 0, want);
+      i2cbus::writeReg(b.addr, REG_CH_DATA + 1, 0);
+      i2cbus::writeReg(b.addr, REG_CH_DATA + 2, 0);
+      i2cbus::writeReg(b.addr, REG_CH_DATA + 3, 0);
+      uint8_t e = 0;
+      i2cbus::readRegs(b.addr, REG_ERROR, &e, 1);
       uint8_t back = readApplied(b, in);
-      if (back != want) {  // the channel window did not take it: stage + bind command like inputs 1-3 (CMD 0x28 + input)
-        i2cbus::writeReg(b.addr, REG_CT_MODEL, want);
-        i2cbus::writeReg(b.addr, REG_COMMAND, CMD_SET_CT_MODEL_CH0 + in);
-        delay(6);
-        uint8_t e = 0;
-        i2cbus::readRegs(b.addr, REG_ERROR, &e, 1);
-        back = readApplied(b, in);
-        Serial.printf("[rbamp] B%u input %u: stage + command path %s (error 0x%02X)\n", bi + 1, in + 1, back == want ? "worked" : "did not work either", e);
-      }
-      if (back != want) Serial.printf("[rbamp] B%u input %u: CT model %u was not taken (the module reports %u)\n", bi + 1, in + 1, want, back);
+      if (e || back != want)
+        Serial.printf("[rbamp] B%u input %u: CT model %u was not taken (module reports %u, error 0x%02X)\n", bi + 1, in + 1, want, back, e);
     }
     if (applied == want) continue;  // only re-applied (fw < 1.4.20): already saved, no flash write
     changed = true;

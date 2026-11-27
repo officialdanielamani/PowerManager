@@ -283,10 +283,15 @@ static void cmdCt(long input, long code, const char *how) {
   bool cm = how ? (!strcmp(how, "cmd") || !strcmp(how, "both")) : i < 3;
   Serial.printf("input %ld: model was %u\n", input, appliedModel(i));
   if (win) {
-    writeReg(cur, REG_CH_SELECT, (uint8_t)((15 << 4) | i));
+    writeReg(cur, REG_CH_SELECT, (uint8_t)((15 << 4) | i));   // value in 0x3C, zeros in 0x3D..0x3F, one byte per transaction
     writeReg(cur, REG_CH_DATA, (uint8_t)code);
+    writeReg(cur, REG_CH_DATA + 1, 0);
+    writeReg(cur, REG_CH_DATA + 2, 0);
+    writeReg(cur, REG_CH_DATA + 3, 0);
+    uint8_t e = 0;
+    readRegs(cur, 0x02, &e, 1);
     delay(5);
-    Serial.printf("  window write done: reads back %u\n", appliedModel(i));
+    Serial.printf("  window write done (ERROR reg 0x%02X): reads back %u\n", e, appliedModel(i));
   }
   if (cm) {
     writeReg(cur, REG_CT_MODEL, (uint8_t)code);
