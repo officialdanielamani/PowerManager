@@ -377,8 +377,9 @@ void begin() {
 }
 
 void setGateway(bool on) {
-  if (on != gateway) Serial.printf("[mesh] gateway role %s\n", on ? "on" : "off");
-  gateway = on && ready;
+  bool now = on && ready;  // without the mesh (MESH_ENABLE 0) the role never turns on: nothing to print
+  if (now != gateway) Serial.printf("[mesh] gateway role %s\n", now ? "on" : "off");
+  gateway = now;
 }
 
 uint8_t leafCount() {

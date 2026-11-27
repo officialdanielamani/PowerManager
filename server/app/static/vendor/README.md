@@ -5,5 +5,6 @@ Third-party front-end files, committed so the Docker build needs no extra downlo
 | Bootstrap | 5.3.3 | MIT |
 | Bootstrap Icons | 1.11.3 | MIT |
 | Chart.js | 4.4.1 | MIT |
+| esptool-js (USB flash in the browser) | 0.5.4 | Apache-2.0 |
 
 Re-download with `python scripts/fetch_vendor.py --force` (from the `server/` folder).

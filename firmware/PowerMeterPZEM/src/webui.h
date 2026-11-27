@@ -83,6 +83,7 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <div class="grid" id="dGrid"></div><div id="dAux"></div></div>
 
 <div class="card"><h2>Session &amp; limits</h2><dl id="dSess"></dl></div>
+<div class="card"><h2>Sensors</h2><dl id="dSensors"></dl></div>
 <div class="card"><h2>Device</h2><dl id="dDev"></dl></div>
 </section>
 
@@ -100,9 +101,8 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <div class="card"><h2>Mesh</h2><p class="mut">Auto: Wi-Fi first. Without Wi-Fi for 90 s the meter talks through a nearby meter that is online (gateway), and an online meter relays for others. Wi-Fi only: never uses or offers the mesh.</p>
 <div class="row"><select id="mrole"><option value="auto">Auto (recommended)</option><option value="wifi">Wi-Fi only</option></select>
 <button class="sec" style="flex:0" onclick="post('/api/mesh',{role:$('mrole').value}).then(r=>note(r.message||r.error,r.ok?'inf':'err'))">Save</button></div></div>
-<div class="card"><h2>Firmware</h2><p class="mut">Installed: <b id="fwVer"></b></p>
-<button class="sec" disabled title="Coming in a later version">Check OTA Update</button>
-<p class="mut">Over-the-air updates from the server are coming in a later version.</p></div>
+<div class="card"><h2>Firmware</h2><dl id="dFw"></dl>
+<p class="mut">Updates are <b>pushed from the server</b> (Firmware &rarr; Flash, over the air or by USB). This meter does not look for updates itself.</p></div>
 <div class="card"><h2>Maintenance</h2><div class="row">
 <button class="sec" onclick="if(confirm('Restart the meter?'))post('/api/reboot').then(r=>note(r.message,'inf'))">Restart</button>
 <button class="bad" onclick="if(confirm('Erase admin, Wi-Fi, pairing and buffered data? The meter returns to first setup.'))post('/api/factory_reset').then(r=>note(r.message,'inf'))">Factory reset</button></div>
@@ -118,7 +118,7 @@ function post(u,b){return api(u,{method:'POST',body:JSON.stringify(b||{})})}
 function note(t,k){$('msg').innerHTML=t?'<div class="msg '+(k||'err')+'">'+esc(t)+'</div>':''}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function show(v){['setup','wifi','login','dash','settings'].forEach(function(n){$('v-'+n).classList.toggle('hide',n!=v)});
- var inside=v=='dash'||v=='settings';$('fwVer').textContent=S.fw||'';$('btnSet').classList.toggle('hide',!inside);$('btnOut').classList.toggle('hide',!inside);
+ var inside=v=='dash'||v=='settings';$('btnSet').classList.toggle('hide',!inside);$('btnOut').classList.toggle('hide',!inside);
  $('wcancel').classList.toggle('hide',!S.wifi);$('wifiTitle').textContent=S.wifi?'Change Wi-Fi':'2. Connect to Wi-Fi';
  if(v=='wifi')scan(0);note('')}
 function route(){api('/api/status').then(function(s){S=s;$('hid').textContent=s.device_id?s.device_id+' · '+(s.sensor||'')+' · v'+s.fw:'';
@@ -158,6 +158,8 @@ function load(){api('/api/state').then(function(d){if(d._s==401)return route();i
  $('dGrid').innerHTML=[['Relay',rl.on?'ON':'OFF'+(rl.block?' <small>('+rl.block+')</small>':'')],['Voltage',r.ok?n(r.v,dc?2:1)+' V':(r.err?'Sensor error':(st.ac?'–':(dc?'No DC':'No AC')))],['Current',r.ok?n(r.a,dc?2:3)+' A':'–'],['Power',r.ok?n(r.w,1)+' W':'–']].concat(dc?[]:[['Power factor',r.ok?n(r.pf,2):'–'],['Frequency',r.ok?n(r.hz,1)+' Hz':'–']]).concat([['Session used',n(ss.kwh,3)+' kWh'+(ss.kwh_t!=null?'<small> (tared '+n(ss.kwh_t,3)+')</small>':'')],['Balance',bal==null?'∞':n(bal,3)+' kWh']]).concat((r.t||[]).map(function(t,i){return['Temperature T'+(i+1),(t==null?'–':t+' °C')+((r.rh||[])[i]!=null?' · '+r.rh[i]+' %RH':'')+(r.temp_high?' ⚠':'')]}))
   .map(function(x){return'<div class="stat"><small>'+x[0]+'</small><b>'+x[1]+'</b></div>'}).join('');
  var c=d.cfg||{};$('dAux').innerHTML=(st.aux||[]).length?'<div style="margin-top:10px"><b>AUX relays</b> <span class="mut">(not metered)</span>'+st.aux.map(function(a){var nm=(c.aux||[])[a.i]||'',md=a.mode&&a.mode!='manual'?' <small class="mut">'+a.mode+(a.override?' · overridden':'')+'</small>':'';return'<div class="row" style="margin-top:8px"><span>AUX'+(a.i+1)+(nm?' · '+esc(nm):'')+' <small class="mut">relay '+a.relay+'</small>'+md+'</span><span style="flex:0;white-space:nowrap">'+(a.on?pill('ON','ok'):pill('OFF',''))+'</span><button class="ok" style="flex:0" onclick="aux('+a.i+',true)">ON</button><button class="sec" style="flex:0" onclick="aux('+a.i+',false)">OFF</button></div>'}).join('')+'</div>':'';$('dSess').innerHTML='<dt>Status</dt><dd>'+status+(st.tamper?' '+pill('Panel open','bad'):'')+(st.ups?' '+pill('On UPS','warn'):'')+'</dd><dt>kWh per session</dt><dd>'+(c.kwh_max?c.kwh_max+' kWh':'Unlimited')+'</dd><dt>Session restarts</dt><dd>'+(c.mode=='none'?'No time limit':fmt(d.next_reset))+'</dd><dt>Auto renew</dt><dd>'+(c.auto?'Yes':'No')+'</dd><dt>Max current</dt><dd>'+(c.amp_max?c.amp_max+' A':'Off')+'</dd><dt>Sensor timeout</dt><dd>'+(c.sensor_to_s?c.sensor_to_s+' s ('+({run:'run as usual',hold:'relay off',end:'end session'})[c.sensor_action]+')':'Off')+'</dd><dt>Tare</dt><dd>'+(c.tare_a||c.tare_w?c.tare_a+' A / '+c.tare_w+' W'+(c.tare_limits?' (used for limits)':' (display only)'):'Off')+'</dd><dt>Relay off when offline</dt><dd>'+(c.offline_off_min?'after '+c.offline_off_min+' min':'Off')+'</dd><dt>Read / send data</dt><dd>every '+(c.read_s||c.report_s)+' s / every '+c.report_s+' s</dd>';
+ $('dSensors').innerHTML='<dt>Power</dt><dd>'+esc(d.power_sensor||'–')+'</dd>'+((d.sensors||[]).length?d.sensors.map(function(s,i){var t=(r.t||[])[i],h=(r.rh||[])[i];return'<dt>T'+(i+1)+'</dt><dd>'+esc(s)+' · '+(t==null?'<span class="mut">no reading</span>':t+' °C'+(h!=null?' · '+h+' %RH':''))+'</dd>'}).join(''):'<dt>Temperature</dt><dd class="mut">no sensor configured</dd>');
+ var o=d.ota||{};$('dFw').innerHTML='<dt>Installed</dt><dd>'+esc(d.fw)+'</dd><dt>Update</dt><dd>'+(o.busy?esc(o.busy)+' '+(o.pct||0)+' %'+(o.why?' · '+esc(o.why):''):o.state=='trial'?'New firmware: waiting for the server to confirm it':o.state=='rolled_back'?'Went back to the previous version ('+esc(o.tried||'?')+' did not work: '+esc(o.why||'?')+')':'No update running')+'</dd><dt>Free update space</dt><dd>'+(o.slot?(o.slot/1048576).toFixed(1)+' MB':'–')+'</dd>';
  $('dDev').innerHTML='<dt>Device ID</dt><dd>'+esc(d.device_id)+'</dd><dt>Firmware</dt><dd>'+esc(d.fw)+'</dd><dt>Hardware</dt><dd>'+esc(d.hw_info||'')+'</dd>'+(d.bat_v!=null?'<dt>Battery</dt><dd>'+d.bat_v+' V (~'+d.bat_pct+' %)</dd>':'')+'<dt>Free memory</dt><dd>'+Math.round((d.heap||0)/1024)+' KB</dd><dt>Server</dt><dd>'+esc(d.server||'–')+'</dd><dt>Last sync</dt><dd>'+fmt(d.last_sync)+'</dd><dt>Waiting to send</dt><dd>'+d.outbox+' item(s)</dd><dt>Connection</dt><dd>'+(d.link=='mesh'?'Mesh via '+esc(d.gateway):d.link=='searching'?'Mesh: looking for a gateway…':d.link=='wifi'?'Wi-Fi '+esc(d.ssid)+' ('+d.rssi+' dBm) · '+esc(d.ip)+(d.leaves?' · relaying '+d.leaves+' meter(s)':''):'Not connected')+'</dd><dt>Uptime</dt><dd>'+Math.floor(d.uptime/3600)+' h '+Math.floor(d.uptime%3600/60)+' min</dd>'})}
 function aux(i,on){post('/api/aux',{i:i,on:on}).then(function(r){if(!r.ok)note(r.error);load()})}
 function relay(on){post('/api/relay',{on:on}).then(function(r){if(!r.ok)note(r.error);load()})}

@@ -50,7 +50,7 @@ static void checkFirmwareType() {
   if (prev.length()) {
     static const char *KEYS[] = {"cfg", "s_sid", "s_start", "s_e0", "s_stat", "s_over", "s_end", "s_stop", "s_tare",
                                  "want", "tripped", "wantm", "tripm", "energy", "nch", "sidc", "started",
-                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6"};
+                                 "ss0", "ss1", "ss2", "ss3", "ss4", "ss5", "ss6", "nxd"};
     for (const char *k : KEYS) pm.remove(k);
     Serial.printf("[store] firmware type changed (%s -> %s): old sessions / kWh / relay state cleared\n",
                   prev.c_str(), FW_TYPE);
@@ -159,17 +159,21 @@ bool loadConfig(MeterConfig &c) {
   CfgBlob b;
   if (pm.getBytesLength("cfg") != sizeof(b)) return false;
   pm.getBytes("cfg", &b, sizeof(b));
-  if (b.version != 7) return false;  // other layout: use defaults, the server re-sends the config
+  if (b.version != 8) return false;  // other layout: use defaults, the server re-sends the config
   c = b.c;
   return true;
 }
 void saveConfig(const MeterConfig &c) {
   CfgBlob b;
-  b.version = 7;
+  b.version = 8;
   b.c = c;
   pm.putBytes("cfg", &b, sizeof(b));
 }
 
+// `at` of the last Schedule Next Session carried out: a configuration from the server that still holds that schedule
+// (it has not heard of it yet) must not run it again.
+uint32_t loadNextDone() { return pm.getUInt("nxd", 0); }
+void saveNextDone(uint32_t at) { pm.putUInt("nxd", at); }
 void loadSession(SessionState &s) {
   s.sid = pm.getUInt("s_sid", 0);
   s.start = pm.getUInt("s_start", 0);

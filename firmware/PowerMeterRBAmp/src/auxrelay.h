@@ -29,6 +29,7 @@ struct Inputs {
   bool noWifi = false;     // Wi-Fi not connected
   bool noServer = false;   // paired, but no link to the server (also: internet problem)
   bool ups = false;        // UPS input active: running on the UPS (UPS_ENABLE)
+  bool reboot = false;     // a restart for a new hardware profile is counting down (hwprofile.h)
   float batPct = NAN;      // battery % remaining (BATTERY_ENABLE), NAN = not measured
   bool disabled = false;   // meter disabled by the server: every AUX relay off
   Inputs() {

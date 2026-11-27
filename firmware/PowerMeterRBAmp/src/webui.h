@@ -81,6 +81,7 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <div class="row" style="margin-top:8px"><button class="sec" onclick="post('/api/send_now').then(r=>note(r.message||'Sent','inf'))">Send Data Now</button></div></div>
 
 <div class="card"><h2>Session &amp; limits</h2><dl id="dSess"></dl></div>
+<div class="card"><h2>Sensors</h2><dl id="dSensors"></dl></div>
 <div class="card"><h2>Device</h2><dl id="dDev"></dl></div>
 </section>
 
@@ -98,9 +99,8 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:1
 <div class="card"><h2>Mesh</h2><p class="mut">Auto: Wi-Fi first. Without Wi-Fi for 90 s the meter talks through a nearby meter that is online (gateway), and an online meter relays for others. Wi-Fi only: never uses or offers the mesh.</p>
 <div class="row"><select id="mrole"><option value="auto">Auto (recommended)</option><option value="wifi">Wi-Fi only</option></select>
 <button class="sec" style="flex:0" onclick="post('/api/mesh',{role:$('mrole').value}).then(r=>note(r.message||r.error,r.ok?'inf':'err'))">Save</button></div></div>
-<div class="card"><h2>Firmware</h2><p class="mut">Installed: <b id="fwVer"></b></p>
-<button class="sec" disabled title="Coming in a later version">Check OTA Update</button>
-<p class="mut">Over-the-air updates from the server are coming in a later version.</p></div>
+<div class="card"><h2>Firmware</h2><dl id="dFw"></dl>
+<p class="mut">Updates are <b>pushed from the server</b> (Firmware &rarr; Flash, over the air or by USB). This meter does not look for updates itself.</p></div>
 <div class="card"><h2>Maintenance</h2><div class="row">
 <button class="sec" onclick="if(confirm('Restart the meter?'))post('/api/reboot').then(r=>note(r.message,'inf'))">Restart</button>
 <button class="bad" onclick="if(confirm('Erase admin, Wi-Fi, pairing and buffered data? The meter returns to first setup.'))post('/api/factory_reset').then(r=>note(r.message,'inf'))">Factory reset</button></div>
@@ -116,7 +116,7 @@ function post(u,b){return api(u,{method:'POST',body:JSON.stringify(b||{})})}
 function note(t,k){$('msg').innerHTML=t?'<div class="msg '+(k||'err')+'">'+esc(t)+'</div>':''}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function show(v){['setup','wifi','login','dash','settings'].forEach(function(n){$('v-'+n).classList.toggle('hide',n!=v)});
- var inside=v=='dash'||v=='settings';$('fwVer').textContent=S.fw||'';$('btnSet').classList.toggle('hide',!inside);$('btnOut').classList.toggle('hide',!inside);
+ var inside=v=='dash'||v=='settings';$('btnSet').classList.toggle('hide',!inside);$('btnOut').classList.toggle('hide',!inside);
  $('wcancel').classList.toggle('hide',!S.wifi);$('wifiTitle').textContent=S.wifi?'Change Wi-Fi':'2. Connect to Wi-Fi';
  if(v=='wifi')scan(0);note('')}
 function route(){api('/api/status').then(function(s){S=s;$('hid').textContent=s.device_id?s.device_id+' · '+(s.sensor||'')+' · v'+s.fw:'';
@@ -160,6 +160,8 @@ function load(){api('/api/state').then(function(d){if(d._s==401)return route();i
  var s0=sl[0]||{};
  $('dSess').innerHTML='<dt>Mode</dt><dd>'+(ind?'Independent (one session per channel)':'Shared (one session for all channels)')+'</dd>'+(ind?'':'<dt>Status</dt><dd>'+sstat(s0)+'</dd><dt>Session used</dt><dd>'+n(s0.kwh,3)+' kWh'+(s0.max?' of '+s0.max+' kWh (all channels)':'')+'</dd><dt>Session restarts</dt><dd>'+(c.sess_mode=='none'?'No time limit':fmt(s0.next_reset))+'</dd><dt>Auto renew</dt><dd>'+(c.auto?'Yes':'No')+'</dd>')+
   (st.tamper?'<dt>Panel</dt><dd>'+pill('Open','bad')+'</dd>':'')+(st.ups?'<dt>Supply</dt><dd>'+pill('On UPS','warn')+'</dd>':'')+'<dt>Max current</dt><dd>'+(cs.map(function(x,i){return'CH'+(i+1)+' '+(x.amp_max?x.amp_max+' A':'off')}).join(' · ')||'–')+'</dd><dt>Sensor timeout</dt><dd>'+(c.sensor_to_s?c.sensor_to_s+' s ('+act[c.sensor_action]+')':'Off')+'</dd><dt>Relay off when offline</dt><dd>'+(c.offline_off_min?'after '+c.offline_off_min+' min':'Off')+'</dd><dt>Read / send data</dt><dd>'+(c.drdy?'DRDY: every measurement window (~100 ms), raw':'every '+c.read_s+' s')+' / sent every '+c.report_s+' s</dd>';
+ $('dSensors').innerHTML='<dt>Power</dt><dd>'+esc(d.power_sensor||'–')+'</dd>'+((d.sensors||[]).length?d.sensors.map(function(s,i){var t=(r.t||[])[i],h=(r.rh||[])[i];return'<dt>T'+(i+1)+'</dt><dd>'+esc(s)+' · '+(t==null?'<span class="mut">no reading</span>':t+' °C'+(h!=null?' · '+h+' %RH':''))+'</dd>'}).join(''):'<dt>Temperature</dt><dd class="mut">no sensor configured</dd>');
+ var o=d.ota||{};$('dFw').innerHTML='<dt>Installed</dt><dd>'+esc(d.fw)+'</dd><dt>Update</dt><dd>'+(o.busy?esc(o.busy)+' '+(o.pct||0)+' %'+(o.why?' · '+esc(o.why):''):o.state=='trial'?'New firmware: waiting for the server to confirm it':o.state=='rolled_back'?'Went back to the previous version ('+esc(o.tried||'?')+' did not work: '+esc(o.why||'?')+')':'No update running')+'</dd><dt>Free update space</dt><dd>'+(o.slot?(o.slot/1048576).toFixed(1)+' MB':'–')+'</dd>';
  $('dDev').innerHTML='<dt>Device ID</dt><dd>'+esc(d.device_id)+'</dd><dt>Firmware</dt><dd>'+esc(d.fw)+'</dd><dt>Hardware</dt><dd>'+esc(d.hw_info||'')+'</dd>'+(d.bat_v!=null?'<dt>Battery</dt><dd>'+d.bat_v+' V (~'+d.bat_pct+' %)</dd>':'')+'<dt>Free memory</dt><dd>'+Math.round((d.heap||0)/1024)+' KB</dd><dt>Server</dt><dd>'+esc(d.server||'–')+'</dd><dt>Last sync</dt><dd>'+fmt(d.last_sync)+'</dd><dt>Waiting to send</dt><dd>'+d.outbox+' item(s)</dd><dt>Connection</dt><dd>'+(d.link=='mesh'?'Mesh via '+esc(d.gateway):d.link=='searching'?'Mesh: looking for a gateway…':d.link=='wifi'?'Wi-Fi '+esc(d.ssid)+' ('+d.rssi+' dBm) · '+esc(d.ip)+(d.leaves?' · relaying '+d.leaves+' meter(s)':''):'Not connected')+'</dd><dt>Uptime</dt><dd>'+Math.floor(d.uptime/3600)+' h '+Math.floor(d.uptime%3600/60)+' min</dd>'})}
 function relay(ch,on){post('/api/relay',{ch:ch,on:on}).then(function(r){if(!r.ok)note(r.error);load()})}
 function trip(ch){post('/api/reset_trip',{ch:ch}).then(load)}

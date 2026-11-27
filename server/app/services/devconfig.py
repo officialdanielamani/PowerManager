@@ -7,25 +7,41 @@ import re
 
 from . import auxcfg, settings
 
-NOTIFY_TYPES = [
-    ("kwh_exceeded", "Device exceeded kWh"),
-    ("voltage_range", "Voltage out of range"),
-    ("session_renew", "Session renewed"),
-    ("max_amp", "Max amp (trip)"),
-    ("panel_open", "Panel open"),
-    ("no_voltage", "No voltage"),
-    ("sensor_error", "Sensor error (no reading)"),
-    ("temp_high", "Temperature too high"),
-    ("ups", "UPS power (mains failed / back)"),
-    ("disconnected", "Device disconnected for"),
-    ("reconnected", "Device reconnected"),
-    ("meter_status", "Meter status (disabled / enabled / unsynced / synced / removed)"),
+# Notification options per meter and user, in the groups of the page. opts: ch = can be limited to channels (independent mode),
+# param = (unit, min, max, default) threshold, needs = hardware the meter must report (caps), mc = multi-channel meters only.
+NOTIFY_GROUPS = [
+    ("Limits", [
+        ("session_renew", "Session renewed", {"ch": True}),
+        ("session_end", "Session ended", {"ch": True}),
+        ("kwh_exceeded", "Exceeded kWh limit", {"ch": True}),
+        ("kwh_remaining", "Remaining % of the session kWh", {"ch": True, "param": ("%", 1, 99, 10)}),
+        ("time_remaining", "Remaining time of the session", {"ch": True, "param": ("hh:mm", 1, 1440 * 30, 60)}),
+        ("max_amp", "Max amp (trip)", {"ch": True}),
+        ("voltage_range", "Voltage out of range", {}),
+    ]),
+    ("Device Info", [
+        ("panel_open", "Panel open", {"needs": "tamper"}),
+        ("ups", "UPS power", {"needs": "ups"}),
+        ("battery_low", "Battery percentage below", {"needs": "battery", "param": ("%", 1, 99, 20)}),
+        ("temp_high", "Temperature above", {"needs": "temp", "param": ("°C", -40, 125, 50)}),
+        ("sensor_error", "Sensor error", {}),
+        ("no_voltage", "No voltage", {}),
+    ]),
+    ("Device Status", [
+        ("meter_status", "Change of device status", {}),
+        ("channel_status", "Change of a channel in the device status", {"mc": True}),
+        ("reboot_pending", "Device restart (hardware change / firmware update)", {}),
+        ("disconnected", "Device disconnected for", {"param": ("min", 1, 1440, 5)}),
+        ("reconnected", "Device reconnected", {}),
+    ]),
 ]
+NOTIFY_TYPES = [(t, label) for _g, items in NOTIFY_GROUPS for t, label, _o in items]
+NOTIFY_OPTS = {t: o for _g, items in NOTIFY_GROUPS for t, _l, o in items}
 # Types that are on for every account until the account switches them off.
-NOTIFY_DEFAULT_ON = {"meter_status", "temp_high", "ups"}
+NOTIFY_DEFAULT_ON = {"meter_status", "channel_status", "temp_high", "ups", "reboot_pending"}
 NOTIFY_LABELS = dict(NOTIFY_TYPES)
 DISCONNECTED_DEFAULT_MIN = 5
-MIN_FW = (1, 0, 0)  # oldest meter firmware this server works with (both sketches)
+MIN_FW = (1, 2, 0)  # oldest meter firmware this server works with (both sketches)
 
 
 def fw_outdated(device):
@@ -65,12 +81,51 @@ def kwh_action(ch_cfg):
     return DEFAULT_KWH_ACTION
 
 
-SESSION_MODES = ("none", "duration", "daily")
+SESSION_MODES = ("none", "duration", "daily", "weekly")
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+WEEKDAY_NAMES = {"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday", "fri": "Friday", "sat": "Saturday", "sun": "Sunday"}
+
+
+def _hhmm(raw):
+    """'8:5' / '08:05' -> '08:05', None when it is not a time."""
+    try:
+        h, m = str(raw or "").strip().split(":")[:2]
+        if 0 <= int(h) <= 23 and 0 <= int(m) <= 59:
+            return f"{int(h):02d}:{int(m):02d}"
+    except ValueError:
+        pass
+    return None
+
+
+def parse_week(form, sfx, errors, label, needed):
+    """Days of the week with their own reset time: checkbox wk_<day><sfx> + time wk_<day>_at<sfx> -> {"mon": "08:00", ...}."""
+    week = {}
+    for d in WEEKDAYS:
+        if form.get(f"wk_{d}{sfx}") not in ("on", "1", "true", True):
+            continue
+        t = _hhmm(form.get(f"wk_{d}_at{sfx}"))
+        if t is None:
+            errors.append(f"{label}{WEEKDAY_NAMES[d]}: time must be HH:MM")
+            t = "00:00"
+        week[d] = t
+    if needed and not week:
+        errors.append(f"{label}Pick at least one day of the week")
+    return week
+
+
+def week_utc_minutes(week):
+    """{"mon": "08:00"} in the display time zone -> sorted UTC minutes of the week (Monday 00:00 UTC = 0) for the meter."""
+    out = set()
+    for i, d in enumerate(WEEKDAYS):
+        t = _hhmm((week or {}).get(d))
+        if t:
+            out.add(settings.local_week_to_utc(i, t))
+    return sorted(out)
 
 
 def channel_count(device):
     try:
-        return max(1, min(8, int((device.caps or {}).get("channels", 1))))
+        return max(1, min(16, int((device.caps or {}).get("channels", 1))))
     except (TypeError, ValueError):
         return 1
 
@@ -91,6 +146,7 @@ def default_cfg(n_channels=1):
         "sess_mode": "none",
         "dur_min": 1440,
         "daily_at": "00:00",
+        "week": {},
         "auto": False,
         "ch": [{"kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION, "amp_max": 0.0} for _ in range(n_channels)],
         "volt_min": 0.0,           # 0 = no lower limit
@@ -98,9 +154,7 @@ def default_cfg(n_channels=1):
         "volt_action": DEFAULT_PROTECT_ACTION,
         "tamper_protect": False,
         "tamper_action": DEFAULT_PROTECT_ACTION,
-        "tare_a": 0.0,             # own consumption (ESP32 + SSR) on the measured line
-        "tare_w": 0.0,
-        "tare_limits": True,       # the meter uses tared values for the kWh limit and max current
+        "tare_limits": True,       # the meter uses tared values (per channel) for the kWh limit and max current
         "sensor_to_s": SENSOR_TIMEOUT_DEFAULT,  # no valid reading for this long = sensor error; 0 = off
         "sensor_action": DEFAULT_PROTECT_ACTION,
         "summary": False,          # "Core data only": no interval readings, only the session summary
@@ -136,7 +190,7 @@ def hw_label(sig):
 
 def _mc_channel_default():
     return {"name": "", "amp_max": 0.0, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION,
-            "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "auto": False}
+            "sess_mode": "none", "dur_min": 1440, "daily_at": "00:00", "week": {}, "auto": False, "disabled": False}
 
 
 def default_for(device):
@@ -146,8 +200,6 @@ def default_for(device):
     if device.is_mc:
         cfg.update({"mode": "shared", "drdy": False, "kwh_max": 0.0, "kwh_action": DEFAULT_KWH_ACTION})
         cfg["ch"] = [_mc_channel_default() for _ in range(n)]
-        for k in ("tare_a", "tare_w", "tare_limits"):  # the clamps measure only the load
-            cfg.pop(k, None)
     if aux_count(device):
         cfg["aux"] = auxcfg.fit([], aux_count(device))
     return cfg
@@ -189,12 +241,14 @@ def fit_channels(device):
         base = default_for(device)
         base.update({k: v for k, v in cfg.items() if k != "ch"})
         cfg = base
-        chans = [dict(_mc_channel_default(), **{k: c.get(k) for k in ("amp_max", "kwh_max", "kwh_action") if k in c})
+        chans = [dict(_mc_channel_default(), **{k: c.get(k) for k in ("amp_max", "kwh_max", "kwh_action", "disabled") if k in c})
                  for c in chans]
     chans = (chans + [_mc_channel_default() for _ in range(n)])[:n]
     cfg["ch"] = chans
     cfg["aux"] = auxcfg.fit(cfg.get("aux"), aux_count(device))
     device.cfg = cfg
+    from . import calib
+    calib.prune(device)  # channels that no longer exist lose their zero / tare
     return True
 
 
@@ -233,6 +287,7 @@ def _parse_sess(form, sfx, errors, label):
     except (ValueError, AssertionError):
         errors.append(f"{label}Daily reset time must be HH:MM")
         out["daily_at"] = "00:00"
+    out["week"] = parse_week(form, sfx, errors, label, out["sess_mode"] == "weekly")
     out["auto"] = form.get("auto" + sfx) == "on"
     return out
 
@@ -254,22 +309,25 @@ def _parse_mc(form, device, cfg, errors):
         if any(ch in c["name"] for ch in "<>\"'&"):
             errors.append(f"{label}name: letters, numbers and spaces only")
             c["name"] = ""
+        c["disabled"] = form.get(f"ch_off_{i}") == "on"   # channel disabled (docs/protocol.md §15)
         c["amp_max"] = _num(form, f"amp_max_{i}", float, 0, rating, f"{label}max A", errors, 0.0)
         c["kwh_max"] = _num(form, f"kwh_max_{i}", float, 0, 100000, f"{label}max kWh", errors, 0.0)
         a = form.get(f"kwh_action_{i}", DEFAULT_KWH_ACTION)
         c["kwh_action"] = a if a in KWH_ACTIONS else DEFAULT_KWH_ACTION
         c.update(_parse_sess(form, f"_{i}", errors, label))
+        prev = ((device.cfg or {}).get("ch") or [])
+        if i < len(prev) and prev[i].get("next"):
+            c["next"] = prev[i]["next"]   # a scheduled next session is not part of this form: keep it
         chans.append(c)
     cfg["ch"] = chans
-    for k in ("tare_a", "tare_w", "tare_limits"):
-        cfg.pop(k, None)
+    cfg["tare_limits"] = form.get("tare_limits") == "on"
 
 
 def parse_form(form, device):
     """Return (cfg, errors) from the Configure form."""
     errors = []
     cfg = default_for(device)
-    drdy = device.is_mc and form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", (device.caps or {}).get("rdy", True)))
+    drdy = device.is_mc and form.get("drdy") == "on" and bool((device.caps or {}).get("drdy", True))
     if drdy:
         # DRDY data mode: every measurement window is recorded (no read interval); send every 1-90 s.
         cfg["report_s"] = _num(form, "report_s_drdy", int, 1, DRDY_SEND_MAX, "Send every (s)", errors, DRDY_SEND_DEFAULT)
@@ -298,6 +356,7 @@ def parse_form(form, device):
         cfg["daily_at"] = f"{int(h):02d}:{int(m):02d}"
     except (ValueError, AssertionError):
         errors.append("Daily reset time must be HH:MM")
+    cfg["week"] = parse_week(form, "", errors, "", cfg["sess_mode"] == "weekly")
     cfg["auto"] = form.get("auto") == "on"
 
     rating = amp_rating(device)
@@ -313,8 +372,6 @@ def parse_form(form, device):
         errors.append("Operating voltage: Min must be lower than Max")
     a = form.get("volt_action", DEFAULT_PROTECT_ACTION)
     cfg["volt_action"] = a if a in PROTECT_ACTIONS else DEFAULT_PROTECT_ACTION
-    cfg["tare_a"] = _num(form, "tare_a", float, 0, 5, "Tare current", errors, 0.0)
-    cfg["tare_w"] = _num(form, "tare_w", float, 0, 500, "Tare power", errors, 0.0)
     cfg["tare_limits"] = form.get("tare_limits") == "on"
     cfg["tamper_protect"] = form.get("tamper_protect") == "on"
     a = form.get("tamper_action", DEFAULT_PROTECT_ACTION)
@@ -333,12 +390,20 @@ def parse_form(form, device):
         _parse_mc(form, device, cfg, errors)
     if aux_count(device):
         cfg["aux"] = auxcfg.parse_form(form, aux_count(device), errors, device)
+    prev_next = (device.cfg or {}).get("next")
+    if prev_next:
+        cfg["next"] = prev_next   # a scheduled next session (single channel / shared mode) is not part of this form: keep it
     return cfg, errors
 
 
 def _sess_doc(c):
     sess_mode = c.get("sess_mode", "none")
+    wk = week_utc_minutes(c.get("week")) if sess_mode == "weekly" else []
+    if sess_mode == "weekly" and not wk:
+        sess_mode = "none"
     sess = {"mode": sess_mode, "auto": bool(c.get("auto"))}
+    if sess_mode == "weekly":
+        sess["wk"] = wk
     if sess_mode == "daily":
         sess["daily_utc_min"] = settings.local_hhmm_to_utc_minute(c.get("daily_at", "00:00"))
     if sess_mode == "duration":
@@ -346,13 +411,44 @@ def _sess_doc(c):
     return sess
 
 
-def to_device(cfg, ver):
+def next_doc(n, amp=True):
+    """Schedule Next Session for the meter (docs/protocol.md §3): when (epoch) and the settings that replace the current ones."""
+    if not n or not n.get("at"):
+        return None
+    doc = {"at": int(n["at"]), "kwh_max": float(n.get("kwh_max", 0) or 0), "kwh_action": n.get("kwh_action", DEFAULT_KWH_ACTION),
+           "sess": _sess_doc(n)}
+    if amp:
+        doc["amp_max"] = float(n.get("amp_max", 0) or 0)
+    return doc
+
+
+def _with_next(doc, n, amp=True):
+    nd = next_doc(n, amp)
+    if nd:
+        doc["next"] = nd
+    return doc
+
+
+def _calib_doc(calib, i):
+    """zero / tare of channel i for the meter (absent = none)."""
+    c = (calib or {}).get(str(i)) or {}
+    out = {}
+    for k in ("zero", "tare"):
+        v = c.get(k) or {}
+        a, w = float(v.get("a") or 0), float(v.get("w") or 0)
+        if a or w:
+            out[k] = {"a": a, "w": w}
+    return out
+
+
+def to_device(cfg, ver, calib=None):
+    """The config document for the meter. `calib` = Device.calib: zero / tare of each channel (docs/protocol.md §13)."""
     if "mode" in cfg:  # multi-channel meter (docs/multichannel.md)
         return {"ver": ver, "cfg": {
             "report_s": int(cfg.get("report_s", 60)),
             "read_s": int(cfg.get("read_s", cfg.get("report_s", 60))),
             "read_ms": int(cfg.get("read_s", cfg.get("report_s", 60))) * 1000,
-            "drdy": bool(cfg.get("drdy", cfg.get("rdy"))),
+            "drdy": bool(cfg.get("drdy")),
             "offline_off_min": int(cfg.get("offline_off_min", 3)) if cfg.get("offline_off") else 0,
             "mode": cfg.get("mode", "shared"),
             "sess": _sess_doc(cfg),
@@ -368,9 +464,12 @@ def to_device(cfg, ver):
             "summary": bool(cfg.get("summary")),
             "ch": [{"i": i, "name": c.get("name", ""), "amp_max": float(c.get("amp_max", 0) or 0),
                     "kwh_max": float(c.get("kwh_max", 0) or 0), "kwh_action": c.get("kwh_action", DEFAULT_KWH_ACTION),
-                    "sess": _sess_doc(c)} for i, c in enumerate(cfg.get("ch", []))],
+                    "dis": bool(c.get("disabled")), "sess": _sess_doc(c), **_calib_doc(calib, i),
+                    **({"next": nd} if (nd := next_doc(c.get("next"))) else {})} for i, c in enumerate(cfg.get("ch", []))],
+            "tare_limits": bool(cfg.get("tare_limits", True)),
             "aux": auxcfg.to_device(cfg.get("aux")),
             "tz_min": auxcfg.tz_minutes(),
+            **({"next": nd} if (nd := next_doc(cfg.get("next"), amp=False)) else {}),
         }}
     sess = _sess_doc(cfg)
     return {
@@ -382,8 +481,7 @@ def to_device(cfg, ver):
             "sess": sess,
             "volt": {"min": float(cfg.get("volt_min", 0) or 0), "max": float(cfg.get("volt_max", 0) or 0),
                      "action": cfg.get("volt_action", DEFAULT_PROTECT_ACTION)},
-            "tare": {"a": float(cfg.get("tare_a", 0) or 0), "w": float(cfg.get("tare_w", 0) or 0),
-                     "limits": bool(cfg.get("tare_limits", True))},
+            "tare_limits": bool(cfg.get("tare_limits", True)),
             "tamper": {"protect": bool(cfg.get("tamper_protect")),
                        "action": cfg.get("tamper_action", DEFAULT_PROTECT_ACTION)},
             "sensor": {"timeout_s": int(cfg.get("sensor_to_s", SENSOR_TIMEOUT_DEFAULT)),
@@ -392,17 +490,24 @@ def to_device(cfg, ver):
             "summary": bool(cfg.get("summary")),
             "ch": [
                 {"i": i, "kwh_max": float(c.get("kwh_max", 0)), "kwh_action": kwh_action(c),
-                 "amp_max": float(c.get("amp_max", 0))}
+                 "amp_max": float(c.get("amp_max", 0)), **_calib_doc(calib, i)}
                 for i, c in enumerate(cfg.get("ch", []))
             ],
             "aux": auxcfg.to_device(cfg.get("aux")),
             "tz_min": auxcfg.tz_minutes(),
+            **({"next": nd} if (nd := next_doc(cfg.get("next"))) else {}),
         },
     }
 
 
 def describe_session(cfg):
     mode = cfg.get("sess_mode", "none")
+    if mode == "weekly":
+        w = cfg.get("week") or {}
+        times = {w[d] for d in WEEKDAYS if d in w}
+        if len(times) == 1:
+            return ("Every day" if len(w) == 7 else ", ".join(d.capitalize() for d in WEEKDAYS if d in w)) + f" at {times.pop()}"
+        return ", ".join(f"{d.capitalize()} {w[d]}" for d in WEEKDAYS if d in w) or "No time limit"
     if mode == "daily":
         return f"Every day at {cfg.get('daily_at', '00:00')}"
     if mode == "duration":

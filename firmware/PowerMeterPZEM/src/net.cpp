@@ -13,7 +13,9 @@
 #include "battery.h"
 #include "ups.h"
 #include "certs.h"
+#include "ota.h"
 #include "control.h"
+#include "i2cbus.h"
 #include "led.h"
 #include "mesh.h"
 #include "mqttlink.h"
@@ -69,6 +71,16 @@ static bool mdnsStarted = false;
 
 String apSsid() { return "Power_" + store::deviceId(); }
 String serverHost() { return srv.host; }
+static volatile bool helloAgain = false;
+void requestHello() { helloAgain = true; }
+bool serverParams(String &host, uint16_t &port, bool &tls, bool &insecure) {
+  if (leafMode || !srv.host.length()) return false;
+  host = srv.host;
+  port = srv.port;
+  tls = srv.tls;
+  insecure = srv.insecure;
+  return true;
+}
 String linkMode() {
   if (leafMode) return mesh::leafLinked() ? "mesh" : "searching";
   return WiFi.status() == WL_CONNECTED ? "wifi" : "none";
@@ -307,6 +319,7 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (!strcmp(mode, "none")) m.sess_mode = SESS_NONE;
   else if (!strcmp(mode, "duration")) m.sess_mode = SESS_DURATION;
   else if (!strcmp(mode, "daily")) m.sess_mode = SESS_DAILY;
+  else if (!strcmp(mode, "weekly")) m.sess_mode = SESS_WEEKLY;
   else { err = "sess.mode"; return false; }
   int daily = s["daily_utc_min"] | 0;
   if (daily < 0 || daily > 1439) { err = "sess.daily_utc_min"; return false; }
@@ -315,6 +328,12 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (dur < 1 || dur > 525600) { err = "sess.dur_min"; return false; }
   m.dur_min = dur;
   m.auto_renew = s["auto"] | false;
+  for (JsonVariant v : s["wk"].as<JsonArray>()) {  // weekly: UTC minutes of the week
+    int w = v | -1;
+    if (w < 0 || w > 10079 || m.nwk >= 7) { err = "sess.wk"; return false; }
+    m.wk[m.nwk++] = w;
+  }
+  if (m.sess_mode == SESS_WEEKLY && !m.nwk) { err = "sess.wk"; return false; }
   JsonObject ch = c["ch"][0];
   float kwh = ch["kwh_max"] | 0.0f, amp = ch["amp_max"] | 0.0f;
   if (kwh < 0 || kwh > 100000) { err = "ch[0].kwh_max"; return false; }
@@ -332,15 +351,18 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   m.volt_min = vmin;
   m.volt_max = vmax;
   m.volt_action = action(v["action"] | "hold");
-  JsonObject ta = c["tare"];
-  float tA = ta["a"] | 0.0f, tW = ta["w"] | 0.0f;
-  if (tA < 0 || tA > 5 || tW < 0 || tW > 500) {
-    err = "tare";
+  // Zero and tare of the measured line = channel 0 (docs/protocol.md §13.3); tare_limits applies to all meters
+  JsonObject c0 = c["ch"][0];
+  float zA = c0["zero"]["a"] | 0.0f, zW = c0["zero"]["w"] | 0.0f, tA = c0["tare"]["a"] | 0.0f, tW = c0["tare"]["w"] | 0.0f;
+  if (zA < 0 || zA > 400 || zW < 0 || zW > 100000 || tA < 0 || tA > 400 || tW < 0 || tW > 100000) {
+    err = "ch.zero_tare";
     return false;
   }
+  m.zero_a = zA;
+  m.zero_w = zW;
   m.tare_a = tA;
   m.tare_w = tW;
-  m.tare_limits = ta["limits"] | true;
+  m.tare_limits = c["tare_limits"] | true;
   JsonObject t = c["tamper"];
   m.tamper_protect = t["protect"] | false;
   m.tamper_action = action(t["action"] | "hold");
@@ -365,6 +387,32 @@ static bool parseConfig(JsonObject c, MeterConfig &out, String &err) {
   if (!strcmp(act, "hold")) m.kwh_action = KWH_HOLD;
   else if (!strcmp(act, "warn")) m.kwh_action = KWH_WARN;
   else m.kwh_action = KWH_END;
+  JsonObject nx = c["next"];  // Schedule Next Session (absent = none)
+  if (!nx.isNull() && (nx["at"] | 0u)) {
+    NextCfg &n = m.next;
+    float na = nx["amp_max"] | 0.0f, nk = nx["kwh_max"] | 0.0f;
+    if (na < 0 || na > SENSOR_AMP_RATING || nk < 0 || nk > 100000) { err = "next"; return false; }
+    n.at = nx["at"].as<uint32_t>();
+    n.amp_max = na;
+    n.kwh_max = nk;
+    const char *nact = nx["kwh_action"] | "";
+    n.kwh_action = !strcmp(nact, "hold") ? KWH_HOLD : !strcmp(nact, "warn") ? KWH_WARN : KWH_END;
+    JsonObject ns = nx["sess"];
+    const char *nm = ns["mode"] | "none";
+    n.sess_mode = !strcmp(nm, "duration") ? SESS_DURATION : !strcmp(nm, "daily") ? SESS_DAILY : !strcmp(nm, "weekly") ? SESS_WEEKLY : SESS_NONE;
+    int nd = ns["daily_utc_min"] | 0;
+    long ndur = ns["dur_min"] | 1440;
+    if (nd < 0 || nd > 1439 || ndur < 1 || ndur > 525600) { err = "next.sess"; return false; }
+    n.daily_utc_min = nd;
+    n.dur_min = ndur;
+    n.auto_renew = ns["auto"] | false;
+    for (JsonVariant v : ns["wk"].as<JsonArray>()) {
+      int w = v | -1;
+      if (w < 0 || w > 10079 || n.nwk >= 7) { err = "next.sess.wk"; return false; }
+      n.wk[n.nwk++] = w;
+    }
+    if (n.sess_mode == SESS_WEEKLY && !n.nwk) { err = "next.sess.wk"; return false; }
+  }
   m.amp_max = amp;
   const char *aerr = nullptr;  // AUX relays: names + automation (applied with the rest in applyConfig)
   if (!auxrelay::parse(c["aux"].as<JsonArrayConst>(), c["tz_min"] | 0, aerr)) {
@@ -426,6 +474,7 @@ static String pairBody(const PairRequest &r) {
   caps["tamper"] = (bool)TAMPER_ENABLE;
   caps["mqtt"] = (bool)NET_MQTT;   // can use an MQTT broker (and the set_mqtt / set_wifi commands)
   caps["ws"] = (bool)NET_WEBSOCKET;
+  ota::capsJson(caps["ota"].to<JsonObject>());  // firmware update over the air (docs/protocol.md §14)
   caps["ups"] = ups::enabled();   // UPS signal input (events ups_on / ups_off)
   caps["battery"] = battery::enabled();
   if (TEMP_ENABLE) caps["temp"] = temp::count();  // temperature sensors found
@@ -586,6 +635,9 @@ static void sendHello() {
   JsonDocument doc;
   doc["t"] = "hello";
   doc["fw"] = FW_VERSION;
+  doc["fw_type"] = FW_TYPE;
+  doc["hw"] = HW_NAME;
+  ota::stateJson(doc["ota"].to<JsonObject>());
   doc["proto"] = PROTO_VERSION;
   doc["boot"] = store::bootCount();
   doc["up"] = millis() / 1000;
@@ -678,6 +730,7 @@ static void sendInfo() {
   if (rtc >= 0) doc["rtc"] = (uint32_t)rtc;  // DS3231 fitted: its own time (0 = not readable)
   doc["stack"] = sys::stackReport();
   doc["relay_sw"] = control::relaySwitches();
+  doc["i2c_recov"] = i2cbus::recoveries();  // times a stuck I2C bus had to be freed since start
   doc["reset"] = String(sys::resetReason()) + (sys::safeMode ? " - SAFE MODE (mesh + DS3231 off)" : "");
   if (battery::enabled()) {
     float v = battery::volts();
@@ -729,10 +782,28 @@ static void handleCommand(JsonObject m) {
     control::renew("manual", false);
   } else if (!strcmp(c, "end")) {
     control::endSession();
+  } else if (!strcmp(c, "ota")) {
+    ok = ota::onCommand(m, err);  // docs/protocol.md §14.3
+  } else if (!strcmp(c, "sensor_check")) {
+    // Zero & Tare wizard: measure the raw values for >= 10 readings (>= 10 s); the result comes as an event
+    // "sensor_check" (docs/protocol.md §13.1). This meter has one channel (0).
+    int n = m["n"] | 10, chn = m["ch"] | 0;
+    ok = control::startSensorCheck((uint8_t)(chn < 0 ? 0 : chn > 255 ? 255 : chn), (uint8_t)(n < 0 ? 10 : n > 255 ? 255 : n), err);
   } else if (!strcmp(c, "send_now")) {
     control::reportNow();
   } else if (!strcmp(c, "reset_trip")) {
     control::resetTrip("server", m["by"] | "");
+  } else if (!strcmp(c, "reboot")) {
+    int s = m["delay_s"] | 60;
+    if (s < 0 || s > 3600) {
+      ok = false;
+      err = "bad_delay";
+    } else {
+      control::scheduleReboot(s);
+    }
+  } else if (!strcmp(c, "reboot_cancel")) {
+    ok = control::cancelReboot();
+    if (!ok) err = "no_reboot";
   } else if (!strcmp(c, "get_state")) {
     sendState();
   } else if (!strcmp(c, "disable") || !strcmp(c, "enable")) {
@@ -803,6 +874,7 @@ static void handleMessage(const char *payload, size_t len) {
 
   if (!strcmp(t, "welcome")) {
     helloDone = true;
+    ota::confirm();  // a freshly installed firmware is good once the server answers
     linkTrySinceMs = 0;  // connected: the MQTT fallback timer starts again at the next loss
     goOnline();
     Serial.println("[net] online");
@@ -1090,6 +1162,10 @@ static void leafLoop() {
       sendHello();
     }
     return;
+  }
+  if (helloAgain) {  // capabilities changed: the server learns the new ones
+    helloAgain = false;
+    sendHello();
   }
   onlineWork();
 }

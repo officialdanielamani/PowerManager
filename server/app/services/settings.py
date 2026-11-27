@@ -127,6 +127,13 @@ def local_hhmm_to_utc_minute(hhmm):
     return int((h * 60 + m - off.total_seconds() // 60) % 1440)
 
 
+def local_week_to_utc(day_idx, hhmm):
+    """Weekday (0 = Monday) + time in the display zone -> UTC minute of the week (Monday 00:00 UTC = 0), using today's offset."""
+    h, m = (int(x) for x in hhmm.split(":"))
+    off = datetime.now(timezone.utc).astimezone(tz()).utcoffset()
+    return int((day_idx * 1440 + h * 60 + m - off.total_seconds() // 60) % 10080)
+
+
 def public_server(request=None):
     """(host, port, tls) used in the pairing QR. Falls back to the browser's host."""
     host = get("server_address").strip()

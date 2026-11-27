@@ -5,7 +5,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ..extensions import db
 from ..models import Device, Incident, now
-from . import devconfig, notify, rollup
+from . import devconfig, notify, notify_limits, rollup
 
 log = logging.getLogger(__name__)
 _scheduler = None
@@ -33,7 +33,8 @@ def check_disconnected():
 def uses_local_time(cfg):
     """Config that the meter evaluates in local time: daily session resets, AUX schedules."""
     cfg = cfg or {}
-    return (cfg.get("sess_mode") == "daily" or any((c or {}).get("sess_mode") == "daily" for c in cfg.get("ch") or [])
+    return (cfg.get("sess_mode") in ("daily", "weekly") or any((c or {}).get("sess_mode") in ("daily", "weekly") for c in cfg.get("ch") or [])
+            or cfg.get("next") or any((c or {}).get("next") for c in cfg.get("ch") or [])
             or any((a or {}).get("mode") == "schedule" for a in cfg.get("aux") or []))
 
 
@@ -45,7 +46,7 @@ def repush_local_time():
         if uses_local_time(d.cfg):
             d.cfg_ver_wanted += 1
             db.session.commit()
-            hub.send(d.id, {"t": "cfg", **devconfig.to_device(d.cfg, d.cfg_ver_wanted)})
+            hub.send(d.id, {"t": "cfg", **devconfig.to_device(d.cfg, d.cfg_ver_wanted, d.calib)})
 
 
 def check_tz_offset():
@@ -113,6 +114,7 @@ def start(app):
     sch = BackgroundScheduler(timezone="UTC", daemon=True)
     sch.add_job(wrap(check_tz_offset), "interval", minutes=30, id="tz_offset")
     sch.add_job(wrap(check_disconnected), "interval", seconds=60, id="disconnected")
+    sch.add_job(wrap(notify_limits.run), "interval", seconds=30, id="notify_limits")
     sch.add_job(wrap(run_rollups), "interval", minutes=5, id="rollups")
     sch.add_job(wrap(rollup.retention), "cron", hour=3, minute=17, id="retention")
     sch.add_job(wrap(cleanup), "cron", hour=3, minute=41, id="cleanup")

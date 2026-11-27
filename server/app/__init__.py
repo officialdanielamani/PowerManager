@@ -10,7 +10,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .config import Config
 from .extensions import csrf, db, limiter, login_manager, sock
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 log = logging.getLogger("powermanager")
 
 
@@ -28,6 +28,7 @@ def create_app(overrides=None):
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
     app = Flask(__name__)
     app.config.from_object(Config())
+    app.config.setdefault("MAX_CONTENT_LENGTH", 80 * 1024 * 1024)  # firmware zips (docs/protocol.md §14)
     if overrides:
         app.config.update(overrides)
     # Behind Cloudflare Tunnel / reverse proxy: trust X-Forwarded-Proto/Host/For (one hop).
@@ -42,10 +43,13 @@ def create_app(overrides=None):
     login_manager.login_message_category = "warning"
 
     from . import models
-    from .routes import auth, device_api, main, meters, settings_routes
+    from .routes import auth, device_api, hardware, main, meters, settings_routes
+    from .routes import firmware as firmware_routes
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(main.bp)
+    app.register_blueprint(hardware.bp)
+    app.register_blueprint(firmware_routes.bp)
     app.register_blueprint(meters.bp)
     app.register_blueprint(settings_routes.bp)
     app.register_blueprint(device_api.bp)

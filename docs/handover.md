@@ -10,20 +10,21 @@ For whoever takes the project over. Read this first, then `architecture.md` and 
 - **Firmware** (`firmware/`): two Arduino sketches for the ESP32-S3.
   `PowerMeterPZEM` = one channel (PZEM-004T AC or PZEM-017 DC), `PowerMeterRBAmp` = 1–16 channels (rbAmp modules).
   The meter enforces every limit itself and keeps working offline; the server owns the configuration.
-- **Versions**: server 1.0.0 (`server/app/__init__.py`), firmware 1.0.0 (`FW_VERSION` in each `config.h`).
+- **Versions**: server 1.2.0 (`server/app/__init__.py`), firmware 1.2.0 (`FW_VERSION` in each `config.h`).
   The server only supports firmware ≥ `MIN_FW` (`server/app/services/devconfig.py`).
 
 ## 2. What is verified, and what is not
 
 | Area | State |
 |---|---|
-| Server logic | Automated tests (`server/tests`, 124 tests) + simulated meters (`server/tools/sim_meter*.py`) |
+| Server logic | Automated tests (`server/tests`, 166 tests) + simulated meters (`server/tools/sim_meter*.py`) |
 | Server UI | Checked by hand / with a headless browser during development; no automated browser tests in the repo |
 | Firmware build | Both sketches and the variants in `firmware/tools/build.sh` compile on Arduino-ESP32 3.3.5 |
 | AUX automation | PC test against the real `auxrelay.cpp` (`firmware/tools/auxrelay_test`) |
+| Hardware profile (rbAmp) | Server: tests (incl. the pages and their access rules), a headless-browser run of the page against the simulator + simulator (`sim_meter_mc.py`). Firmware: PC test of the real `hwprofile.cpp` (rules, JSON, live / restart / confirm / rollback / crash loop, `firmware/tools/hwprofile_test`); the rest of the firmware change was only syntax-checked on a PC, **the ESP32 build has to be run by CI / arduino-cli** |
 | MQTT link | PC test: the firmware's `mqttlink.cpp` + a real broker + the server bridge (`firmware/tools/mqttlink_test`) |
 | Basic metering, relays, sessions on real meters | Used on real hardware by the project owner during development (earlier firmware versions) |
-| **Not yet tried on real hardware** | MQTT link (also through Cloudflare / TLS), backup Wi-Fi switching, UPS input, battery % event, AUX schedules by date and the newer event sources, changing Wi-Fi from the server, firmware 1.0.0 as a whole after the legacy clean-up |
+| **Not yet tried on real hardware** | OTA update (download over HTTP / HTTPS, rollback after an unconfirmed boot, `Update` into the spare slot, boot-slot switch), USB flash from the browser (esptool-js, Web Serial behind the reverse proxy), Zero & Tare (sensor check, zero on the meter, tare in the limits; rbAmp session tare accounting), I2C recovery (relay board re-init, stuck-bus freeing, rbAmp re-probe), hardware profile from the server (I2C scan, rbAmp address, live clamp change, restart + confirm + rollback), 16 MB partition table (boot after a full flash erase, NVS use), MQTT link (also through Cloudflare / TLS), backup Wi-Fi switching, UPS input, battery % event, AUX schedules by date and the newer event sources, changing Wi-Fi from the server, firmware 1.0.0 as a whole after the legacy clean-up |
 | Mesh | Has its own manual test plan in `mesh.md` |
 
 Treat the "not yet tried" row as the first test list on a bench meter before a field roll-out.
@@ -32,7 +33,8 @@ Treat the "not yet tried" row as the first test list on a bench meter before a f
 
 ```bash
 make venv            # server/.venv with server + test requirements (server/requirements-dev.txt)
-make test            # pytest + firmware PC tests (needs g++, libssl-dev, git)
+make test            # pytest + firmware PC tests incl. syntax_check (needs g++, libssl-dev, git)
+make e2e             # browser test: server + simulated meter + Playwright (needs Node + Playwright)
 make run             # dev server on http://localhost:5000, setup token printed in the terminal
 make firmware-setup  # once: arduino-cli core esp32 3.3.5 + ArduinoJson 7.1.0 + WebSockets 2.7.2
 make firmware        # compile both sketches + variants (dc, example, all-parts, ws-only, mqtt-only)
@@ -40,7 +42,16 @@ make docker          # build the server image
 ```
 
 - **Simulated meters**: `server/tools/sim_meter.py` (one channel) and `sim_meter_mc.py` (multi-channel); usage in
-  `server/README.md`. They speak the WebSocket protocol only.
+  `server/README.md`. They speak the WebSocket protocol only. `sim_meter_mc.py` also simulates the hardware profile
+  (I2C scan, rbAmp address, restart / confirm / rollback; `--bus` sets which addresses answer).
+- **Test tools kept in the repository** (take them from here if a machine lacks them):
+  `firmware/tools/host_tests.sh` (runs the checks below), `firmware/tools/check_shared.py`, `auxrelay_test/`,
+  `sensorcheck_test/` (sensor check collector + zero / tare maths), `i2c_test/` (relay board unplug / power loss / late plug-in, stuck I2C bus; real `relays.cpp` + `i2cbus.cpp`),
+  `hwprofile_test/` (profile rules + restart / confirm / rollback, PC build of the real `hwprofile.cpp`),
+  `mqttlink_test/`, `syntax_check/` (rbAmp / PZEM sources + every `examples/*.h` against Arduino stubs, the
+  `static_assert`s must reject a broken table, net.cpp / .ino snippets; `make syntax-check`),
+  `server/tools/e2e/` (`run.sh`: real server + simulated meter + Playwright browser test of Update Device I/O and the
+  generator; needs Node + `npx playwright install chromium`; `make e2e`).
 - **Test environment with an MQTT broker**: `cd server && docker compose -f docker-compose.dev.yml up --build`
   (server on port 5001 with its own data folder `instance-dev/`, Mosquitto on 1883 and 9001 / WebSocket).
 - **Firmware by hand**: Arduino IDE, settings in `firmware/README.md`. `firmware/tools/build.sh <sketch> [variant]`
@@ -50,7 +61,7 @@ make docker          # build the server image
 
 | Workflow | When | What |
 |---|---|---|
-| `.github/workflows/ci.yml` | every pull request, pushes to `main` / `master`, manual | server tests (Python 3.11 and 3.13), firmware PC tests, firmware compile matrix (7 builds), Docker image builds and answers `/healthz` |
+| `.github/workflows/ci.yml` | every pull request, pushes to `main` / `master`, manual | server tests (Python 3.11 and 3.13), firmware PC tests (incl. the ESP32 syntax check), browser test of the hardware pages (`server/tools/e2e`), firmware compile matrix (7 builds), Docker image builds and answers `/healthz` |
 | `.github/workflows/release.yml` | tag `v*`, manual | tests, then the server image to `ghcr.io/<owner>/powermanager` (`<version>`, `<major>.<minor>`, `latest`) |
 
 The workflows were written with the project but have **not run on GitHub yet** (the scripts they call were run
@@ -66,7 +77,8 @@ Firmware is not released as binaries: each meter is compiled with its own `confi
 
 1. **Shared firmware files.** Most files in `PowerMeterPZEM/src` and `PowerMeterRBAmp/src` must be identical
    (`firmware/tools/check_shared.py` lists them). Edit one, copy to the other, run the check. Files that differ on
-   purpose: `app_state`, `control`, `storage`, `net.cpp`, `web.cpp`, `webui.h`, `led.cpp`, `hwmap.h`.
+   purpose: `app_state`, `control`, `storage`, `net.cpp`, `web.cpp`, `webui.h`, `led.cpp`, `hwmap.h`, `relaymap.h`,
+   `relays.cpp` (the rbAmp ones use the run-time hardware profile). `hwprofile.h/.cpp` and `partitions.csv`: see below.
 2. **config.h and the generator.** `server/app/firmware_cfg/{pzem,rbamp}_config.h` are copies of the two
    `config.h` files; the generator (`app/services/cfggen.py`) replaces `#define` values in them. After changing a
    `config.h`: copy it there (the check script and `tests/test_cfggen.py` fail otherwise), and if you added an

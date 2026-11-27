@@ -13,11 +13,11 @@ namespace auxrelay {
 enum Mode : uint8_t { M_MANUAL = 0, M_SCHEDULE = 1, M_EVENT = 2 };
 enum Src : uint8_t {
   S_TEMP = 0, S_HUM = 1, S_AMP = 2, S_WATT = 3, S_KWH = 4, S_SESSION = 5,
-  S_TAMPER = 6, S_TRIP = 7, S_VOLT = 8, S_WIFI = 9, S_SERVER = 10, S_UPS = 11, S_BAT = 12, S_COUNT = 13
+  S_TAMPER = 6, S_TRIP = 7, S_VOLT = 8, S_WIFI = 9, S_SERVER = 10, S_UPS = 11, S_BAT = 12, S_REBOOT = 13, S_COUNT = 14
 };
 static const char *MODE_NAME[] = {"manual", "schedule", "event"};
-static const char *SRC_NAME[] = {"temp", "hum", "amp", "watt", "kwh", "session", "tamper", "trip", "volt", "wifi", "server", "ups", "bat"};
-static const float HYST[] = {1.0f, 2.0f, 0.1f, 10.0f, 0.01f, 0, 0, 0, 0, 0, 0, 0, 2.0f};  // a condition clears this far back
+static const char *SRC_NAME[] = {"temp", "hum", "amp", "watt", "kwh", "session", "tamper", "trip", "volt", "wifi", "server", "ups", "bat", "reboot"};
+static const float HYST[] = {1.0f, 2.0f, 0.1f, 10.0f, 0.01f, 0, 0, 0, 0, 0, 0, 0, 2.0f, 0};  // a condition clears this far back
 static const uint32_t MIN_SWITCH_MS = 5000;                      // event mode: at most one change per 5 s
 static const uint8_t TOTAL = 255;                                 // amp / watt: all channels together
 static const uint8_t ANY = 254;                                   // any channel (amp, watt, kWh, session, trip)
@@ -32,14 +32,17 @@ struct Rule {
   uint8_t src = S_TEMP, idx = 0, over = 1, on = 1, running = 1;
   float value = 0;
 };
+static const uint8_t EV_MAX = 3;         // event mode: up to 3 conditions, OR-ed (docs/protocol.md §8)
 struct Cfg {
   char name[21] = "";
   uint8_t mode = M_MANUAL, override = 0, elseOn = 0;
   Sched s[SCHED_MAX];
-  Rule ev;
+  uint8_t nev = 0;        // conditions used
+  uint8_t evOn = 1;       // while ANY condition is true the relay is ON (1) or OFF (0); otherwise the opposite
+  Rule ev[EV_MAX];
 };
 struct Blob {
-  uint8_t version = 2;
+  uint8_t version = 3;
   int16_t tz = 0;  // local time = UTC + tz minutes (sent by the server, which knows the time zone)
   Cfg c[MAX];
 };
@@ -49,7 +52,7 @@ struct Run {
   bool autoState = false, autoKnown = false;
   bool ovr = false, ovrState = false;  // manual override of the automation
   bool out = false;       // what the relay does now
-  bool latched = false;   // event condition currently true
+  bool latched[EV_MAX] = {false, false, false};   // event condition currently true (hysteresis), per condition
   uint32_t lastAutoMs = 0;
   const char *src = nullptr;  // who caused the next change (manual commands)
 };
@@ -81,7 +84,7 @@ void begin() {
   prefs.begin("aux", true);
   if (prefs.getBytesLength("cfg") == sizeof(Blob)) {
     prefs.getBytes("cfg", &active, sizeof(active));
-    if (active.version != 2) active = Blob();  // other layout: defaults, the server re-sends the config
+    if (active.version != 3) active = Blob();  // other layout: defaults, the server re-sends the config
   }
   uint16_t want = prefs.getUShort("want", 0);
   prefs.end();
@@ -142,21 +145,33 @@ bool parse(JsonArrayConst list, int tzMin, const char *&err) {
       c.s[k].on = s["on"] | true;
       k++;
     }
-    JsonObjectConst e = a["event"];
-    if (!e.isNull()) {
+    // Event conditions: "events": [ ... ] (1..3, OR-ed) with "ev_on" (relay ON while any is true).
+    JsonArrayConst evs = a["events"];
+    uint8_t n = 0;
+    bool evOn = a["ev_on"] | true;
+    for (uint8_t k = 0; k < (uint8_t)evs.size(); k++) {
+      JsonObjectConst e = evs[k].as<JsonObjectConst>();
+      if (k >= EV_MAX) {
+        err = "aux.event";
+        return false;
+      }
       int src = srcOf(e["src"] | "");
       int idx = e["idx"] | 0;
       if (src < 0 || idx < 0 || (idx >= MAX_CH && idx != TOTAL && idx != ANY)) {
         err = "aux.event";
         return false;
       }
-      c.ev.src = src;
-      c.ev.idx = idx;
-      c.ev.over = strcmp(e["cmp"] | "over", "under") != 0;
-      c.ev.value = e["value"] | 0.0f;
-      c.ev.running = e["active"] | (e["running"] | true);  // session: running; tamper, trip, ...: active
-      c.ev.on = e["on"] | true;
-    } else if (c.mode == M_EVENT) {
+      Rule &r = c.ev[k];
+      r.src = src;
+      r.idx = idx;
+      r.over = strcmp(e["cmp"] | "over", "under") != 0;
+      r.value = e["value"] | 0.0f;
+      r.running = e["active"] | (e["running"] | true);  // session: running; tamper, trip, ...: active
+      n = k + 1;
+    }
+    c.nev = n;
+    c.evOn = evOn;
+    if (c.mode == M_EVENT && !n) {
       err = "aux.event";
       return false;
     }
@@ -169,7 +184,8 @@ void commit() {
   StateLock l;
   for (uint8_t i = 0; i < MAX; i++)
     if (memcmp(&staged.c[i].mode, &active.c[i].mode, sizeof(Cfg) - sizeof(Cfg::name))) {
-      run[i].autoKnown = run[i].ovr = run[i].latched = false;  // automation changed: start fresh
+      run[i].autoKnown = run[i].ovr = false;  // automation changed: start fresh
+      for (uint8_t k = 0; k < EV_MAX; k++) run[i].latched[k] = false;
       run[i].lastAutoMs = 0;
     }
   bool changed = memcmp(&staged, &active, sizeof(Blob)) != 0;
@@ -235,15 +251,15 @@ static bool compare(const Rule &r, bool latched, float v) {
   return r.over ? (latched ? v > r.value - h : v >= r.value) : (latched ? v < r.value + h : v <= r.value);
 }
 
-static bool evalEvent(const Cfg &c, Run &rn, const Inputs &in, bool &st) {
-  const Rule &r = c.ev;
-  bool cond = false;
+// One condition. false = no value now (sensor missing, no reading ...): its state is unknown.
+static bool evalRule(const Rule &r, bool latched, const Inputs &in, bool &cond) {
+  cond = false;
   switch (r.src) {
     case S_TEMP:
     case S_HUM: {
       float v = r.src == S_TEMP ? temp::value(r.idx) : temp::humidity(r.idx);
       if (isnan(v)) return false;  // sensor missing: keep the last state
-      cond = compare(r, rn.latched, v);
+      cond = compare(r, latched, v);
       break;
     }
     case S_AMP:
@@ -257,14 +273,14 @@ static bool evalEvent(const Cfg &c, Run &rn, const Inputs &in, bool &st) {
           if (isnan(v)) continue;
           some = true;
           total += v;
-          if (compare(r, rn.latched, v)) any = true;
+          if (compare(r, latched, v)) any = true;
         }
         if (!some) return false;
-        cond = r.idx == ANY ? any : compare(r, rn.latched, total);
+        cond = r.idx == ANY ? any : compare(r, latched, total);
       } else {
         float v = channelValue(r.src, r.idx, in);
         if (isnan(v)) return false;  // no reading / no kWh limit: keep the last state
-        cond = compare(r, rn.latched, v);
+        cond = compare(r, latched, v);
       }
       break;
     }
@@ -287,14 +303,31 @@ static bool evalEvent(const Cfg &c, Run &rn, const Inputs &in, bool &st) {
     case S_WIFI: cond = in.noWifi == (bool)r.running; break;
     case S_SERVER: cond = in.noServer == (bool)r.running; break;
     case S_UPS: cond = in.ups == (bool)r.running; break;
+    case S_REBOOT: cond = in.reboot == (bool)r.running; break;
     case S_BAT:
       if (isnan(in.batPct)) return false;  // no battery measurement: keep the last state
-      cond = compare(r, rn.latched, in.batPct);
+      cond = compare(r, latched, in.batPct);
       break;
     default: return false;
   }
-  rn.latched = cond;
-  st = cond ? r.on : !r.on;
+  return true;
+}
+
+// All conditions, OR-ed: the relay follows evOn while any condition is true. Unknown conditions count as false, but when
+// nothing is true and one is unknown the last state is kept.
+static bool evalEvent(const Cfg &c, Run &rn, const Inputs &in, bool &st) {
+  bool any = false, unknown = false;
+  for (uint8_t k = 0; k < c.nev && k < EV_MAX; k++) {
+    bool cond;
+    if (!evalRule(c.ev[k], rn.latched[k], in, cond)) {
+      unknown = true;
+      continue;
+    }
+    rn.latched[k] = cond;
+    any = any || cond;
+  }
+  if (!any && unknown) return false;
+  st = any ? c.evOn : !c.evOn;
   return true;
 }
 

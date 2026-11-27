@@ -5,7 +5,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..extensions import db
 from ..models import Channel, Device, Event, Incident, Measurement, RollupDirty, Session, Temperature, now
-from . import commands, devconfig, incidents, notify, settings
+from . import calib, commands, devconfig, hwprofile, incidents, notify, settings
+from . import firmware as firmware_svc
 
 log = logging.getLogger(__name__)
 
@@ -164,7 +165,11 @@ def h_hello(conn, device, msg):
         device.proto = 1
     if isinstance(msg.get("caps"), dict):
         new_sig = devconfig.hw_signature(msg["caps"])
-        if device.hw_sig and new_sig and new_sig != device.hw_sig:
+        # A new channel count that comes from a hardware profile sent by the server is not other hardware.
+        same_kind = bool(device.hw_sig and new_sig and "-mc" in device.hw_sig and "-mc" in new_sig
+                         and device.hw_sig.split("-")[0] == new_sig.split("-")[0] and msg["caps"].get("hw_cfg"))
+        profile_change = hwprofile.profile_change_expected(device, msg.get("hwp"), same_kind)
+        if device.hw_sig and new_sig and new_sig != device.hw_sig and not profile_change:
             # Other hardware / firmware type on this ESP32: archive the old history, start clean.
             from . import lifecycle
             lifecycle.hardware_changed(device, msg["caps"], new_sig)
@@ -185,6 +190,8 @@ def h_hello(conn, device, msg):
     if isinstance(state, dict):
         _apply_state(device, state)
         _reconcile_incidents(device, state)
+    hwprofile.on_hello(device, msg.get("hwp"))
+    firmware_svc.on_hello(device, msg)  # fw_type, OTA state (docs/protocol.md §14)
     try:
         dev_ver = int(msg.get("cfg_ver", 0))
     except (TypeError, ValueError):
@@ -200,7 +207,7 @@ def h_hello(conn, device, msg):
     if getattr(conn, "direct", True) and device.link_key:
         conn.send({"t": "link_key", "key": device.link_key})  # meter stores it (needed for mesh)
     if dev_ver != device.cfg_ver_wanted:
-        conn.send({"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted)})
+        conn.send({"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted, device.calib)})
     commands.flush_pending(device, conn)
 
 
@@ -387,6 +394,8 @@ def _session_progress(device, items):
             if cur is None or cur.get("sid") != p["sid"]:
                 continue  # a session we have no state for yet: the next state message brings it
             cur["kwh"] = _f(p["kwh"])
+            if p.get("kwh_t") is not None:  # the meter's own tared value (its limit), docs/protocol.md §13.5
+                cur["kwh_t"] = _f(p["kwh_t"])
             s = Session.query.filter_by(device_fk=device.id, gen=device.pair_gen, sid=p["sid"]).first()
             if s is not None and s.ended_at is None:
                 s.kwh_used = cur["kwh"]
@@ -458,14 +467,25 @@ def h_info(conn, device, msg):
     """Answer to "Get meter info"."""
     keep = ("ip", "ssid", "rssi", "mac", "heap", "heap_min", "psram", "psram_free", "fw", "hw", "hw_info",
             "bat_v", "bat_pct", "uptime", "boot", "core", "chip", "flash", "outbox", "time_src",
-            "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "sensor_detail", "relay_board", "clamps",
+            "link", "gateway", "mesh_ch", "leaves", "stack", "reset", "sensor", "kind", "clock", "rtc", "relay_sw", "i2c_recov", "sensor_detail", "relay_board", "clamps",
             "sensor_boards", "temp_sensors", "transport", "mqtt", "wifi_net", "wifi2")
     device.last_info = {k: msg[k] for k in keep if k in msg}
     device.last_info_at = now()
 
 
 def h_cmd_ack(conn, device, msg):
-    commands.ack(device, msg.get("ref"), msg.get("ok"), msg.get("err"))
+    res = msg.get("res") if isinstance(msg.get("res"), dict) else None
+    if res is not None and msg.get("detail"):
+        res = dict(res, detail=str(msg["detail"])[:80])
+    elif res is None and msg.get("detail"):
+        res = {"detail": str(msg["detail"])[:80]}
+    cmd = commands.ack(device, msg.get("ref"), msg.get("ok"), msg.get("err"), res)
+    if cmd is not None and cmd.c in ("hw_profile", "hw_cancel"):
+        hwprofile.on_ack(device, cmd, msg.get("ok"), msg.get("err"), res)
+    elif cmd is not None and cmd.c == "sensor_check":
+        calib.on_ack(device, cmd, msg.get("ok"), msg.get("err"))
+    elif cmd is not None and cmd.c == "ota":
+        firmware_svc.on_cmd_ack(device, cmd)
 
 
 HANDLERS = {
@@ -484,7 +504,7 @@ HANDLERS = {
 
 def _apply_state(device, state):
     keys = ("relay", "tripped", "tamper", "ups", "ac", "sess", "volt_out", "sensor_err", "mode", "sessions", "no_sensor", "aux",
-            "temp_high")
+            "temp_high", "bat")
     clean = {k: state[k] for k in keys if k in state}
     merged = dict(device.last_state or {})
     if "relay" in state:  # a full state: flags that are only sent while true are cleared when missing
@@ -596,10 +616,20 @@ def process_event(device, ev):
     if e == "overcurrent":
         incidents.open_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                 detail={"a": d.get("val"), "limit": _r4(_f(d.get("limit"))), "ch": ev.ch})
-        notify.notify(device, "max_amp", f"{_chp(device, ev)}Over-current trip: {d.get('val')} A")
+        notify.notify(device, "max_amp", f"{_chp(device, ev)}Over-current trip: {d.get('val')} A", ch=ev.ch)
     elif e == "trip_reset":
         incidents.close_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
+    elif e == "reboot_pending":   # a reboot asked on the Configuration page (General): countdown running
+        notify.notify(device, "reboot_pending", f"Meter restarts in {int(d.get('in_s') or 0)} s (reboot requested)")
+    elif e == "reboot_cancelled":
+        notify.notify(device, "reboot_pending", "The requested reboot was cancelled")
+    elif e in ("hw_reboot_pending", "hw_active", "hw_rollback"):
+        hwprofile.on_event(device, ev)
+    elif e in ("ota_progress", "ota_failed", "ota_ok"):  # firmware update over the air (docs/protocol.md §14)
+        firmware_svc.on_event(device, ev)
+    elif e == "sensor_check":  # result of a sensor check (Zero & Tare wizard)
+        calib.on_event(device, ev)
     elif e == "relay_error":
         notify.notify(device, "sensor_error", "Relay board not answering on I2C: the relays cannot be switched")
     elif e == "relay_ok":
@@ -633,6 +663,7 @@ def process_event(device, ev):
         incidents.open_incident(device.id, "sensor", ev.ts, event=ev, estimated=est,
                                 detail={"kind": kind, "after_s": d.get("after_s"), "action": d.get("action")})
         why = ("garbled replies (wiring / noise)" if kind == "bad"
+               else "sensor not responding (sensor or wiring fault)" if device.is_mc
                else "sensor not responding (sensor or wiring fault, or no "
                + ("DC supply" if device.kind == "dc" else "AC power") + ")")
         what = {"end": "session ended", "hold": "relay off until readings return"}.get(d.get("action"), "power kept on")
@@ -680,12 +711,16 @@ def process_event(device, ev):
                 s = _session(device, sid)
                 if s.ended_at is None:
                     s.ended_at, s.end_reason = ev.ts, "quota"  # kWh used: from session_end (raw)
-            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit reached ({kwh} kWh): power off, session ended")
+            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit reached ({kwh} kWh): power off, session ended", ch=ev.ch)
         elif action == "hold":
             notify.notify(device, "kwh_exceeded",
-                          f"{pre}Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed")
+                          f"{pre}Session kWh limit reached ({kwh} kWh): power off until the session ends or is renewed", ch=ev.ch)
         else:
-            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit exceeded ({kwh} kWh): power kept on")
+            notify.notify(device, "kwh_exceeded", f"{pre}Session kWh limit exceeded ({kwh} kWh): power kept on", ch=ev.ch)
+    elif e == "next_session":
+        # The meter carried out its Schedule Next Session itself (it may have been offline at that time): see services/nextsession.py
+        from . import nextsession
+        nextsession.device_applied(device, mch if device.is_mc and device.mc_mode == "independent" else None, d.get("at"))
     elif e == "session_start":
         sid = d.get("sid")
         if isinstance(sid, int):
@@ -702,18 +737,26 @@ def process_event(device, ev):
                              .filter(Session.ended_at.isnot(None)).count() == 0)
         if not first:  # the very first session(s) after pairing are not a "renew"
             notify.notify(device, "session_renew",
-                          _chp(device, ev) + ("Session auto-renewed" if d.get("auto") else "Session renewed"))
+                          _chp(device, ev) + ("Session auto-renewed" if d.get("auto") else "Session renewed"), ch=ev.ch)
     elif e == "session_end":
         sid = d.get("sid")
         if isinstance(sid, int):
             s = _session(device, sid, mch)
             if s.ended_at is None:  # keep the first end (e.g. the kWh limit), not a later Renew
                 s.ended_at = ev.ts
-                s.end_reason = str(d.get("reason", ""))[:10] or None
+                s.end_reason = str(d.get("reason", ""))[:16] or None
             if d.get("kwh") is not None:  # always the raw kWh
                 s.kwh_used = _f(d.get("kwh")) or 0.0
             if isinstance(d.get("sum"), dict):  # min / max / avg of the session
                 s.stats = _session_stats(d["sum"])
+        reason = str(d.get("reason", ""))
+        if reason not in ("manual", "next", "auto", "daily"):  # a renew ends the old session too: that has its own notification
+            label = {"quota": "kWh limit reached", "expired": "time limit reached", "voltage": "voltage out of range",
+                     "tamper": "panel opened", "sensor": "sensor error", "temp": "temperature too high", "stopped": "ended by a user",
+                     "mode": "mode changed", "disabled": "meter disabled", "ch_disabled": "channel disabled",
+                     "hw_change": "hardware change", "restart": "restart"}.get(reason, reason or "ended")
+            kwh = d.get("kwh")
+            notify.notify(device, "session_end", f"{_chp(device, ev)}Session ended ({label})" + (f": {kwh} kWh" if kwh is not None else ""), ch=ev.ch)
     elif e == "server_back":
         last_off = (Incident.query
                     .filter_by(device_fk=device.id, type="offline")

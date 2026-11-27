@@ -2,16 +2,50 @@
 {% block title %}Firmware · PowerManager{% endblock %}
 {% block content %}
 <h1 class="h4 mb-3">Firmware</h1>
-{% if outdated %}<div class="alert alert-warning" style="max-width:1000px"><i class="bi bi-exclamation-triangle me-1"></i>{{ outdated }} meter(s) run firmware older than {{ min_fw }}, which this server no longer supports. Flash the current firmware.</div>{% endif %}
-<div class="card" style="max-width:1000px">
-  <div class="card-header d-flex align-items-center gap-2">
+{% if outdated %}<div class="alert alert-warning" style="max-width:1100px"><i class="bi bi-exclamation-triangle me-1"></i>{{ outdated }} meter(s) run firmware older than {{ min_fw }}, which this server no longer supports. Flash the current firmware.</div>{% endif %}
+<form method="post" action="{{ url_for('fw.delete') }}" id="fwForm">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="card" style="max-width:1100px">
+  <div class="card-header d-flex align-items-center gap-2 flex-wrap">
     <span class="fw-semibold">List of firmware</span>
-    <a class="btn btn-sm btn-primary ms-auto text-nowrap" href="{{ url_for('main.firmware_config_page') }}"><i class="bi bi-file-earmark-code me-1"></i>Generate config.h</a>
+    <span class="ms-auto d-flex gap-2 flex-wrap">
+      {% if current_user.is_admin %}
+      <button class="btn btn-sm btn-outline-danger text-nowrap" id="delBtn" disabled onclick="return confirm('Delete the selected firmware?')"><i class="bi bi-trash me-1"></i>Delete selected</button>
+      <a class="btn btn-sm btn-outline-success text-nowrap" href="{{ url_for('fw.add') }}"><i class="bi bi-plus-lg me-1"></i>Add New Firmware</a>
+      {% endif %}
+      <a class="btn btn-sm btn-outline-primary text-nowrap" href="{{ url_for('hardware.page') }}"><i class="bi bi-diagram-3 me-1"></i>Update Device I/O</a>
+      <a class="btn btn-sm btn-primary text-nowrap" href="{{ url_for('main.firmware_config_page') }}"><i class="bi bi-file-earmark-code me-1"></i>Generate config.h</a>
+    </span>
   </div>
-  <div class="card-body d-flex align-items-center gap-3">
-    <i class="bi bi-cloud-arrow-down fs-2 text-body-tertiary"></i>
-    <div><div class="fw-semibold">Over-the-air (OTA) updates are coming in a later version.</div>
-      <div class="text-body-secondary small">This page will then list firmware files and update meters from the server.</div></div>
-  </div>
+  <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+    <thead><tr>{% if current_user.is_admin %}<th style="width:2em"><input class="form-check-input" type="checkbox" id="all"></th>{% endif %}
+      <th>Title</th><th>Info</th><th>Type</th><th>Version</th><th>Size</th><th>By</th><th></th></tr></thead>
+    <tbody>
+    {% for f in items %}
+      <tr>{% if current_user.is_admin %}<td><input class="form-check-input pick" type="checkbox" name="ids" value="{{ f.id }}"></td>{% endif %}
+        <td class="fw-semibold">{{ f.title }}</td><td>{{ f.info }}</td><td><code>{{ f.fw_type }}</code></td><td>{{ f.version }}</td>
+        <td class="text-nowrap">{{ '%.2f MB'|format(f.size / 1048576) if f.size > 1048576 else '%.1f KB'|format(f.size / 1024) }}</td><td>{{ f.updated_by }}</td>
+        <td class="text-end text-nowrap">
+          <a class="btn btn-sm btn-primary" href="{{ url_for('fw.flash_page', fid=f.id) }}"><i class="bi bi-lightning-charge me-1"></i>Flash</a>
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fw.info', fid=f.id) }}">Info</a>
+          {% if current_user.is_admin %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fw.edit', fid=f.id) }}">Edit</a>{% endif %}
+        </td></tr>
+    {% else %}
+      <tr><td colspan="8" class="text-body-secondary p-3">No firmware yet.{% if current_user.is_admin %} Press <em>Add New Firmware</em> and upload the zip made by the Arduino IDE.{% endif %}
+        You can still flash a meter by USB with a firmware from this list; without one there is nothing to flash.</td></tr>
+    {% endfor %}
+    </tbody></table></div>
 </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var all = document.getElementById('all'), del = document.getElementById('delBtn');
+  if (!del) return;
+  function sync() { del.disabled = !document.querySelector('.pick:checked'); }
+  if (all) all.addEventListener('change', function () { document.querySelectorAll('.pick').forEach(function (c) { c.checked = all.checked; }); sync(); });
+  document.querySelectorAll('.pick').forEach(function (c) { c.addEventListener('change', sync); });
+})();
+</script>
 {% endblock %}

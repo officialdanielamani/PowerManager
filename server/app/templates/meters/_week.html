@@ -1,0 +1,16 @@
+{# Days of the week, each with its own reset time. sfx = "" or "_<channel>" (form field names wk_<day><sfx> / wk_<day>_at<sfx>);
+   named=false: no form fields (the Schedule Next Session panel reads them with JS). #}
+{% macro week_picker(sfx, week, named=true) -%}
+{% set names = {'mon': 'Mon', 'tue': 'Tue', 'wed': 'Wed', 'thu': 'Thu', 'fri': 'Fri', 'sat': 'Sat', 'sun': 'Sun'} %}
+{% set week = week or {} %}
+<div class="pm-week border rounded p-2" style="max-width:300px">
+  <div class="form-check mb-1"><input class="form-check-input pm-wk-all" type="checkbox" {{ 'checked' if week|length == 7 }}><label class="form-check-label small fw-semibold">All days</label></div>
+  {% for d, label in names.items() %}
+  <div class="d-flex align-items-center gap-2 mb-1">
+    <div class="form-check mb-0" style="width:4.2em"><input class="form-check-input pm-wk-day" type="checkbox" data-day="{{ d }}" {% if named %}name="wk_{{ d }}{{ sfx }}"{% endif %} {{ 'checked' if d in week }}><label class="form-check-label small">{{ label }}</label></div>
+    <input class="form-control form-control-sm pm-wk-time" style="width:115px" type="time" data-day="{{ d }}" {% if named %}name="wk_{{ d }}_at{{ sfx }}"{% endif %} value="{{ week.get(d, '00:00') }}" {{ 'disabled' if d not in week }}>
+  </div>
+  {% endfor %}
+  <div class="form-text mt-0">Time in {{ tz_label() }}. Tick all days and set a different time for each.</div>
+</div>
+{%- endmacro %}

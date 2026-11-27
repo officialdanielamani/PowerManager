@@ -1,4 +1,4 @@
-// PowerManager multi-channel AC meter: ESP32-S3 Super Mini + rbAmp BASIC (SCT-013, I2C) + DS3231
+// PowerManager multi-channel AC meter: ESP32-S3 N16R8 + rbAmp BASIC (SCT-013, I2C) + DS3231
 // + tamper switch + I2C relay board (PCF8574 / XL9535) + WS2812. See docs/multichannel.md.
 // Arduino IDE 2.x, board package "esp32" by Espressif 3.x. See firmware/README.md.
 //
@@ -9,15 +9,24 @@
 //   led     (core 1): status LED
 //   loop()          : BOOT button (factory reset) + soft watchdog
 
+#include <WiFi.h>
 #include <esp_task_wdt.h>
+
+// Files of the PZEM sketch in this folder (copied / merged over it): Arduino compiles every .cpp in src/, so the build fails
+// with errors in sensor_pzem.cpp. Use a clean copy of firmware/PowerMeterRBAmp (delete the old folder first).
+#if __has_include("src/sensor_pzem.h")
+#error "PowerMeterRBAmp/src contains sensor_pzem.h from the PowerMeterPZEM sketch. Delete the folder and copy firmware/PowerMeterRBAmp again (do not merge the two sketches)."
+#endif
 
 #include "config.h"
 #include "src/app_state.h"
 #include "src/auxrelay.h"
 #include "src/control.h"
+#include "src/hwprofile.h"
 #include "src/i2cbus.h"
 #include "src/led.h"
 #include "src/net.h"
+#include "src/ota.h"
 #include "src/outbox.h"
 #include "src/rbamp.h"
 #include "src/relays.h"
@@ -25,6 +34,67 @@
 #include "src/system.h"
 #include "src/timekeep.h"
 #include "src/web.h"
+
+// ---- hardware profile (src/hwprofile.h): glue to the rest of the firmware
+static bool hwProbe(uint8_t addr, bool rbampOnly) { return rbampOnly ? rbamp::isRbamp(addr) : i2cbus::present(addr); }
+
+struct HwEvent {
+  uint32_t ver;
+  int inS;
+  const char *reason;
+  int addr;
+};
+static void hwEventFill(JsonObject o, void *p) {
+  HwEvent *e = (HwEvent *)p;
+  o["ver"] = e->ver;
+  if (e->inS) o["in_s"] = e->inS;
+  if (e->reason) o["reason"] = e->reason;
+  if (e->addr >= 0) o["addr"] = e->addr;
+}
+static void hwEvent(const char *name, uint32_t ver, int inS, const char *reason, int addr) {
+  HwEvent e = {ver, inS, reason, addr};
+  control::emitEvent(name, hwEventFill, &e);
+}
+static void hwRestart() {
+  Serial.println("[hwp] restarting now");
+  control::prepareRestart();  // sessions end (events are written to flash at once), kWh and state saved, relays off
+  sys::reboot(500);
+}
+static void hwApplyClamps() {  // live clamp change: tables reloaded, models written to the modules
+  hw::reload();
+  rbamp::applyClamps();
+  control::bumpState();
+  net::requestHello();  // caps.ratings changed: tell the server
+}
+static void hwInit() {  // before anything uses the hardware tables
+  hwp::Hooks h = {hwProbe, hwEvent, hwRestart, hwApplyClamps, nullptr};
+  hwp::begin(hw::defaultProfile(), hw::RELAY_GPIO_COUNT, h);
+  hw::reload();
+}
+
+// ---- firmware update over the air (ota.h, docs/protocol.md §14)
+struct OtaEvt {
+  const char *state, *why, *ver;
+  int pct;
+};
+static void otaFill(JsonObject o, void *p) {
+  OtaEvt *e = (OtaEvt *)p;
+  o["state"] = e->state;
+  o["pct"] = e->pct;
+  if (e->why) o["why"] = e->why;
+  if (e->ver) o["ver"] = e->ver;
+}
+static void otaEvent(const char *name, const char *state, int pct, const char *why, const char *ver) {
+  OtaEvt e = {state, why, ver, pct};
+  control::emitEvent(name, otaFill, &e);
+}
+static void otaPrepare() { control::prepareRestart(true); }  // sessions end ("restart"), kWh + state saved, relays off
+static void otaRestart() { sys::reboot(200); }
+static bool otaWifi() { return WiFi.status() == WL_CONNECTED; }
+static void otaInit() {
+  ota::Hooks h = {otaPrepare, otaRestart, otaEvent, net::serverParams, otaWifi};
+  ota::begin(h);
+}
 
 static void loadState() {
   StateLock l;
@@ -83,7 +153,7 @@ static void serialCommand(const String &cmd) {
     Serial.print("[i2c] answering:");
     int n = 0;
     for (uint8_t a = 0x08; a <= 0x77; a++)
-      if (i2cbus::probe(a)) {
+      if (i2cbus::present(a)) {
         Serial.printf(" 0x%02X", a);
         n++;
       }
@@ -125,7 +195,15 @@ static void serialCommand(const String &cmd) {
     if (ok) Serial.println("[rbamp] now set RBAMP_BOARDS in config.h to match (or connect the next module)");
     return;
   }
-  Serial.println("Commands: info | i2c scan | relay test | rbamp addr <old> <new>");
+  if (cmd.equalsIgnoreCase("hw")) {
+    JsonDocument doc;
+    hwp::stateJson(doc.to<JsonObject>());
+    String out;
+    serializeJson(doc, out);
+    Serial.printf("[hwp] %s\n", out.c_str());
+    return;
+  }
+  Serial.println("Commands: info | hw | i2c scan | relay test | rbamp addr <old> <new>");
 }
 
 void setup() {
@@ -137,6 +215,7 @@ void setup() {
   delay(200);
   // Boot steps are printed so a crash during start-up shows how far it got.
   sys::bootCheck();
+  otaInit();  // a new firmware that never reached the server goes back to the old one (before anything else)
   auto step = [](const char *what) {
     sys::crumb(sys::CR_BOOT, what);
     Serial.printf("[boot] %s\n", what);
@@ -146,6 +225,7 @@ void setup() {
   state_init();
   step("storage (NVS)");
   store::begin();
+  hwInit();
   loadState();
   step("offline buffer (LittleFS)");
   outbox::begin();
@@ -186,6 +266,9 @@ void loop() {
     pressedMs = 0;
   }
   sys::crumb(sys::CR_MAIN, "loop");
+  i2cbus::tick();  // frees a stuck I2C bus (a device holding SDA low)
+  hwp::tick();  // hardware profile: restart countdown, confirm check, rollback
+  ota::tick();  // firmware update: progress events, confirm timeout
   sys::tick();
   sys::checkHeartbeats();
   sys::checkStacks();

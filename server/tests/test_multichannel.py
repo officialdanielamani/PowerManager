@@ -264,3 +264,58 @@ def test_reversed_clamp_warning(app, admin, mc):
         tel(5, t + 180, 640)  # turned over
         assert "1" not in d.last_state["clamp_rev"]
         assert admin.get(f"/meters/{mc}/live").get_json()["clamp_rev"] == []
+
+
+def test_disable_channel(app, admin, mc):
+    """A channel disabled by an admin / manager (not the whole meter): config to the meter, blocked commands, Info badge."""
+    r = admin.post(f"/meters/{mc}/configure", data=_form(mode="independent", ch_off_1="on"))
+    assert r.status_code in (200, 302)
+    with app.app_context():
+        d = db.session.get(Device, mc)
+        assert d.cfg["ch"][1]["disabled"] is True and not d.cfg["ch"][0]["disabled"]
+        doc = devconfig.to_device(d.cfg, 1)["cfg"]
+        assert doc["ch"][1]["dis"] is True and doc["ch"][0]["dis"] is False
+        d.last_state = {"mode": "independent", "relay": [{"i": 0}, {"i": 1}], "sessions": [{"ch": 0, "sid": 1, "status": "active"}, {"ch": 1, "sid": 2, "status": "active"}]}
+        db.session.commit()
+    # relay ON and Renew of the disabled channel are refused; the other channel works
+    on = admin.post(f"/meters/{mc}/action", json={"action": "relay_on", "ch": 1}).get_json()
+    assert not on["ok"] and on["error"] == "ch_disabled"
+    rn = admin.post(f"/meters/{mc}/action", json={"action": "renew", "ch": 1}).get_json()
+    assert not rn["ok"] and rn["error"] == "ch_disabled"
+    assert admin.post(f"/meters/{mc}/action", json={"action": "renew", "ch": 0}).get_json()["ok"]
+    assert admin.post(f"/meters/{mc}/action", json={"action": "relay_off", "ch": 1}).get_json()["ok"]   # OFF is harmless
+    # every user who sees the meter gets the flag (Info badge)
+    chs = admin.get(f"/api/ui/meters").get_json()["meters"][0]["channels"]
+    assert chs[1]["disabled"] is True and chs[0]["disabled"] is False
+    # enabled again
+    admin.post(f"/meters/{mc}/configure", data=_form(mode="independent"))
+    with app.app_context():
+        assert not db.session.get(Device, mc).cfg["ch"][1]["disabled"]
+    assert admin.post(f"/meters/{mc}/action", json={"action": "renew", "ch": 1}).get_json()["ok"]
+
+
+def test_history_several_channels_and_total(app, admin, mc):
+    t = now() - 600
+    with app.app_context():
+        pk = mc
+        for k in range(5):
+            for ch, (a, w) in enumerate(((1.0, 230.0), (2.0, 460.0))):
+                db.session.add(Measurement(device_fk=pk, ch=ch, gen=1, seq=k + 1, ts=t + k * 60, v=230.0, a=a, w=w, e=10.0 * (ch + 1) + k * 0.1))
+        db.session.commit()
+    # one channel: the old answer
+    one = admin.get(f"/meters/{mc}/history?range=1h&ch=1").get_json()
+    assert not one.get("multi") and one["stats"]["w"]["avg"] == 460.0
+    # two channels + their total
+    d = admin.get(f"/meters/{mc}/history?range=1h&ch=0,1&total=1").get_json()
+    assert d["multi"] and [s["ch"] for s in d["series"]] == [0, 1]
+    assert d["series"][0]["stats"]["w"]["avg"] == 230.0 and d["series"][1]["stats"]["w"]["avg"] == 460.0
+    tot = d["total"]
+    assert len(tot["points"]) == 5 and tot["points"][0]["w"] == 690.0 and tot["points"][0]["a"] == 3.0 and tot["points"][0]["v"] == 230.0
+    assert tot["stats"]["w"]["avg"] == 690.0 and tot["stats"]["kwh"] == pytest.approx(0.4 + 0.4, abs=0.01)
+    # channels without the total, and a bad / out of range list falls back to channel 0
+    d2 = admin.get(f"/meters/{mc}/history?range=1h&ch=0,1").get_json()
+    assert d2["multi"] and d2["total"] is None
+    assert not admin.get(f"/meters/{mc}/history?range=1h&ch=9,x").get_json().get("multi")
+    # the Info page offers the picker
+    html = admin.get(f"/meters/{mc}").get_data(as_text=True)
+    assert 'id="chPick"' in html and "Total of the selected channels" in html

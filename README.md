@@ -3,7 +3,7 @@
 Self-hosted energy meter system: ESP32-S3 meters measure and switch loads, and a Docker server manages them,
 applies session / kWh limits, keeps history and sends notifications.
 
-> **Status (server 1.0.0, firmware 1.0.0):** the server is covered by automated tests and tested end-to-end with
+> **Status (server 1.2.0, firmware 1.2.0):** the server is covered by automated tests and tested end-to-end with
 > simulated meters; both firmwares compile and their PC tests pass. Several newer features have not been tried on
 > real hardware yet. See [docs/handover.md](docs/handover.md) for exactly what is and is not verified.
 
@@ -37,7 +37,8 @@ pair it with the code or QR. The server is normally published through a Cloudfla
 
 ```bash
 make venv            # server/.venv with the server + test requirements
-make test            # server tests + firmware PC tests
+make test            # server tests + firmware PC tests (incl. ESP32 syntax check against stubs)
+make e2e             # browser test of the hardware pages (needs Node + Playwright)
 make run             # development server on http://localhost:5000
 make firmware-setup  # once: ESP32 core + libraries for arduino-cli
 make firmware        # compile both sketches and the build variants

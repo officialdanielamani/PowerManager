@@ -5,7 +5,8 @@
 
 namespace relays {
 bool begin();                  // all relays OFF; false if an I2C board does not answer
-bool write(uint32_t onMask);   // bit k = relay k+1 ON. Re-sent periodically (I2C board glitch recovery)
+bool write(uint32_t onMask);   // bit k = relay k+1 ON. Re-sent periodically with the pin directions: a board that was
+                               // unplugged / lost power works again by itself
 bool ok();                     // the last write to every board was acknowledged
 String summary();              // "GPIO 7 (1) OK, XL9535 @0x20 (2) OK, PCF8574 @0x21 (8) NOT ANSWERING"
 }  // namespace relays

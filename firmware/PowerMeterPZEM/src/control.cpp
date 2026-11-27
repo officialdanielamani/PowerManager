@@ -5,6 +5,7 @@
 
 #include "../config.h"
 #include "outbox.h"
+#include "sensorcheck.h"
 #include "storage.h"
 #include "system.h"
 #include "auxrelay.h"
@@ -15,6 +16,7 @@
 #include "sessstats.h"
 #include "temp.h"
 #include "timekeep.h"
+#include "weekly.h"
 
 namespace control {
 
@@ -156,6 +158,10 @@ uint32_t nextReset() {
       return timekeep::now() - (millis() - g.sess.startMs) / 1000 + c.dur_min * 60;
     return 0;
   }
+  if (c.sess_mode == SESS_WEEKLY && timekeep::valid()) {
+    uint32_t start = g.sess.start ? g.sess.start : timekeep::now() - (millis() - g.sess.startMs) / 1000;
+    return weeklyNext(start, c.wk, c.nwk);
+  }
   if (c.sess_mode == SESS_DAILY && timekeep::valid()) {
     uint32_t start = g.sess.start ? g.sess.start : timekeep::now() - (millis() - g.sess.startMs) / 1000;
     uint32_t day = start - start % 86400;
@@ -208,6 +214,8 @@ static void startSession(bool autoRenew) {
   bump();
 }
 
+static float batPct_ = NAN;  // battery % (BATTERY_ENABLE), measured every 5 s: AUX rules and the state sent to the server ("bat")
+
 static void endSession(const char *reason) {
   // caller holds StateLock. Sends session_end once per session.
   if (g.sess.ended) return;
@@ -232,7 +240,7 @@ void renew(const char *reason, bool autoRenew) {
 
 static const char *stopReasonName(uint8_t why) {
   return why == STOP_VOLTAGE ? "voltage" : why == STOP_TAMPER ? "tamper" : why == STOP_SENSOR ? "sensor"
-       : why == STOP_MANUAL ? "stopped" : why == STOP_TEMP ? "temp" : "disabled";
+       : why == STOP_MANUAL ? "stopped" : why == STOP_TEMP ? "temp" : why == STOP_OTA ? "restart" : "disabled";
 }
 
 // Voltage / tamper / sensor protection with action "end": end the session now (relay off until renewed).
@@ -252,6 +260,46 @@ static const char *ACTION_NAME[] = {"run", "hold", "end"};
 void endSession() {
   StateLock l;
   stopSession(STOP_MANUAL);
+}
+
+// Planned restart (firmware update, docs/protocol.md §14): the session ends (event session_end, reason "restart"), relays off.
+void prepareRestart(bool ota) {
+  (void)ota;
+  {
+    StateLock l;
+    stopSession(STOP_OTA);
+  }
+  relays::write(0);
+}
+
+
+// ---- Reboot asked from the server (Configuration -> General): countdown, then a plain restart. Sessions and kWh continue
+// after it (they are kept in flash); the relays switch off for the restart and come back from the saved wish.
+static uint32_t rebootDueMs_ = 0;
+static bool rebootSet_ = false;
+void scheduleReboot(uint16_t delayS) {
+  StateLock l;
+  rebootDueMs_ = millis() + (uint32_t)delayS * 1000UL;
+  rebootSet_ = true;
+  uint32_t in = delayS;
+  emitEvent("reboot_pending", [](JsonObject o, void *p) { o["in_s"] = *(uint32_t *)p; }, &in);
+  bump();
+}
+bool cancelReboot() {
+  StateLock l;
+  if (!rebootSet_) return false;
+  rebootSet_ = false;
+  emitEvent("reboot_cancelled", nullptr, nullptr);
+  bump();
+  return true;
+}
+bool rebootPending() { return rebootSet_; }
+static void checkReboot() {
+  // caller holds StateLock
+  if (!rebootSet_ || (int32_t)(millis() - rebootDueMs_) < 0) return;
+  rebootSet_ = false;
+  relays::write(0);
+  sys::reboot(500);
 }
 
 void setDisabled(bool disabled) {
@@ -313,11 +361,21 @@ bool resetTrip(const char *src, const char *by) {
   return true;
 }
 
+static uint32_t nextDone_ = 0;  // `at` of the last Schedule Next Session carried out (storage.cpp loadNextDone)
+static bool nextDoneLoaded_ = false;
+static void loadDone() {
+  if (nextDoneLoaded_) return;
+  nextDone_ = store::loadNextDone();
+  nextDoneLoaded_ = true;
+}
+
 void applyConfig(const MeterConfig &c) {
   auxrelay::commit();  // AUX names + automation (staged by net parseConfig)
   StateLock l;
   g.cfg = c;
-  store::saveConfig(c);
+  loadDone();
+  if (g.cfg.next.at && g.cfg.next.at <= nextDone_) g.cfg.next = NextCfg();  // already carried out: a stale copy
+  store::saveConfig(g.cfg);
   // kWh limit raised (or removed) while the session was held at the old limit ("relay off until the session
   // ends"): the session continues. A session that already ENDED stays ended: use Renew to start a new one.
   double used = sessionKwhLimit();
@@ -372,6 +430,7 @@ void stateJson(JsonObject o) {
   if (g.sess.status == SESS_ENDED)
     s["end_reason"] = stopReasonName(g.sess.stopReason);
   if (g.disabled) o["disabled"] = true;
+  if (battery::enabled() && !isnan(batPct_)) o["bat"] = (int)batPct_;
   if (g.voltOut) o["volt_out"] = true;
   if (g.tempHigh) o["temp_high"] = true;
   if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
@@ -477,11 +536,65 @@ static void checkSensor(bool ok, uint8_t err) {
   bump();
 }
 
+// ---- sensor check for Zero & Tare (docs/protocol.md §13.1): raw values, once per second, at least 10 s
+static sc::Check check_;
+
+static void addStat(JsonObject o, const char *key, const sc::Stat &s, int dec) {
+  JsonArray a = o[key].to<JsonArray>();
+  a.add(serialized(String(s.mean, dec)));
+  a.add(serialized(String(s.mn, dec)));
+  a.add(serialized(String(s.mx, dec)));
+}
+static void reportCheck(sc::Result &r) {
+  // caller holds StateLock
+  emitEvent("sensor_check", [](JsonObject o, void *p) {
+    sc::Result *x = (sc::Result *)p;
+    o["ch"] = x->ch;
+    o["n"] = x->n;
+    o["secs"] = x->secs;
+    o["ok"] = x->ok;
+    if (x->why) o["why"] = x->why;
+    addStat(o, "a", x->a, 4);
+    addStat(o, "w", x->w, 2);
+    addStat(o, "v", x->v, 1);
+  }, &r);
+}
+
+bool startSensorCheck(uint8_t ch, uint8_t readings, const char *&err) {
+  StateLock l;
+  err = nullptr;
+  if (ch != 0) {
+    err = "bad_channel";
+    return false;
+  }
+  if (!g.reading.ok) {
+    err = "no_sensor";
+    return false;
+  }
+  if (check_.active()) {
+    err = "busy";
+    return false;
+  }
+  check_.start(0, readings, millis());
+  Serial.printf("[check] sensor check started (%u readings, at least %u s)\n", readings < 10 ? 10 : readings, readings < 10 ? 10 : readings);
+  return true;
+}
+
 static void readSensor() {
   Reading r;
   bool ok = sensor_->read(0, r);
   uint8_t err = sensor_->lastError();
   StateLock l;
+  if (ok) {  // the check sees the RAW values; the zero is subtracted right after (energy register: untouched, it is the truth)
+    if (check_.active()) {
+      sc::Result res;
+      if (check_.feed(r.a, r.w, r.v, millis(), res)) reportCheck(res);
+    }
+    sc::Offsets zo;
+    zo.zeroA = g.cfg.zero_a;
+    zo.zeroW = g.cfg.zero_w;
+    sc::applyZero(r.a, r.w, zo);
+  }
   g.lastReadErr = ok ? (uint8_t)SENS_OK : (err ? err : (uint8_t)SENS_NO_REPLY);
   checkSensor(ok, g.lastReadErr);
   if (ok) {
@@ -558,8 +671,39 @@ void relayTest(bool on) {
 
 static void writeRelays(bool force);
 
+// Schedule Next Session (docs/protocol.md §3): at the set time the new limits and session details replace the current ones, the
+// running session ends and, with Auto renew, a new one starts on them. This meter's clock decides, so it also happens while the
+// meter is offline; the event is sent when it is back and the server then follows.
+static void checkNext() {
+  // caller holds StateLock. Needs a valid clock (NTP or RTC); without one it waits.
+  NextCfg &n = g.cfg.next;
+  if (!n.at || !timekeep::valid() || timekeep::now() < n.at) return;
+  loadDone();
+  nextDone_ = n.at;
+  store::saveNextDone(nextDone_);
+  g.cfg.amp_max = n.amp_max;
+  g.cfg.kwh_max = n.kwh_max;
+  g.cfg.kwh_action = n.kwh_action;
+  g.cfg.sess_mode = n.sess_mode;
+  g.cfg.daily_utc_min = n.daily_utc_min;
+  g.cfg.nwk = n.nwk;
+  for (uint8_t i = 0; i < 7; i++) g.cfg.wk[i] = n.wk[i];
+  g.cfg.dur_min = n.dur_min;
+  g.cfg.auto_renew = n.auto_renew;
+  uint32_t at = n.at;
+  bool autoRenew = n.auto_renew;
+  g.cfg.next = NextCfg();
+  store::saveConfig(g.cfg);
+  if (autoRenew) renew("next", false);  // the old session ends, the new one starts on the new settings
+  else stopSession(STOP_MANUAL);          // ends; the relay stays off until Renew
+  emitEvent("next_session", [](JsonObject o, void *p) { o["at"] = *(uint32_t *)p; }, &at);
+  bump();
+}
+
 static void checkRules(bool firstPass) {
   StateLock l;
+  checkNext();
+  checkReboot();
   // No session starts on its own after pairing: the admin starts the first one with Renew.
 
   // Over-current (latched until reset).
@@ -708,19 +852,26 @@ static void writeRelays(bool force) {
   }
 }
 
+static void batteryTick() {
+  if (!battery::enabled()) return;
+  static uint32_t atMs = 0;
+  static float sent = NAN;
+  if (!isnan(batPct_) && millis() - atMs < 5000) return;
+  atMs = millis();
+  batPct_ = battery::percent(battery::volts());
+  if (isnan(sent) || fabsf(batPct_ - sent) >= 2) {  // the server notices a low battery: send the state when it moved
+    sent = batPct_;
+    StateLock l;
+    bump();
+  }
+}
+
 // AUX relay automation: live values of the measured line for the event rules.
 static void auxTick() {
+  batteryTick();
   if (!auxrelay::count()) return;
   auxrelay::Inputs in;
-  if (battery::enabled()) {  // battery % for the AUX event rules, measured every 5 s
-    static uint32_t batAtMs = 0;
-    static float batPct = NAN;
-    if (isnan(batPct) || millis() - batAtMs > 5000) {
-      batAtMs = millis();
-      batPct = battery::percent(battery::volts());
-    }
-    in.batPct = batPct;
-  }
+  in.batPct = batPct_;
   {
     StateLock l;
     in.nch = 1;
@@ -728,6 +879,7 @@ static void auxTick() {
     in.disabled = g.disabled;
     in.tamper = g.tamper;
     in.ups = g.ups;
+    in.reboot = rebootSet_;
     in.voltOut = g.voltOut;
     in.noWifi = g.net <= NET_WIFI_CONNECTING;
     in.noServer = g.paired && g.offlineSinceMs != 0;
@@ -856,6 +1008,11 @@ void task(void *) {
     checkTamper();
     checkUps();
     checkRules(first);
+    {  // a sensor check that cannot collect enough valid readings ends as failed after 60 s
+      StateLock l;
+      sc::Result res;
+      if (check_.tick(millis(), res)) reportCheck(res);
+    }
     sys::crumb(sys::CR_CONTROL, "aux");
     auxTick();
     first = false;

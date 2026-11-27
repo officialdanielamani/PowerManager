@@ -60,7 +60,7 @@ var PM = (function () {
                 ended_tamper: ['danger', 'Session ended (tamper)'], ended_sensor: ['danger', 'Session ended (sensor error)'], ended_temp: ['danger', 'Session ended (temperature)'], ended_: ['warning', 'Session ended'], ended_disabled: ['secondary', 'Session ended (disabled)'],
                 disabled: ['dark', 'Disabled'], none: ['warning', 'No session (Renew to start)'],
                 independent_mixed: ['info', 'Per channel'], ended_stopped: ['secondary', 'Session ended (End)'],
-                ended_mode: ['secondary', 'Session ended (mode changed)']};
+                ended_mode: ['secondary', 'Session ended (mode changed)'], ended_ch_disabled: ['dark', 'Session ended (channel disabled)']};
   var INCIDENT = {power: '<span class="badge text-bg-warning"><i class="bi bi-lightning"></i> No power</span>',
                   trip: '<span class="badge text-bg-danger"><i class="bi bi-exclamation-octagon"></i> Trip</span>',
                   tamper: '<span class="badge pm-bg-purple"><i class="bi bi-unlock"></i> Tamper</span>',
@@ -78,6 +78,12 @@ var PM = (function () {
     if (!tared || !m.tare) return m;
     var o = Object.assign({}, m);
     o.w = m.w_tared; o.kwh = m.kwh_tared; o.cost = m.cost_tared; o.reading = m.reading_tared;
+    if (m.mc && m.channels) {  // each channel has its own tare
+      o.channels = m.channels.map(function (c) {
+        return c.tare ? Object.assign({}, c, {w: c.w_tared, a: c.a_tared, kwh: c.kwh_tared == null ? c.kwh : c.kwh_tared,
+                                             cost: c.cost_tared == null ? c.cost : c.cost_tared}) : c;
+      });
+    }
     return o;
   }
 
@@ -112,7 +118,7 @@ var PM = (function () {
         (a.override ? '<span class="badge text-bg-warning ms-1" title="Switched by hand: the automation takes over again at its next change">overridden</span>' : '') : '';
       var canSwitch = admin && a.can_override;
       return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100"><div class="d-flex align-items-center gap-2">' +
-        '<span class="fw-semibold">' + esc(a.name) + '</span><span class="small text-body-secondary text-nowrap">relay ' + esc(a.relay) + '</span>' + modeBadge +
+        '<span class="fw-semibold">' + esc(a.name) + '</span><span class="small text-body-secondary text-nowrap">' + esc(a.relay_label || 'relay ' + a.relay) + '</span>' + modeBadge +
         '<span class="ms-auto">' + chBadge({relay_on: a.on}) + '</span></div>' +
         (a.desc && a.mode !== 'manual' ? '<div class="small text-body-secondary mt-1">' + esc(a.desc) + '</div>' : '') +
         (canSwitch ? '<div class="d-flex gap-1 mt-2"><button class="btn btn-sm btn-success" data-mc-action="aux_on" data-i="' + a.i + '">ON</button>' +
@@ -138,19 +144,26 @@ var PM = (function () {
           (c.sid ? '#' + c.sid + ' · ' : '') + fmt(c.kwh, 3) + ' / ' + (c.kwh_max || '∞') + ' kWh' + (c.cost ? ' · ' + esc(c.cost) : '') +
           '<div class="text-body-secondary">' + esc(c.session_desc || '') + (c.next_reset ? ' · next reset ' + esc(c.next_reset) : '') + '</div></div>';
       }
+      if (c.disabled) {   // disabled by an admin / manager: grey, no session, no buttons (not the same as a disabled meter)
+        return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100 bg-body-tertiary" style="opacity:.75">' +
+          '<div class="d-flex align-items-center gap-2"><span class="fw-semibold text-truncate">' + esc(c.name) + '</span><span class="ms-auto"><span class="badge text-bg-dark">Disabled</span></span></div>' +
+          '<div class="d-flex flex-wrap gap-3 small mt-1 text-body-secondary"><span><span class="fs-5 fw-semibold">' + (c.w == null ? '–' : c.w) + '</span> W</span><span>' + fmt(c.a, 3) + ' A</span><span>' + fmt(c.e, 3) + ' kWh total</span></div>' +
+          '<div class="small text-body-secondary mt-1">This channel is disabled: no session, relay off.</div></div></div>';
+      }
       return '<div class="col-12 col-md-6 col-xl-4"><div class="border rounded p-2 h-100">' +
         '<div class="d-flex align-items-center gap-2"><span class="fw-semibold text-truncate">' + esc(c.name) + '</span>' + revBadge(c) + '<span class="ms-auto">' + chBadge(c) + '</span></div>' +
         (c.reversed ? '<div class="small text-danger mt-1"><i class="bi bi-exclamation-triangle me-1"></i>Negative power: the current clamp may be fitted the wrong way round. Turn it over (the arrow / K→L should point to the load); its kWh is not counted until then.</div>' : '') +
         '<div class="d-flex flex-wrap gap-3 small mt-1"><span><span class="fs-5 fw-semibold">' + (c.w == null ? '–' : c.w) + '</span> W</span><span>' + fmt(c.a, 3) + ' A</span><span>PF ' + fmt(c.pf, 2) + '</span>' +
         '<span class="text-body-secondary">' + fmt(c.e, 3) + ' kWh total</span>' + (c.amp_max ? '<span class="text-body-secondary">max ' + c.amp_max + ' A</span>' : '') + '</div>' +
         (c.relay_block && !c.relay_on ? '<div class="small text-body-secondary">Off: ' + esc(c.relay_block) + '</div>' : '') + sess +
+        (c.next_at ? '<div class="small text-body-secondary mt-1"><i class="bi bi-calendar-event me-1"></i>New session settings on ' + esc(c.next_at_local) + '</div>' : '') +
         (admin ? '<div class="d-flex flex-wrap gap-1 mt-2">' +
           (blocked ? '<button class="btn btn-sm btn-success" disabled title="Blocked until the session is renewed / trip is reset"><i class="bi bi-toggle-on me-1"></i>ON</button>'
                    : btn('relay_on', 'btn-success', 'bi-toggle-on', 'ON')) +
           btn('relay_off', 'btn-outline-secondary', 'bi-toggle-off', 'OFF') +
           (c.tripped ? btn('reset_trip', 'btn-outline-danger', 'bi-shield-check', 'Reset Trip') : '') +
-          (ind ? btn('renew', 'btn-outline-primary', 'bi-arrow-repeat', 'Renew', 'Start a new session on ' + c.name + '?') +
-                 btn('end', 'btn-outline-danger', 'bi-stop-circle', 'End', 'End the session of ' + c.name + ' now? Its relay stays off until renewed.') : '') +
+          (ind ? btn('renew', 'btn-outline-primary', 'bi-arrow-repeat', 'Renew Now', 'Start a new session on ' + c.name + '?') +
+                 btn('end', 'btn-outline-danger', 'bi-stop-circle', 'End session', 'End the session of ' + c.name + ' now? Its relay stays off until renewed.') : '') +
           '</div>' : '') + '</div></div>';
     }).join('') + '</div>';
   }
@@ -442,7 +455,7 @@ var PM = (function () {
           (function check() {
             fetch(opt.deviceInfo, {credentials: 'same-origin'}).then(function (x) { return x.json(); }).then(function (d) {
               if (d.at && d.at !== prev.at) return (body.innerHTML = infoTable(d));
-              if (++tries >= 15) return (body.innerHTML = '<div class="alert alert-warning">The meter did not answer (firmware older than 0.5?).</div>' + (prev.at ? infoTable(prev) : ''));
+              if (++tries >= 15) return (body.innerHTML = '<div class="alert alert-warning">The meter did not answer.</div>' + (prev.at ? infoTable(prev) : ''));
               setTimeout(check, 1000);
             });
           })();
@@ -487,8 +500,7 @@ var PM = (function () {
     }
 
     // ---- Get Data Now: ask the meter for a reading and wait for it to arrive
-    var gd = document.getElementById('btnGetData');
-    if (gd) gd.addEventListener('click', function () {
+    document.querySelectorAll('.btn-get-data').forEach(function (gd) { gd.addEventListener('click', function () {
       var before = lastLive.reading_ts || 0, html = gd.innerHTML;
       gd.disabled = true; gd.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Waiting…';
       function done(msg, kind) { gd.disabled = false; gd.innerHTML = html; if (msg) toast(msg, kind); }
@@ -503,7 +515,7 @@ var PM = (function () {
           }).catch(function () { setTimeout(check, 1000); });
         })();
       });
-    });
+    }); });
 
     // ---- Auto refresh: while this page is open, ask the meter for a fresh reading once a minute (the panel
     // itself updates every 5 s as soon as new data arrives). Skipped when the tab is hidden, the meter is
@@ -516,14 +528,15 @@ var PM = (function () {
     }, 60000);
 
     // history
-    var state = {range: '1d', series: 'w', from: '', to: '', ch: 0};
+    var state = {range: '1d', series: 'w', from: '', to: '', chs: [0], total: false};
+    var chColors = ['#0d6efd', '#fd7e14', '#198754', '#dc3545', '#6f42c1', '#20c997', '#d63384', '#6c757d', '#0dcaf0', '#ffc107', '#6610f2', '#795548', '#009688', '#e83e8c', '#17a2b8', '#343a40'];
     var chart = null, last = null;
     var colors = {w: '#0d6efd', a: '#fd7e14', v: '#198754', kwh: '#6f42c1'};
     var units = {w: 'W', a: 'A', v: 'V', kwh: 'kWh'};
     var tempColors = ['#dc3545', '#20c997', '#6610f2', '#fd7e14', '#0dcaf0', '#d63384', '#6c757d', '#198754'];
 
     function query() {
-      var q = 'range=' + state.range + '&ch=' + state.ch + (tared ? '&tared=1' : '');
+      var q = 'range=' + state.range + '&ch=' + state.chs.join(',') + (state.total ? '&total=1' : '') + (tared ? '&tared=1' : '');
       if (state.range === 'custom') {
         q += '&from=' + encodeURIComponent(state.from) + '&to=' + encodeURIComponent(state.to);
         if (state.startTs && state.endTs) q += '&start_ts=' + state.startTs + '&end_ts=' + state.endTs;
@@ -559,8 +572,45 @@ var PM = (function () {
       var md = p(d.getUTCDate()) + '/' + p(d.getUTCMonth() + 1);
       return span <= 86400 ? hm : (span <= 7 * 86400 ? md + ' ' + hm : md + '/' + d.getUTCFullYear());
     }
+    function drawMulti() {   // several channels and / or their total
+      var s = state.series, span = last.end - last.start, off = last.tz_offset_s;
+      var lines = last.series.map(function (x, i) { return {name: x.name, pts: x.points, stats: x.stats, color: chColors[x.ch % chColors.length]}; });
+      if (last.total) lines.push({name: 'Total', pts: last.total.points, stats: last.total.stats, color: '#000000', total: true});
+      var all = {};
+      lines.forEach(function (l) { l.pts.forEach(function (p) { all[Math.round(p.t * 10) / 10] = p.t; }); });
+      var keys = Object.keys(all).map(Number).sort(function (a, b) { return a - b; });
+      var labels = keys.map(function (k) { return label(all[k], span, off); }), datasets;
+      function series(l, f) { var m = {}; l.pts.forEach(function (p) { m[Math.round(p.t * 10) / 10] = p[f]; }); return keys.map(function (k) { return m[k] == null ? null : m[k]; }); }
+      if (s === 'v') lines = lines.slice(0, 1);   // one voltage for the whole meter
+      var bars = s === 'kwh' && last.source !== 'raw';
+      datasets = lines.map(function (l) {
+        var f = s === 'kwh' ? (last.source === 'raw' ? 'kwh_cum' : 'kwh') : s;
+        var ds = {label: l.name + (s === 'kwh' ? ' (kWh)' : ' (' + units[s] + ')'), data: series(l, f), borderColor: l.color, backgroundColor: l.color + (bars ? 'cc' : '22'), pointRadius: 0,
+                  borderWidth: l.total ? 3 : 2, tension: .2, spanGaps: true};
+        if (bars) ds.type = l.total ? 'line' : 'bar';
+        return ds;
+      });
+      if (chart) chart.destroy();
+      chart = new Chart(document.getElementById('chart'), {
+        type: 'line', data: {labels: labels, datasets: datasets},
+        options: {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'index', intersect: false},
+                  scales: {x: {ticks: {maxTicksLimit: 10, autoSkip: true}}, y: {beginAtZero: s !== 'v'}},
+                  plugins: {legend: {display: true, labels: {boxWidth: 12}}}}
+      });
+      var html = '<div class="col-12"><div class="table-responsive"><table class="table table-sm mb-1"><thead><tr><th></th><th>Power W (min · avg · max)</th><th>Current A (min · avg · max)</th><th>Energy kWh</th></tr></thead><tbody>';
+      lines.concat(s === 'v' ? [] : []).forEach(function (l) {
+        var st = l.stats || {}, w = st.w || {}, a = st.a || {};
+        html += '<tr' + (l.total ? ' class="fw-semibold"' : '') + '><td><span class="badge" style="background:' + l.color + '">&nbsp;</span> ' + esc(l.name) + '</td><td>' + fmt(w.min, 1) + ' · ' + fmt(w.avg, 1) + ' · ' + fmt(w.max, 1) + '</td><td>' +
+          fmt(a.min, 3) + ' · ' + fmt(a.avg, 3) + ' · ' + fmt(a.max, 3) + '</td><td>' + fmt(st.kwh, 3) + '</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+      if (last.cost) html += '<div class="col-12 small">Energy of the selected channels: <b>' + fmt((last.stats || {}).kwh, 3) + '</b> kWh · <b>' + esc(last.cost) + '</b></div>';
+      document.getElementById('stats').innerHTML = html;
+      document.getElementById('rangeLabel').textContent = last.start_local + ' → ' + last.end_local + ' (' + {raw: 'raw', h: 'hourly', d: 'daily'}[last.source] + ')';
+    }
     function draw() {
       if (!last) return;
+      if (last.multi && state.series !== 'temp' && state.series !== 'hum') return drawMulti();
       var s = state.series, span = last.end - last.start, off = last.tz_offset_s;
       var pts = last.points, labels = pts.map(function (p) { return label(p.t, span, off); });
       var datasets;
@@ -631,8 +681,22 @@ var PM = (function () {
         b.classList.add('active'); state.series = b.dataset.series; draw();
       });
     });
-    var chSel = document.getElementById('chSel');
-    if (chSel) chSel.addEventListener('change', function () { state.ch = +chSel.value; load(); });
+    var chPick = document.getElementById('chPick');
+    if (chPick) {   // channels of the chart: any number of them, and / or their total
+      var cbs = chPick.querySelectorAll('.ch-cb'), tot = document.getElementById('chTotal');
+      var apply = function () {
+        state.chs = Array.prototype.filter.call(cbs, function (c) { return c.checked; }).map(function (c) { return +c.value; });
+        if (!state.chs.length) { state.chs = [+cbs[0].value]; cbs[0].checked = true; }
+        state.total = tot.checked;
+        var names = Array.prototype.filter.call(cbs, function (c) { return c.checked; }).map(function (c) { return c.parentNode.textContent.trim(); });
+        document.getElementById('chPickBtn').textContent = (names.length > 2 ? names.length + ' channels' : names.join(', ')) + (state.total ? ' + total' : '');
+        load();
+      };
+      cbs.forEach(function (c) { c.addEventListener('change', apply); });
+      tot.addEventListener('change', apply);
+      document.getElementById('chAll').addEventListener('click', function () { cbs.forEach(function (c) { c.checked = true; }); apply(); });
+      document.getElementById('chNone').addEventListener('click', function () { cbs.forEach(function (c, i) { c.checked = i === 0; }); tot.checked = false; apply(); });
+    }
     load();
     setInterval(function () { if (state.range === '1h' || state.range === '1d') load(); }, 60000);
   }
@@ -687,3 +751,15 @@ var PM = (function () {
   return {post: post, poll: poll, toast: toast, esc: esc, bindActions: bindActions, updateMeterCard: updateMeterCard, meterInfo: meterInfo,
           dashboard: dashboard, sessionTime: sessionTime, dur: dur};
 })();
+
+// Days-of-the-week picker (templates/meters/_week.html): "All days" ticks every day; a day's time is only editable while it is ticked.
+document.addEventListener('change', function (e) {
+  var t = e.target;
+  if (!t.classList) return;
+  var box = t.closest && t.closest('.pm-week');
+  if (!box) return;
+  if (t.classList.contains('pm-wk-all')) box.querySelectorAll('.pm-wk-day').forEach(function (c) { c.checked = t.checked; });
+  var days = box.querySelectorAll('.pm-wk-day');
+  box.querySelector('.pm-wk-all').checked = box.querySelectorAll('.pm-wk-day:checked').length === days.length;
+  days.forEach(function (c) { box.querySelector('.pm-wk-time[data-day=' + c.dataset.day + ']').disabled = !c.checked; });
+});

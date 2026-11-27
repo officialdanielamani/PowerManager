@@ -6,6 +6,8 @@
 #include "../config.h"
 #include "outbox.h"
 #include "rbamp.h"
+#include "sensorcheck.h"
+#include "hwprofile.h"
 #include "relays.h"
 #include "storage.h"
 #include "system.h"
@@ -15,6 +17,7 @@
 #include "sessstats.h"
 #include "temp.h"
 #include "timekeep.h"
+#include "weekly.h"
 
 namespace control {
 
@@ -90,6 +93,75 @@ double slotKwh(uint8_t s) {
   return k > 0 ? k : 0;
 }
 
+// ---- zero / tare (docs/protocol.md §13): zero is applied right after every sensor read, tare acts on the limits
+static sc::Offsets offs(uint8_t i) {
+  const ChConfig &c = g.cfg.ch[i];
+  sc::Offsets o;
+  o.zeroA = c.zeroA;
+  o.zeroW = c.zeroW;
+  o.tareA = c.tareA;
+  o.tareW = c.tareW;
+  return o;
+}
+static bool slotHasTare(uint8_t slot) {  // a channel governed by this session slot has a tare
+  for (uint8_t i = 0; i < g.nch && i < MC_MAX_CH; i++)
+    if (slotOf(i) == slot && (g.cfg.ch[i].tareW > 0 || g.cfg.ch[i].tareA > 0)) return true;
+  return false;
+}
+static double slotKwhTared(uint8_t s) {
+  double k = slotEnergy(s) - g.sess[s].e0 - g.sess[s].tareKwh;
+  return k > 0 ? k : 0;
+}
+static double slotKwhLimit(uint8_t s) {  // the kWh the limit is compared with: tared when "tare_limits" is on
+  if (g.cfg.tare_limits) return slotKwhTared(s);
+  double k = slotEnergy(s) - g.sess[s].e0;
+  return k > 0 ? k : 0;
+}
+
+static sc::Check check_;                       // running sensor check (one at a time)
+static float rawA_[MC_MAX_CH], rawW_[MC_MAX_CH];  // the latest read of every channel before the zero
+
+static void addStat(JsonObject o, const char *key, const sc::Stat &s, int dec) {
+  JsonArray a = o[key].to<JsonArray>();
+  a.add(serialized(String(s.mean, dec)));
+  a.add(serialized(String(s.mn, dec)));
+  a.add(serialized(String(s.mx, dec)));
+}
+static void reportCheck(sc::Result &r) {
+  // caller holds StateLock
+  emitEvent("sensor_check", [](JsonObject o, void *p) {
+    sc::Result *x = (sc::Result *)p;
+    o["ch"] = x->ch;
+    o["n"] = x->n;
+    o["secs"] = x->secs;
+    o["ok"] = x->ok;
+    if (x->why) o["why"] = x->why;
+    addStat(o, "a", x->a, 4);
+    addStat(o, "w", x->w, 2);
+    addStat(o, "v", x->v, 1);
+  }, &r);
+}
+
+bool startSensorCheck(uint8_t ch, uint8_t readings, const char *&err) {
+  StateLock l;
+  err = nullptr;
+  if (!g.nch || ch >= g.nch) {
+    err = "bad_channel";
+    return false;
+  }
+  if (!rbamp::present() || !g.readOk) {
+    err = "no_sensor";
+    return false;
+  }
+  if (check_.active()) {
+    err = "busy";
+    return false;
+  }
+  check_.start(ch, readings, millis());
+  Serial.printf("[check] CH%u: sensor check started (%u readings, at least %u s)\n", ch + 1, readings < 10 ? 10 : readings, readings < 10 ? 10 : readings);
+  return true;
+}
+
 static uint16_t wantMask() {
   uint16_t m = 0;
   for (uint8_t i = 0; i < MC_MAX_CH && i < 16; i++)
@@ -119,6 +191,10 @@ uint32_t nextReset(uint8_t slot) {
     if (timekeep::valid()) return timekeep::now() - (millis() - s.startMs) / 1000 + c.dur_min * 60;
     return 0;
   }
+  if (c.mode == SESS_WEEKLY && timekeep::valid()) {
+    uint32_t start = s.start ? s.start : timekeep::now() - (millis() - s.startMs) / 1000;
+    return weeklyNext(start, c.wk, c.nwk);
+  }
   if (c.mode == SESS_DAILY && timekeep::valid()) {
     uint32_t start = s.start ? s.start : timekeep::now() - (millis() - s.startMs) / 1000;
     uint32_t day = start - start % 86400;
@@ -127,6 +203,20 @@ uint32_t nextReset(uint8_t slot) {
     return t;
   }
   return 0;
+}
+
+// Schedule Next Session already carried out (see storage.cpp loadNextDone): a stale copy in a new configuration is dropped.
+static uint32_t nextDone_[MC_MAX_CH + 1];
+static bool nextDoneLoaded_ = false;
+static void dropDoneNext(MeterConfig &c) {
+  // caller holds StateLock
+  if (!nextDoneLoaded_) {
+    store::loadNextDone(nextDone_);
+    nextDoneLoaded_ = true;
+  }
+  if (c.next.at && c.next.at <= nextDone_[MC_MAX_CH]) c.next = NextCfg();
+  for (uint8_t i = 0; i < MC_MAX_CH; i++)
+    if (c.ch[i].next.at && c.ch[i].next.at <= nextDone_[i]) c.ch[i].next = NextCfg();
 }
 
 static bool durationElapsedNoClock(uint8_t slot) {
@@ -148,6 +238,8 @@ struct SessCtx {
 // channel's own). RAM only, sent with session_end.
 static SessStats stats_[MC_MAX_CH];
 
+static float batPct_ = NAN;  // battery % (BATTERY_ENABLE), measured every 5 s: AUX rules and the state sent to the server ("bat")
+
 static void startSession(uint8_t slot, bool autoRenew) {
   // caller holds StateLock
   SessionState &s = g.sess[slot];
@@ -161,10 +253,11 @@ static void startSession(uint8_t slot, bool autoRenew) {
   s.over = false;
   s.ended = false;
   s.stopReason = STOP_NONE;
+  s.tareKwh = 0;
   store::saveSession(slot, s);
   saveEnergy();
   stats_[slot].reset();
-  SessCtx ctx = {s.sid, (int8_t)(indep() ? slot : -1), autoRenew, slotKwhMax(slot), nullptr, 0};
+  SessCtx ctx = {s.sid, (int8_t)(indep() ? slot : -1), autoRenew, slotKwhMax(slot), nullptr, 0, nullptr};
   emitEvent("session_start", [](JsonObject o, void *p) {
     SessCtx *c = (SessCtx *)p;
     o["sid"] = c->sid;
@@ -201,6 +294,9 @@ static const char *stopReasonName(uint8_t why) {
     case STOP_MANUAL: return "stopped";
     case STOP_MODE: return "mode";
     case STOP_TEMP: return "temp";
+    case STOP_HW: return "hw_change";
+    case STOP_OTA: return "restart";
+    case STOP_CHDIS: return "ch_disabled";
     default: return "disabled";
   }
 }
@@ -223,6 +319,7 @@ static void stopAll(StopReason why) {
 static void renewSlot(uint8_t slot, const char *reason, bool autoRenew) {
   // caller holds StateLock
   if (g.disabled) return;  // a disabled meter has no sessions
+  if (indep() && slot < MC_MAX_CH && g.cfg.ch[slot].disabled) return;  // a disabled channel has none either
   if (g.sess[slot].sid) endSession(slot, reason);  // no-op if a limit already ended it
   startSession(slot, autoRenew);
 }
@@ -239,6 +336,55 @@ void endSessions(int8_t ch) {
   StateLock l;
   if (indep() && ch >= 0 && ch < g.nch) stopSlot(ch, STOP_MANUAL);
   else stopAll(STOP_MANUAL);
+}
+
+bool anySessionRunning() {
+  StateLock l;
+  for (uint8_t i = 0; i < sessSlots(); i++)
+    if (g.sess[i].sid && g.sess[i].status != SESS_ENDED && g.sess[i].status != SESS_EXPIRED) return true;
+  return false;
+}
+
+void prepareRestart(bool ota) {
+  {
+    StateLock l;
+    stopAll(ota ? STOP_OTA : STOP_HW);  // every running session ends (event session_end, reason hw_change / restart)
+    saveEnergy();
+    saveFlags();
+  }
+  relays::write(0);
+}
+
+
+// ---- Reboot asked from the server (Configuration -> General): countdown, then a plain restart. Sessions and kWh continue
+// after it (they are kept in flash); the relays switch off for the restart and come back from the saved wish.
+static uint32_t rebootDueMs_ = 0;
+static bool rebootSet_ = false;
+void scheduleReboot(uint16_t delayS) {
+  StateLock l;
+  rebootDueMs_ = millis() + (uint32_t)delayS * 1000UL;
+  rebootSet_ = true;
+  uint32_t in = delayS;
+  emitEvent("reboot_pending", [](JsonObject o, void *p) { o["in_s"] = *(uint32_t *)p; }, &in);
+  bump();
+}
+bool cancelReboot() {
+  StateLock l;
+  if (!rebootSet_) return false;
+  rebootSet_ = false;
+  emitEvent("reboot_cancelled", nullptr, nullptr);
+  bump();
+  return true;
+}
+bool rebootPending() { return rebootSet_; }
+static void checkReboot() {
+  // caller holds StateLock
+  if (!rebootSet_ || (int32_t)(millis() - rebootDueMs_) < 0) return;
+  rebootSet_ = false;
+  saveEnergy();
+  saveFlags();
+  relays::write(0);
+  sys::reboot(500);
 }
 
 void setDisabled(bool disabled) {
@@ -263,6 +409,7 @@ bool setRelay(uint8_t ch, bool on, const char *src, const char *&err) {
   if (on) {
     SessStatus st = g.sess[slotOf(ch)].status;
     if (g.disabled) err = "disabled";
+    else if (g.cfg.ch[ch].disabled) err = "ch_disabled";
     else if (g.ch[ch].tripped) err = "tripped";
     else if (!g.sess[slotOf(ch)].sid) err = "no_session";
     else if (st == SESS_QUOTA) err = "quota_exceeded";
@@ -325,6 +472,8 @@ bool resetTrip(int8_t ch, const char *src, const char *by) {
 void applyConfig(const MeterConfig &c) {
   auxrelay::commit();  // AUX names + automation (staged by net parseConfig)
   StateLock l;
+  bool wasDisabled[MC_MAX_CH];
+  for (uint8_t i = 0; i < MC_MAX_CH; i++) wasDisabled[i] = g.cfg.ch[i].disabled;
   if (c.mode != g.cfg.mode) {
     // Shared <-> Independent: the running session(s) end; press Renew to start in the new mode.
     stopAll(STOP_MODE);
@@ -341,12 +490,23 @@ void applyConfig(const MeterConfig &c) {
   } else {
     g.cfg = c;
   }
-  store::saveConfig(c);
+  dropDoneNext(g.cfg);
+  store::saveConfig(g.cfg);
+  // A channel that has just been disabled: its session ends (independent mode; in shared mode the one session goes on for the
+  // other channels), its relay goes off and does not come back by itself when the channel is enabled again.
+  for (uint8_t i = 0; i < g.nch && i < MC_MAX_CH; i++) {
+    if (!g.cfg.ch[i].disabled || wasDisabled[i]) continue;
+    if (indep()) stopSlot(i, STOP_CHDIS);
+    if (g.ch[i].wantOn) {
+      g.ch[i].wantOn = false;
+      saveFlags();
+    }
+  }
   // kWh limit raised (or removed) while a session was held at the old limit ("relay off until the session
   // ends"): that session continues. A session that already ENDED stays ended: use Renew to start a new one.
   for (uint8_t i = 0; i < sessSlots(); i++) {
     SessionState &ss = g.sess[i];
-    double used = slotEnergy(i) - ss.e0;
+    double used = slotKwhLimit(i);
     float max = slotKwhMax(i);
     bool room = max <= 0 || used < max;
     if (!ss.sid || !room || !((ss.status == SESS_QUOTA && !ss.ended) || ss.over)) continue;
@@ -381,6 +541,7 @@ static void sessJson(JsonObject s, uint8_t slot) {
   if (ss.start) s["start"] = ss.start;
   double k = slotEnergy(slot) - ss.e0;
   s["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+  if (slotHasTare(slot)) s["kwh_t"] = serialized(String(slotKwhTared(slot), 4));  // the value the limit uses (tare_limits)
   s["max"] = num4(slotKwhMax(slot));
   s["status"] = sessStatusName(ss.status);
   if (ss.over) s["over"] = true;
@@ -410,6 +571,7 @@ void stateJson(JsonObject o) {
   if (ups::enabled()) o["ups"] = g.ups;
   o["ac"] = g.ac;
   if (g.disabled) o["disabled"] = true;
+  if (battery::enabled() && !isnan(batPct_)) o["bat"] = (int)batPct_;
   if (g.voltOut) o["volt_out"] = true;
   if (g.tempHigh) o["temp_high"] = true;
   if (g.sensorErr) o["sensor_err"] = SENS_NAME[g.sensorErr % 3];
@@ -506,12 +668,14 @@ static void addSessionProgress(JsonDocument &doc) {
       o["sid"] = g.sess[i].sid;
       double k = slotEnergy(i) - g.sess[i].e0;
       o["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+      if (slotHasTare(i)) o["kwh_t"] = serialized(String(slotKwhTared(i), 4));
     }
   } else {
     JsonObject se = doc["s"].to<JsonObject>();
     se["sid"] = g.sess[0].sid;
     double k = slotEnergy(0) - g.sess[0].e0;
     se["kwh"] = serialized(String(k > 0 ? k : 0, 4));
+    if (slotHasTare(0)) se["kwh_t"] = serialized(String(slotKwhTared(0), 4));
   }
 }
 
@@ -754,6 +918,16 @@ static void readSensor() {
     g.hz = smp.hz;
     g.readAtMs = millis();
     g.sensorEverOk = true;
+    for (uint8_t i = 0; i < g.nch; i++) {  // zero: the sensor offset is subtracted right after the read (§13.4)
+      rawA_[i] = smp.a[i];
+      rawW_[i] = smp.w[i];
+      sc::applyZero(smp.a[i], smp.w[i], offs(i));
+    }
+    if (check_.active()) {  // sensor check: the RAW values, once per second
+      sc::Result res;
+      if (check_.channel() >= g.nch) check_.cancel();
+      else if (check_.feed(rawA_[check_.channel()], rawW_[check_.channel()], smp.v, millis(), res)) reportCheck(res);
+    }
     for (uint8_t i = 0; i < g.nch; i++) {
       g.ch[i].r.a = smp.a[i];
       g.ch[i].r.w = smp.w[i];
@@ -782,14 +956,15 @@ static void readSensor() {
   for (uint8_t i = 0; i < g.nch; i++) {
     ChState &c = g.ch[i];
     float lim = g.cfg.ch[i].amp_max;
-    if (!c.tripped && lim > 0 && c.r.a > lim) {
+    float aNow = g.cfg.tare_limits ? sc::taredCurrent(c.r.a, offs(i)) : c.r.a;  // tared current when "tare_limits" is on
+    if (!c.tripped && lim > 0 && aNow > lim) {
       if (++c.overReads >= TRIP_CONFIRM_READS) {
         c.tripped = true;
         saveFlags();
         struct Ctx {
           uint8_t ch;
           float a, limit;
-        } ctx = {i, c.r.a, lim};
+        } ctx = {i, aNow, lim};
         emitEvent("overcurrent", [](JsonObject o, void *p) {
           Ctx *x = (Ctx *)p;
           o["ch"] = x->ch;
@@ -826,13 +1001,21 @@ static void energyTick() {
     bool valid = false;
     if (rbamp::periodFinish(avg, valid) && valid && pendingDt > 0 && pendingDt < 10000) {
       StateLock l;
-      for (uint8_t i = 0; i < g.nch; i++) g.ch[i].e += (double)avg[i] * pendingDt / 3.6e9;  // W x ms -> kWh
+      for (uint8_t i = 0; i < g.nch; i++) {
+        sc::Offsets o = offs(i);
+        float w = avg[i] > o.zeroW ? avg[i] - o.zeroW : 0;  // the zero is subtracted from the energy too
+        g.ch[i].e += (double)w * pendingDt / 3.6e9;           // W x ms -> kWh
+        SessionState &ss = g.sess[slotOf(i)];
+        if (ss.sid && !ss.ended && o.tareW > 0) ss.tareKwh += sc::tareEnergyKwh(w, o, pendingDt);  // the tare's share
+      }
     }
   }
   if (now - lastSaveMs >= ENERGY_SAVE_MS) {
     lastSaveMs = now;
     StateLock l;
     saveEnergy();
+    for (uint8_t sl = 0; sl < sessSlots(); sl++)  // the tare's share must survive a restart (only sessions with a tare: flash wear)
+      if (g.sess[sl].sid && slotHasTare(sl)) store::saveSession(sl, g.sess[sl]);
   }
 }
 
@@ -864,15 +1047,70 @@ static void noteRelaySwitch(uint8_t ch, const char *block) {
   }
 }
 
+// Schedule Next Session (docs/protocol.md §3): at the set time the new limits and session details replace the current ones, the
+// running session ends and, with Auto renew, a new one starts on them. This meter's clock decides, so it also happens while the
+// meter is offline; the event is sent when it is back and the server then follows.
+struct NextCtx {
+  int8_t ch;
+  uint32_t at;
+};
+static void runNext(int8_t ch) {
+  // caller holds StateLock
+  NextCfg n = ch >= 0 ? g.cfg.ch[ch].next : g.cfg.next;
+  uint8_t slot = ch >= 0 ? ch : 0;
+  if (!nextDoneLoaded_) {
+    store::loadNextDone(nextDone_);
+    nextDoneLoaded_ = true;
+  }
+  nextDone_[ch >= 0 ? ch : MC_MAX_CH] = n.at;
+  store::saveNextDone(nextDone_);
+  if (ch >= 0) {
+    ChConfig &cc = g.cfg.ch[ch];
+    cc.amp_max = n.amp_max;
+    cc.kwh_max = n.kwh_max;
+    cc.kwh_action = n.kwh_action;
+    cc.sess = n.sess;
+    cc.next = NextCfg();
+  } else {
+    g.cfg.kwh_max = n.kwh_max;
+    g.cfg.kwh_action = n.kwh_action;
+    g.cfg.sess = n.sess;
+    g.cfg.next = NextCfg();
+  }
+  store::saveConfig(g.cfg);
+  if (n.sess.auto_renew) renewSlot(slot, "next", false);  // the old session ends, the new one starts on the new settings
+  else stopSlot(slot, STOP_MANUAL);                          // ends; the relay stays off until Renew
+  NextCtx ctx = {ch, n.at};
+  emitEvent("next_session", [](JsonObject o, void *p) {
+    NextCtx *c = (NextCtx *)p;
+    if (c->ch >= 0) o["ch"] = c->ch;
+    o["at"] = c->at;
+  }, &ctx);
+  bump();
+}
+static void checkNext() {
+  // caller holds StateLock. Needs a valid clock (NTP or RTC); without one it waits.
+  if (!timekeep::valid()) return;
+  uint32_t t = timekeep::now();
+  if (indep()) {
+    for (uint8_t i = 0; i < g.nch && i < MC_MAX_CH; i++)
+      if (g.cfg.ch[i].next.at && t >= g.cfg.ch[i].next.at) runNext(i);
+  } else if (g.cfg.next.at && t >= g.cfg.next.at) {
+    runNext(-1);
+  }
+}
+
 static void checkRules(bool firstPass) {
   StateLock l;
+  checkNext();
+  checkReboot();
   uint8_t slots = sessSlots();
   // No session starts on its own after pairing: the admin starts the first one(s) with Renew.
 
   for (uint8_t s = 0; s < slots; s++) {
     SessionState &ss = g.sess[s];
     // kWh quota
-    double kwh = slotEnergy(s) - ss.e0;
+    double kwh = slotKwhLimit(s);
     float max = slotKwhMax(s);
     uint8_t act = slotKwhAction(s);
     if (ss.sid && ss.status == SESS_ACTIVE && max > 0 && kwh >= max) {
@@ -887,7 +1125,6 @@ static void checkRules(bool firstPass) {
         if (c->ch >= 0) o["ch"] = c->ch;
         o["kwh"] = serialized(String(c->kwh, 4));
         o["action"] = c->action;
-        o["end"] = strcmp(c->action, "warn") != 0;
       };
       if (act == KWH_WARN) {
         if (!ss.over) {  // warn once, keep the power on
@@ -958,7 +1195,8 @@ static void checkRules(bool firstPass) {
     SessStatus st = g.sess[slotOf(i)].status;
     const char *block = meterBlock;
     if (!block) {
-      if (c.tripped) block = "tripped";
+      if (g.cfg.ch[i].disabled) block = "ch_disabled";  // disabled channel: relay off, whatever the session says
+      else if (c.tripped) block = "tripped";
       else if (!g.sess[slotOf(i)].sid) block = "no_session";  // first session not started yet (Renew)
       else if (st == SESS_QUOTA) block = "quota";
       else if (st == SESS_EXPIRED) block = "expired";
@@ -1009,20 +1247,27 @@ static void checkRules(bool firstPass) {
   }
 }
 
+static void batteryTick() {
+  if (!battery::enabled()) return;
+  static uint32_t atMs = 0;
+  static float sent = NAN;
+  if (!isnan(batPct_) && millis() - atMs < 5000) return;
+  atMs = millis();
+  batPct_ = battery::percent(battery::volts());
+  if (isnan(sent) || fabsf(batPct_ - sent) >= 2) {  // the server notices a low battery: send the state when it moved
+    sent = batPct_;
+    StateLock l;
+    bump();
+  }
+}
+
 // AUX relay automation: live values for the event rules (per channel; kWh balance and session of the
 // session that governs the channel: the shared one, or the channel's own in independent mode).
 static void auxTick() {
+  batteryTick();
   if (!auxrelay::count()) return;
   auxrelay::Inputs in;
-  if (battery::enabled()) {  // battery % for the AUX event rules, measured every 5 s
-    static uint32_t batAtMs = 0;
-    static float batPct = NAN;
-    if (isnan(batPct) || millis() - batAtMs > 5000) {
-      batAtMs = millis();
-      batPct = battery::percent(battery::volts());
-    }
-    in.batPct = batPct;
-  }
+  in.batPct = batPct_;
   {
     StateLock l;
     in.nch = g.nch < auxrelay::MAX_CH ? g.nch : auxrelay::MAX_CH;
@@ -1030,6 +1275,7 @@ static void auxTick() {
     in.disabled = g.disabled;
     in.tamper = g.tamper;
     in.ups = g.ups;
+    in.reboot = hwp::rebootPending() || rebootSet_;
     in.voltOut = g.voltOut;
     in.noWifi = g.net <= NET_WIFI_CONNECTING;
     in.noServer = g.paired && g.offlineSinceMs != 0;
@@ -1042,7 +1288,7 @@ static void auxTick() {
       in.running[i] = ss.sid && ss.status == SESS_ACTIVE && !g.disabled;
       float max = slotKwhMax(s);
       if (ss.sid && max > 0) {
-        double left = max - (slotEnergy(s) - ss.e0);
+        double left = max - slotKwhLimit(s);
         in.balance[i] = left > 0 ? (float)left : 0.0f;
       }
     }
@@ -1140,6 +1386,11 @@ void task(void *) {
     checkTamper();
     checkUps();
     checkRules(first);
+    {  // a sensor check that cannot collect enough valid readings ends as failed after 60 s
+      StateLock l;
+      sc::Result res;
+      if (check_.tick(millis(), res)) reportCheck(res);
+    }
     sys::crumb(sys::CR_CONTROL, "aux");
     auxTick();
     first = false;

@@ -1,9 +1,12 @@
 # Multi-channel AC meter (rbAmp)
 
-A separate firmware (`firmware/PowerMeterRBAmp/`) for an ESP32-S3 Super Mini with one or more **rbAmp BASIC**
+A separate firmware (`firmware/PowerMeterRBAmp/`) for an ESP32-S3 N16R8 with one or more **rbAmp BASIC**
 modules (SCT-013 clamps), a DS3231, a tamper limit switch and **I²C relay board(s)** (PCF8574 + SSRs, or
 XL9535 relay boards), optionally DS18B20 temperature sensors. One voltage input, 1–16 current channels; the
-`CHANNELS` table in `config.h` maps each channel to a module input, a clamp model and a relay.
+`CHANNELS` table in `config.h` maps each channel to a module input, a clamp model and a relay: a relay board
+(A, B … = the entries of `RELAY_BOARDS`, in order) and an output on it. A profile sent from the server keeps the
+letter of each board (Board A removed: Board B stays B); `config.h` counts by position. The same table can be changed from the server
+(Firmware → Update Device I/O, [protocol.md §12](protocol.md)).
 
 The server treats it as an AC meter with `caps.mc = true` and `caps.channels = N`.
 
@@ -134,6 +137,15 @@ rbAmp with N channels) keeps the same meter on the server. Both sides handle thi
   counts as a change.
 
 Example: PZEM AC → rbAmp 5 ch → PZEM DC → rbAmp 2 ch → PZEM AC leaves one live meter and four archives.
+
+## Changing the wiring from the server (planned, 1.1.0)
+
+The rbAmp addresses, the relay boards and the channel table (input, clamp model, relay) can be edited on the
+server (Firmware → Update Device I/O) and sent to the meter; a clamp model change applies at once, everything
+else after a reboot with automatic rollback. Specification: [protocol.md §12](protocol.md). Pins and enable flags
+stay in `config.h`. Hardwired expander addresses (MCP23017, XL9535, PCF8574) are only chosen on the page and
+checked with **Scan Address**; an rbAmp module's own address is written to the module by the wizard, with only
+that module connected.
 
 ## AUX relays
 

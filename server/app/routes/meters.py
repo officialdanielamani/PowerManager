@@ -14,11 +14,13 @@ from ..extensions import db
 from ..models import (Command, Device, Event, Incident, Measurement, MeterViewer, Notification,
                       NotificationRule, User,
                       PairingCode, Rollup, RollupDirty, Session, Temperature, now)
-from ..services import access, auxcfg, commands, devconfig, mqtt_bridge, history, hub, incidents, ingest, lifecycle, settings, validation
+from ..services import access, auxcfg, commands, devconfig, mqtt_bridge, history, hub, incidents, ingest, lifecycle, notify, settings, validation
+from ..services import calib as calib_svc
+from ..services import nextsession
 from ..services import tare as tare_svc
 from .decorators import staff_required
 from .device_api import ensure_device_defaults
-from .main import meter_summary
+from .main import _relay_label, meter_summary
 
 bp = Blueprint("meters", __name__, url_prefix="/meters")
 log = logging.getLogger(__name__)
@@ -70,22 +72,112 @@ def pairing_status(code):
     return jsonify(status="pending", remaining=pc.expires_at - now())
 
 
+# ------------------------------------------------------------------ zero & tare (docs/protocol.md §13)
+
+@bp.get("/<int:pk>/calibration")
+@staff_required
+def calibration(pk):
+    """Old address of the Zero & Tare page: it is the Tune tab of the configuration now."""
+    return redirect(url_for("meters.configure", pk=_device(pk).id) + "#tune")
+
+
+def _calib_limits():
+    return {"min_readings": calib_svc.MIN_READINGS, "min_secs": calib_svc.MIN_SECS,
+            "zero_max_a": calib_svc.ZERO_MAX_A, "zero_max_w": calib_svc.ZERO_MAX_W}
+
+
+@bp.get("/<int:pk>/calibration/status")
+@staff_required
+def calibration_status(pk):
+    device = _device(pk)
+    return jsonify(ok=True, online=hub.is_online(device.id), server_time=now(), channels=calib_svc.view(device),
+                   cfg_synced=device.synced)
+
+
+@bp.post("/<int:pk>/calibration/check")
+@staff_required
+def calibration_check(pk):
+    device = _device(pk)
+    body = request.get_json(silent=True) or {}
+    cmd, err = calib_svc.start_check(device, body.get("ch", 0), body.get("kind"), current_user)
+    if err:
+        msg = {"offline": "The meter is offline: a sensor check needs a connected meter.", "bad_channel": "No such channel."}.get(err, err)
+        return jsonify(ok=False, error=msg), 409
+    return jsonify(ok=True)
+
+
+@bp.post("/<int:pk>/calibration/apply")
+@staff_required
+def calibration_apply(pk):
+    device = _device(pk)
+    body = request.get_json(silent=True) or {}
+    vals, errors = calib_svc.apply(device, body.get("ch", 0), body.get("kind"), current_user)
+    if errors:
+        return jsonify(ok=False, errors=errors), 400
+    return jsonify(ok=True, **vals)
+
+
+@bp.post("/<int:pk>/calibration/clear")
+@staff_required
+def calibration_clear(pk):
+    device = _device(pk)
+    body = request.get_json(silent=True) or {}
+    if not calib_svc.clear(device, body.get("ch", 0), body.get("what", "all"), current_user):
+        return jsonify(ok=False, errors=["No such channel"]), 400
+    return jsonify(ok=True)
+
+
 # ------------------------------------------------------------------ configure
 
+@bp.post("/<int:pk>/next-session")
+@staff_required
+def next_session(pk):
+    """Schedule Next Session of a channel or of the whole meter (Configuration): action set | clear."""
+    device = _device(pk)
+    body = request.get_json(silent=True) or {}
+    ch = body.get("ch")
+    ch = int(ch) if str(ch).isdigit() else None   # none = the whole meter (single channel / Shared mode)
+    if body.get("action") == "clear":
+        return jsonify(ok=True, cleared=nextsession.clear(device, ch))
+    info, errors = nextsession.schedule(device, ch, body, current_user)
+    if errors:
+        return jsonify(ok=False, errors=errors), 400
+    return jsonify(ok=True, next=info, server_time=now())
+
+
 def _push_config(device):
-    msg = {"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted)}
+    msg = {"t": "cfg", **devconfig.to_device(device.cfg, device.cfg_ver_wanted, device.calib)}
     return hub.send(device.id, msg) is not None
 
 
 def _rules(device, user):
+    """The notification page: groups of options with this user's choices. Options for hardware the meter does not have are left out
+    (the page shows them disabled), channel limits only for independent multi-channel meters."""
     rules = {r.type: r for r in NotificationRule.query.filter_by(device_fk=device.id, user_fk=user.id).all()}
-    out = []
-    for ntype, label in devconfig.NOTIFY_TYPES:
-        r = rules.get(ntype)
-        on = bool(r.enabled) if r else ntype in devconfig.NOTIFY_DEFAULT_ON
-        out.append({"type": ntype, "label": label, "enabled": on,
-                    "param": (r.param if r and r.param else devconfig.DISCONNECTED_DEFAULT_MIN)})
-    return out
+    caps = device.caps or {}
+    have = {"tamper": bool(caps.get("tamper")), "ups": bool(caps.get("ups")), "battery": bool(caps.get("battery")),
+            "temp": bool(caps.get("temp")) or bool((device.last_reading or {}).get("t"))}
+    indep = device.is_mc and device.mc_mode == "independent"
+    allowed = access.allowed_channels(user, device)
+    chans = [(i, device.channel_name(i)) for i in range(devconfig.channel_count(device)) if allowed is None or i in allowed] if indep else []
+    groups = []
+    for gname, items in devconfig.NOTIFY_GROUPS:
+        rows = []
+        for ntype, label, opts in items:
+            if opts.get("mc") and not device.is_mc:
+                continue
+            r = rules.get(ntype)
+            on = bool(r.enabled) if r else ntype in devconfig.NOTIFY_DEFAULT_ON
+            unit, lo, hi, dflt = opts.get("param", (None, 0, 0, 0))
+            param = r.param if r and r.param else dflt
+            needs = opts.get("needs")
+            rows.append({"type": ntype, "label": label, "enabled": on, "param": param, "unit": unit, "lo": lo, "hi": hi,
+                         "hhmm": f"{int(param) // 60}:{int(param) % 60:02d}" if unit == "hh:mm" else None,
+                         "supported": have.get(needs, True) if needs else True,
+                         "channels": chans if (opts.get("ch") and chans) else [],
+                         "picked": [c for c, _n in chans] if (r is None or r.channels is None) else [int(c) for c in r.channels]})
+        groups.append({"name": gname, "rows": rows})
+    return groups
 
 
 def _viewers():
@@ -205,7 +297,6 @@ def configure(pk):
             else:
                 retention[key] = (form.get(f"{key}_autodel") == "on", int(raw))
         if not errors:
-            device.tare_a, device.tare_w = cfg.get("tare_a", 0.0), cfg.get("tare_w", 0.0)  # mirror (tare is part of cfg)
             device.data_autodel, device.data_autodel_days = retention["data"]
             device.sessions_autodel, device.sessions_autodel_days = retention["sessions"]
             device.events_autodel, device.events_autodel_days = retention["events"]
@@ -213,7 +304,12 @@ def configure(pk):
             device.currency, device.price_per_kwh = currency, price
             device.positive_only = form.get("positive_only") == "on"
             config_changed = cfg != device.cfg
+            was_off = {i for i, c in enumerate((device.cfg or {}).get("ch") or []) if c.get("disabled")}
             device.cfg = cfg
+            for i, c in enumerate(cfg.get("ch") or []):   # a channel was disabled / enabled: "channel status" notification
+                if bool(c.get("disabled")) != (i in was_off):
+                    notify.notify(device, "channel_status",
+                                  f"{device.channel_name(i)} {'disabled' if c.get('disabled') else 'enabled'} by {current_user.username}", ch=i)
             if owner != device.owner_fk:
                 old = db.session.get(User, device.owner_fk) if device.owner_fk else None
                 transfer_owner(device, owner)
@@ -235,7 +331,7 @@ def configure(pk):
             else:
                 db.session.commit()
                 flash("Saved.", "success")
-                return redirect(url_for("meters.info", pk=device.id))
+                return redirect(url_for("meters.configure", pk=device.id))   # stay on the configuration (same tab)
     cfg = device.cfg or devconfig.default_for(device)
     dur = int(cfg.get("dur_min", 1440))
     return render_template("meters/configure.html", d=device, cfg=cfg, errors=errors,
@@ -243,15 +339,17 @@ def configure(pk):
                            protect_actions=devconfig.PROTECT_ACTIONS, kwh_action_of=devconfig.kwh_action,
                            viewers=_viewers(), linked={v.user_fk: v for v in MeterViewer.query.filter_by(device_fk=device.id)},
                            managers=access.managers() if current_user.is_admin else [],
-                           aux_relays={a.get("i"): a.get("relay") for a in (device.last_state or {}).get("aux") or []
-                                       if isinstance(a, dict)},
+                           aux_relays={a.get("i"): _relay_label(device, a.get("relay")) for a in (device.last_state or {}).get("aux") or []
+                                       if isinstance(a, dict) and a.get("relay")},
                            n_temp=auxcfg.temp_count(device), aux_sched_max=auxcfg.SCHED_MAX, fw_old=devconfig.fw_outdated(device),
                            mqtt_meter=mqtt_bridge.meter_config(),
-                           aux_sources=auxcfg.sources(device), aux_flags=auxcfg.FLAGS, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
+                           aux_sources=auxcfg.sources(device), aux_ev_max=auxcfg.EV_MAX, aux_flags=auxcfg.FLAGS, aux_modes=auxcfg.MODES, aux_days=auxcfg.DAYS,
                            aux_cfg=auxcfg.fit(cfg.get("aux"), devconfig.aux_count(device)),
                            n_channels=devconfig.channel_count(device),
                            dur_d=dur // 1440, dur_h=(dur % 1440) // 60, dur_m=dur % 60,
                            new=request.args.get("new") == "1", amp_rating=devconfig.amp_rating(device),
+                           server_time=now(),
+                           calib_view=calib_svc.view(device), calib_online=hub.is_online(device.id), calib_limits=_calib_limits(),
                            form=request.form if errors else None)
 
 
@@ -348,22 +446,50 @@ def notifications(pk):
     device = access.device_for_current_user(pk)
     if request.method == "POST":
         form = request.form
-        disc_min = (form.get("notify_disconnected_min") or "5").strip()
-        if not disc_min.isdigit() or not 1 <= int(disc_min) <= 1440:
-            flash("Disconnected minutes must be 1–1440", "danger")
-            return redirect(url_for("meters.notifications", pk=pk))
-        for ntype, _label in devconfig.NOTIFY_TYPES:
+        errors = []
+        indep = device.is_mc and device.mc_mode == "independent"
+        allowed = access.allowed_channels(current_user, device)
+        n_ch = devconfig.channel_count(device)
+        for ntype, _label, opts in [(t, l, o) for _g, items in devconfig.NOTIFY_GROUPS for t, l, o in items]:
             r = db.session.get(NotificationRule, (device.id, current_user.id, ntype))
             if r is None:
                 r = NotificationRule(device_fk=device.id, user_fk=current_user.id, type=ntype)
                 db.session.add(r)
             r.enabled = form.get(f"notify_{ntype}") == "on"
-            if ntype == "disconnected":
-                r.param = int(disc_min)
+            if "param" in opts:
+                unit, lo, hi, dflt = opts["param"]
+                raw = (form.get(f"notify_{ntype}_param") or "").strip()
+                try:
+                    if not raw:
+                        val = r.param or dflt   # not sent: keep the value
+                    elif unit == "hh:mm":
+                        h, m = raw.split(":")
+                        val = int(h) * 60 + int(m)
+                    else:
+                        val = int(raw)
+                    if not lo <= val <= hi:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    if r.enabled:
+                        errors.append(f"{_label}: enter a value from {lo} to {hi} {unit if unit != 'hh:mm' else '(hh:mm, at least 0:01)'}")
+                    val = r.param or dflt
+                if val != r.param:
+                    r.fired = {}   # a new threshold: the notification can be sent again
+                r.param = val
+            if opts.get("ch") and indep:
+                picked = [int(c) for c in form.getlist(f"notify_{ntype}_ch") if str(c).isdigit() and int(c) < n_ch
+                          and (allowed is None or int(c) in allowed)]
+                every = [i for i in range(n_ch) if allowed is None or i in allowed]
+                r.channels = None if sorted(picked) == every else sorted(picked)
+        if errors:
+            db.session.rollback()
+            for e in errors:
+                flash(e, "danger")
+            return redirect(url_for("meters.notifications", pk=pk))
         db.session.commit()
         flash("Your notification options for this meter were saved.", "success")
         return redirect(url_for("meters.notifications", pk=pk))
-    return render_template("meters/notifications.html", d=device, rules=_rules(device, current_user),
+    return render_template("meters/notifications.html", d=device, groups=_rules(device, current_user),
                            telegram=settings.get("telegram_enabled") == "1",
                            has_chat=bool(current_user.telegram_chat_id))
 
@@ -471,8 +597,21 @@ def action(pk):
         if ch is not None and act != "send_now":
             params["ch"] = ch
         cmd, err = commands.issue(device, act, params, current_user)
-    elif device.disabled_at and act not in ("send_now", "enable", "disable", "unsync", "remove", "get_info", "tare_now"):
+    elif device.disabled_at and act not in ("send_now", "enable", "disable", "unsync", "remove", "get_info"):
         return jsonify(ok=False, error="disabled", message="This meter is disabled (read-only). Enable it first."), 409
+    elif act in ("reboot", "reboot_cancel"):
+        params = {}
+        if act == "reboot":
+            try:
+                params["delay_s"] = int(body.get("delay_s", 60))
+            except (TypeError, ValueError):
+                params["delay_s"] = -1
+            if not 0 <= params["delay_s"] <= 3600:
+                return jsonify(ok=False, error="bad_delay", message="Seconds: 0 to 3600."), 400
+        cmd, err = commands.issue(device, act, params, current_user)
+        if err:
+            return jsonify(ok=False, error=err, message="The meter is offline."), 409
+        return jsonify(ok=True, message=(f"The meter restarts in {params['delay_s']} s" if act == "reboot" else "Reboot cancelled"))
     elif act == "set_default":
         device.cfg = devconfig.default_for(device)
         ensure_device_defaults(device, reset=True)
@@ -496,20 +635,6 @@ def action(pk):
         flash(msgs[act], "success")
         dest = url_for("meters.info", pk=device.id) if act in ("disable", "enable") else url_for("main.dashboard")
         return jsonify(ok=True, redirect=dest)
-    elif act == "tare_now":
-        # Suggest offsets from the latest reading. Only meaningful with the relay OFF (then the
-        # meter measures nothing but its own power supply). The form is filled, not saved.
-        relays = (device.last_state or {}).get("relay") or []
-        if relays and relays[0].get("on"):
-            return jsonify(ok=False, error="relay_on",
-                           message="Turn the relay OFF first: with the load off, the meter only measures itself."), 409
-        reading = device.last_reading or {}
-        ch = (reading.get("ch") or [{}])[0]
-        if not reading.get("ts") or now() - reading["ts"] > 120 or ch.get("w") is None:
-            return jsonify(ok=False, error="stale",
-                           message="No reading from the last 2 minutes. Use Get Data Now on the Info page, then try again."), 409
-        return jsonify(ok=True, a=round(ch.get("a") or 0, 3), w=round(ch.get("w") or 0, 1),
-                       message=f"Filled from the reading at {settings.fmt_ts(reading['ts'])}. Press Save to keep it.")
     elif act == "get_info":
         cmd, err = commands.issue(device, "get_info", {}, current_user)
         if err or (cmd is not None and not cmd.sent_at):
@@ -527,6 +652,7 @@ def action(pk):
             "session_expired": "Relay ON blocked: session ended. Renew the session first.",
             "no_session": "Relay ON blocked: no session yet. Press Renew Now to start one.",
             "tripped": "Relay ON blocked: over-current trip. Reset the trip first.",
+            "ch_disabled": "This channel is disabled (Configuration → Channels): no session, no relay.",
             "offline": "The device is offline.",
         }
         return jsonify(ok=False, error=err, message=messages.get(err, err)), 409
@@ -617,8 +743,15 @@ def info(pk):
                            price=settings.price(device) if access.can_price(current_user) else (None, None),
                            money=settings.money, can_csv=access.can_csv(current_user),
                            tare_kwh=lambda sess: (round(tare_svc.kwh(sess.kwh_used or 0, (sess.ended_at or now()) - sess.started_at,
-                                                                     tare_svc.offsets(device)), 4)
-                                                  if tare_svc.offsets(device) and sess.started_at else None))
+                                                                     _session_tare(device, sess)), 4)
+                                                  if _session_tare(device, sess) and sess.started_at else None))
+
+
+def _session_tare(device, sess):
+    """The tare that applies to a session: its channel's (independent), or all channels together (shared / single)."""
+    if isinstance(sess.ch, int):
+        return tare_svc.offsets(device, sess.ch)
+    return tare_svc.total(device, range(calib_svc.channel_count(device)))
 
 
 _last_refresh = {}  # meter pk -> time of last "Get Data Now" (any user)
@@ -697,10 +830,26 @@ def history_delete(pk):
 def history_json(pk):
     device = access.device_for_current_user(pk, allow_removed=True)
     start, end = _range_args(device)
-    ch = _channel_arg(device)
-    data = history.query(device.id, ch, start, end)
-    if request.args.get("tared") == "1":
-        data = history.apply_tare(data, tare_svc.offsets(device))
+    chs = _channels_arg(device)
+    want_total = request.args.get("total") == "1"
+    ch = chs[0]
+    tared = request.args.get("tared") == "1"
+    if len(chs) > 1 or want_total:   # several channels and / or their total (multi-channel Info page)
+        series, datas = [], []
+        for c in chs:
+            one = history.query(device.id, c, start, end)
+            if tared:
+                one = history.apply_tare(one, tare_svc.offsets(device, c))
+            datas.append(one)
+            series.append({"ch": c, "name": device.channel_name(c), "points": one["points"], "stats": one["stats"]})
+        data = {"multi": True, "source": datas[0]["source"], "start": start, "end": end, "series": series,
+                "total": history.combine(datas) if want_total else None, "points": [], "stats": {}}
+        kw = [d["stats"].get("kwh") for d in datas if d["stats"].get("kwh") is not None]
+        data["stats"] = {"kwh": round(sum(kw), 4) if kw else None}
+    else:
+        data = history.query(device.id, ch, start, end)
+        if tared:
+            data = history.apply_tare(data, tare_svc.offsets(device, ch))
     data["temps"] = history.temps(device.id, start, end)
     data["start_local"] = settings.fmt_ts(start, False)
     data["end_local"] = settings.fmt_ts(end, False)
@@ -710,6 +859,23 @@ def history_json(pk):
     data["cost"] = (settings.money(kwh * price, currency)
                     if access.can_price(current_user) and price is not None and kwh is not None else None)
     return jsonify(data)
+
+
+def _channels_arg(device):
+    """?ch=0,2,3 of the history request: the channels (a viewer limited to some channels gets only those)."""
+    allowed = access.allowed_channels(current_user, device)
+    n = max(1, devconfig.channel_count(device))
+    chs = []
+    for part in str(request.args.get("ch", "")).split(","):
+        if part.strip().isdigit() and int(part) < n and int(part) not in chs:
+            chs.append(int(part))
+    if allowed is not None:
+        chs = [c for c in chs if c in allowed]
+        if not chs:
+            chs = [min(allowed)] if not request.args.get("ch") else []
+        if not chs:
+            abort(404)
+    return chs or [0]
 
 
 def _channel_arg(device):
@@ -743,6 +909,25 @@ def _csv_tare(device, source, header, rows):
                               None if vals[iw] is None else round(tare_svc.watts(vals[iw], tare), 1)])
            for ts, vals in rows)
     return header + [f"A_tared (-{tare[0]:g})", f"W_tared (-{tare[1]:g})"], out
+
+
+def _csv_wide_tare(device, source, header, rows):
+    """Multi-channel CSV: for every channel that has a tare, tared current / power columns at the end (raw data only)."""
+    if source != "raw":
+        return header, rows
+    cols = []   # (index of A, index of W, tare, channel name)
+    for i in range(calib_svc.channel_count(device)):
+        t = tare_svc.offsets(device, i)
+        nm = device.channel_name(i)
+        if t and f"{nm} A" in header and f"{nm} W" in header:
+            cols.append((header.index(f"{nm} A"), header.index(f"{nm} W"), t, nm))
+    if not cols:
+        return header, rows
+    out = ((ts, list(vals) + [x for ia, iw, t, _ in cols
+                              for x in (None if vals[ia] is None else round(tare_svc.amps(vals[ia], t), 3),
+                                        None if vals[iw] is None else round(tare_svc.watts(vals[iw], t), 1))])
+           for ts, vals in rows)
+    return header + [f"{nm} {k}_tared" for _, _, _, nm in cols for k in ("A", "W")], out
 
 
 def _csv_decimals(h):
@@ -821,6 +1006,7 @@ def export_csv(pk):
         start, end = sess.started_at, sess.ended_at or now()
         if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
             source, header, rows = history.csv_wide(device, start, end, allowed)
+            header, rows = _csv_wide_tare(device, source, header, rows)
             out = (_ts_cols(ts) + [("" if v is None else v) for v in vals] for ts, vals in rows)
             hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
             return _csv_response(f"{device.device_id}_session{sess.sid}_{_fname_ts(start)}.csv", hdr, out)
@@ -833,6 +1019,7 @@ def export_csv(pk):
     start, end = _range_args(device)
     if device.is_mc or devconfig.channel_count(device) > 1:  # every channel side by side
         source, header, rows = history.csv_wide(device, start, end, allowed)
+        header, rows = _csv_wide_tare(device, source, header, rows)
         out = (_ts_cols(ts) + [("" if v is None else v) for v in vals] for ts, vals in rows)
         hdr = ["time_utc", f"time_local ({settings.get('timezone')})"] + header
         return _csv_response(f"{device.device_id}_{_fname_ts(start)}_{_fname_ts(end)}.csv", hdr, out)
@@ -857,7 +1044,7 @@ def _hms(secs):
 
 END_REASONS = {"quota": "kWh limit", "expired": "Time limit", "manual": "Renew Now", "voltage": "Voltage out of range",
                "tamper": "Tamper", "sensor": "Sensor error", "temp": "Temperature too high", "next": "Next session started",
-               "disabled": "Disabled", "stopped": "End", "mode": "Mode changed", "hardware": "Hardware changed"}
+               "disabled": "Disabled", "ch_disabled": "Channel disabled", "stopped": "End", "mode": "Mode changed", "hardware": "Hardware changed"}
 
 
 @bp.get("/<int:pk>/sessions/summary.csv")
@@ -1012,7 +1199,7 @@ def _bulk_apply(cfg, new, groups):
     if "report" in groups:
         out["report_s"], out["read_s"] = new["report_s"], new["read_s"]
     if "session" in groups:
-        for k in ("sess_mode", "dur_min", "daily_at", "auto"):
+        for k in ("sess_mode", "dur_min", "daily_at", "week", "auto"):
             out[k] = new[k]
     if "offline" in groups:
         out["offline_off"], out["offline_off_min"] = new["offline_off"], new["offline_off_min"]
@@ -1096,7 +1283,7 @@ def bulk_configure():
         "report": _differs(devices, lambda c: (c.get("read_s", c.get("report_s")), c.get("report_s"))),
         "kwh": _differs(devices, lambda c: [(x.get("kwh_max"), devconfig.kwh_action(x)) for x in c.get("ch", [])]),
         "amp": _differs(devices, lambda c: [x.get("amp_max") for x in c.get("ch", [])]),
-        "session": _differs(devices, lambda c: (c.get("sess_mode"), c.get("dur_min"), c.get("daily_at"), c.get("auto"))),
+        "session": _differs(devices, lambda c: (c.get("sess_mode"), c.get("dur_min"), c.get("daily_at"), c.get("week"), c.get("auto"))),
         "offline": _differs(devices, lambda c: (c.get("offline_off"), c.get("offline_off_min"))),
         "voltage": _differs(devices, lambda c: (c.get("volt_min", 0), c.get("volt_max", 0), c.get("volt_action", "hold"))),
         "tamper": _differs(devices, lambda c: (bool(c.get("tamper_protect")), c.get("tamper_action", "hold"))),

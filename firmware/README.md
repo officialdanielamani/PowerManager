@@ -1,6 +1,6 @@
 # PowerMeter firmware (ESP32-S3)
 
-Firmware for the PowerManager meter: ESP32-S3 Super Mini + power sensor + solid-state relay + WS2812 LED + tamper switch.
+Firmware for the PowerManager meter: ESP32-S3 N16R8 + power sensor + solid-state relay + WS2812 LED + tamper switch.
 
 Two sketches (open the folder's `.ino` in Arduino IDE):
 
@@ -9,7 +9,7 @@ Two sketches (open the folder's `.ino` in Arduino IDE):
 | `PowerMeterPZEM/PowerMeterPZEM.ino` | single channel: PZEM-004T (AC) or PZEM-017 (DC) — this page |
 | `PowerMeterRBAmp/PowerMeterRBAmp.ino` | multi-channel AC: one or more rbAmp modules — see [`PowerMeterRBAmp/README.md`](PowerMeterRBAmp/README.md) |
 
-Example configurations: [`examples/`](examples/). The server needs firmware 1.0.0 or newer.
+Example configurations: [`examples/`](examples/). The server needs firmware 1.2.0 or newer.
 
 **AC or DC meter:** one sketch, two firmwares. In `config.h` set `METER_DC 0` for the **AC meter** (PZEM-004T) or `METER_DC 1` for the **DC meter** (PZEM-017). Everything else (limits, sessions, mesh, offline buffer, local page) is the same. The meter tells the server its type when it pairs, so the server shows it as AC or DC automatically and uses the matching price. Design: [`../docs/firmware.md`](../docs/firmware.md), protocol: [`../docs/protocol.md`](../docs/protocol.md).
 
@@ -31,8 +31,9 @@ Example configurations: [`examples/`](examples/). The server needs firmware 1.0.
 |---------|-------|
 | Board | ESP32S3 Dev Module, from the **esp32** (Espressif) list |
 | USB CDC On Boot | Enabled (serial log over the USB-C port) |
-| Flash Size | 4MB |
-| Partition Scheme | **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** |
+| Flash Size | 16MB (128Mb) |
+| PSRAM | OPI PSRAM (N16R8 module) |
+| Partition Scheme | **Custom**: uses `partitions.csv` in the sketch folder (6 MB app + 6 MB OTA slot, 20 KB NVS, 3.9 MB LittleFS). The offsets of `nvs` / `otadata` / `app0` must not change: the Arduino upload writes at 0xe000 / 0x10000. First flash or switch from another table: *Erase All Flash Before Sketch Upload* once |
 
 Open `firmware/PowerMeterPZEM/PowerMeterPZEM.ino`, check the pins in `config.h` (or make it with the server's **Firmware → Generate config.h**), then Upload.
 
@@ -47,7 +48,7 @@ If you also have other ESP32 board packages installed (e.g. **esp32-bluepad32** 
 | DC only: MAX485 DE+RE (set `PIN_RS485_DE`; `-1` for auto-direction modules) | – |
 | SSR input (+) (`RELAY_GPIO_PINS`) | 7 |
 | Tamper switch (NC, other side to GND) | 4 |
-| WS2812 data | 48 (onboard LED on most Super Mini boards) |
+| WS2812 data | 48 (onboard LED on many ESP32-S3 dev boards) |
 | I²C SDA / SCL (optional: DS3231, PCF8574 / XL9535 relay boards, SHT sensors) | 8 / 9 |
 | Battery sense (optional, set `BATTERY_ENABLE 1`) | 1, through a divider (see `config.h`) |
 | DS18B20 temperature sensor(s) (optional, set `TEMP_DS18B20 1`) | 10, 4.7 kΩ pull-up to 3.3 V |
@@ -83,8 +84,8 @@ What each switch costs (multi-channel firmware 0.8.0, ESP32-S3, measured):
 | Tamper switch (`TAMPER_ENABLE`) | < 1 KB |
 
 Default build ≈ 1.39 MB, everything optional off ≈ 1.37 MB. Most of the firmware is Wi-Fi, TLS, the web server
-and JSON, which every meter needs, so the switches save little: the *Minimal SPIFFS* partition scheme (1.9 MB
-app) is still required (the default scheme's 1.2 MB app space is too small either way).
+and JSON, which every meter needs, so the switches save little: the app fits easily in the 6 MB slots of the
+custom partition table.
 
 **Temperature (DS18B20):** up to `TEMP_MAX_SENSORS` (4) on one wire, numbered T1, T2 … by serial number (stable
 over a restart). Read every `TEMP_READ_MS` (10 s), sent with the readings, shown on the server (Info page, dashboard,
@@ -173,9 +174,9 @@ on the server) and AUX relays can react to it, and to the battery % when `BATTER
 
 Both sketches use the same four parts: **[1] Board info** (version, type), **[2] Enable flags** (every optional
 part and link, 1 / 0), **[3] Pin out**, **[4] Options / configuration** (boards, relays, channels, sensors,
-timing). The server makes a complete file for your hardware: *Firmware → Generate config.h*. Firmware 1.0.0 does
-not read settings saved by older versions: after updating an older meter, save its configuration on the server
-once (kWh counters and AUX automation of the old version are not carried over).
+timing). The server makes a complete file for your hardware: *Firmware → Generate config.h*. Firmware 1.2.0 does
+not read the settings saved by older versions: after updating, the meter takes its configuration from the server
+again (kWh counters and relay states of the old version are not carried over).
 
 ## 10. Building and testing without the Arduino IDE
 
@@ -189,3 +190,13 @@ firmware/tools/host_tests.sh                    # PC tests: shared files, AUX au
 `arduino-cli` must be installed. The PC tests need g++, OpenSSL headers and
 `pip install -r server/requirements-dev.txt`. CI runs all of this (`.github/workflows/ci.yml`).
 Rules for changing the firmware (shared files, `config.h` copies, versions): [`../docs/handover.md`](../docs/handover.md) §5.
+
+
+## Troubleshooting
+
+- **Errors in `sensor_pzem.cpp` (`PZEM_TIMEOUT_MS was not declared`, `struct Reading has no member named v`) when building PowerMeterRBAmp**,
+  or errors in `rbamp.cpp` when building PowerMeterPZEM: the sketch folder contains files of the other sketch (a copy that was merged
+  over an older one). Arduino compiles every `.cpp` in `src/`. Delete the sketch folder and copy a clean `firmware/PowerMeterRBAmp`
+  (or `PowerMeterPZEM`) again. Each sketch now stops with a clear `#error` when it finds a file of the other one.
+- **Boot loop / `No bootable app partitions in the partition table`**: see the partition notes in [docs/firmware.md](../docs/firmware.md)
+  (erase the flash once, keep the offsets of `partitions.csv`).

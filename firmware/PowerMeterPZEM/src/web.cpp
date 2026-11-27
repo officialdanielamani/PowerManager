@@ -13,6 +13,7 @@
 #include "auxrelay.h"
 #include "temp.h"
 #include "net.h"
+#include "ota.h"
 #include "storage.h"
 #include "system.h"
 #include "timekeep.h"
@@ -323,6 +324,10 @@ static void hState() {
   d["kwh"] = serialized(String(control::sessionKwh(), 4));
   d["kwh_limit"] = serialized(String(control::sessionKwhLimit(), 4));  // what the kWh limit compares
   d["hw_info"] = HW_INFO;
+  d["power_sensor"] = String(SENSOR_NAME) + " · PZEM" + (METER_DC ? "-017" : "-004T") + " (Modbus 0x" + String((unsigned int)PZEM_ADDRESS, HEX) + ")";
+  ota::webJson(d["ota"].to<JsonObject>());  // firmware: pushed from the server, state / progress here
+  JsonArray sn = d["sensors"].to<JsonArray>();  // temperature / humidity sensors: T1.. with their type / address
+  for (uint8_t i = 0; i < temp::count(); i++) sn.add(temp::name(i));
   d["heap"] = ESP.getFreeHeap();
   if (battery::enabled()) {
     float v = battery::volts();
@@ -356,7 +361,7 @@ static void hState() {
   c["kwh_action"] = KA[g.cfg.kwh_action % 3];
   c["amp_max"] = num4(g.cfg.amp_max);
   c["auto"] = g.cfg.auto_renew;
-  c["mode"] = g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
+  c["mode"] = g.cfg.sess_mode == SESS_WEEKLY ? "weekly" : g.cfg.sess_mode == SESS_DAILY ? "daily" : g.cfg.sess_mode == SESS_DURATION ? "duration" : "none";
   c["offline_off_min"] = g.cfg.offline_off_min;
   static const char *PA[] = {"run", "hold", "end"};
   c["tare_a"] = num4(g.cfg.tare_a);

@@ -12,11 +12,12 @@ MODES = {"manual": "Manual (ON / OFF buttons)", "schedule": "Schedule", "event":
 SOURCES = {"temp": "Temperature", "hum": "Humidity", "amp": "Current (A)", "watt": "Power (W)",
            "kwh": "kWh balance", "session": "Session", "tamper": "Tamper", "trip": "Over-current trip",
            "volt": "Voltage protection", "wifi": "No Wi-Fi", "server": "No server / internet",
-           "ups": "UPS power (mains failed)", "bat": "Battery %"}
+           "ups": "UPS power (mains failed)", "bat": "Battery %", "reboot": "Wait for reboot (hardware change)"}
 UNITS = {"temp": "°C", "hum": "%RH", "amp": "A", "watt": "W", "kwh": "kWh", "bat": "%"}
-FLAGS = ("tamper", "trip", "volt", "wifi", "server", "ups")  # on / off conditions ("active" or "not active")
+FLAGS = ("tamper", "trip", "volt", "wifi", "server", "ups", "reboot")  # on / off conditions ("active" or "not active")
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 SCHED_MAX = 14
+EV_MAX = 3   # conditions per AUX relay in event mode, OR-ed (docs/protocol.md §8)
 TOTAL = 255  # amp / watt of all channels together
 ANY = 254    # any channel
 
@@ -34,20 +35,24 @@ def sources(device):
         return dict(SOURCES)
     caps = device.caps or {}
     need = {"temp": temp_count(device), "hum": temp_count(device) and caps.get("hum"), "tamper": caps.get("tamper"),
-            "volt": caps.get("voltage") is not False, "ups": caps.get("ups"), "bat": caps.get("battery")}
+            "volt": caps.get("voltage") is not False, "ups": caps.get("ups"), "bat": caps.get("battery"), "reboot": caps.get("hw_cfg")}
     return {k: label for k, label in SOURCES.items() if need.get(k, True)}
 
 
 def default():
-    return {"name": "", "mode": "manual", "override": False, "else": "off", "sched": [], "event": None}
+    return {"name": "", "mode": "manual", "override": False, "else": "off", "sched": [], "events": [], "ev_on": True}
+
+
+def norm(a):
+    """One stored AUX entry: missing keys get their defaults, at most EV_MAX event conditions."""
+    a = dict(default(), **(a or {}))
+    a["events"] = [e for e in (a.get("events") or []) if isinstance(e, dict)][:EV_MAX]
+    return a
 
 
 def fit(items, n):
-    """Pad / trim a stored AUX list to n relays (older configs only had names)."""
-    out = []
-    for a in (list(items or []) + [None] * n)[:n]:
-        out.append(dict(default(), **(a or {})))
-    return out
+    """Pad / trim a stored AUX list to n relays."""
+    return [norm(a) for a in (list(items or []) + [None] * n)[:n]]
 
 
 def _hhmm(raw):
@@ -110,22 +115,27 @@ def parse_form(form, n, errors, device=None):
                 row["days"] = days
             a["sched"].append(row)
         allowed = sources(device)
-        src = form.get(f"aux_ev_src_{j}", "")
-        if src not in allowed and a["mode"] == "event":
-            errors.append(f"{label} event: choose what the relay reacts to")
-        if src in allowed:
-            idx = form.get(f"aux_ev_idx_{j}", "0")
+        for k in range(EV_MAX):   # condition 1 uses the plain field names, 2 and 3 a suffix _1 / _2 (and a "use" box)
+            sfx = "" if k == 0 else f"_{k}"
+            if k and form.get(f"aux_ev_use_{j}{sfx}") != "on":
+                continue
+            src = form.get(f"aux_ev_src_{j}{sfx}", "")
+            if src not in allowed:
+                if a["mode"] == "event":
+                    errors.append(f"{label} condition {k + 1}: choose what the relay reacts to")
+                continue
+            idx = form.get(f"aux_ev_idx_{j}{sfx}", "0")
             idx = int(idx) if str(idx).isdigit() and (int(idx) < 16 or int(idx) == TOTAL or int(idx) == ANY) else 0
             if src in ("tamper", "volt", "wifi", "server", "ups", "bat"):
                 idx = 0
-            ev = {"src": src, "idx": idx, "on": form.get(f"aux_ev_on_{j}", "on") == "on"}
+            ev = {"src": src, "idx": idx}
             if src == "session":
-                ev["running"] = form.get(f"aux_ev_running_{j}", "running") == "running"
+                ev["running"] = form.get(f"aux_ev_running_{j}{sfx}", "running") == "running"
             elif src in FLAGS:
-                ev["active"] = form.get(f"aux_ev_active_{j}", "active") == "active"
+                ev["active"] = form.get(f"aux_ev_active_{j}{sfx}", "active") == "active"
             else:
-                ev["cmp"] = "under" if form.get(f"aux_ev_cmp_{j}") == "under" else "over"
-                raw = (form.get(f"aux_ev_value_{j}") or "").strip()
+                ev["cmp"] = "under" if form.get(f"aux_ev_cmp_{j}{sfx}") == "under" else "over"
+                raw = (form.get(f"aux_ev_value_{j}{sfx}") or "").strip()
                 try:
                     ev["value"] = round(float(raw), 3)
                     if not -1000000 <= ev["value"] <= 1000000:
@@ -133,8 +143,12 @@ def parse_form(form, n, errors, device=None):
                 except ValueError:
                     ev["value"] = 0.0
                     if a["mode"] == "event":
-                        errors.append(f"{label} event: enter a number for the value")
-            a["event"] = ev
+                        errors.append(f"{label} condition {k + 1}: enter a number for the value")
+            if ev not in a["events"]:
+                a["events"].append(ev)
+        a["ev_on"] = form.get(f"aux_ev_on_{j}", "on") == "on"
+        if a["mode"] == "event" and not a["events"] and not any(e.startswith(f"{label} condition") for e in errors):
+            errors.append(f"{label} event: choose what the relay reacts to")
         if a["mode"] == "schedule" and not a["sched"]:
             errors.append(f"{label}: add at least one schedule (or choose Manual)")
         out.append(a)
@@ -145,7 +159,7 @@ def to_device(items):
     """The AUX list as the meter wants it."""
     out = []
     for j, a in enumerate(items or []):
-        a = dict(default(), **(a or {}))
+        a = norm(a)
         doc = {"i": j, "name": a.get("name", ""), "mode": a["mode"], "override": bool(a.get("override")),
                "else": a.get("else", "off")}
         if a["mode"] == "schedule":
@@ -160,9 +174,9 @@ def to_device(items):
                 else:
                     row["days"] = sum(1 << int(x) for x in s.get("days") or [])
                 doc["sched"].append(row)
-        if a["mode"] == "event" and a.get("event"):
-            ev = a["event"]
-            doc["event"] = {k: ev[k] for k in ("src", "idx", "cmp", "value", "running", "active", "on") if k in ev}
+        if a["mode"] == "event" and a.get("events"):
+            doc["events"] = [{k: e[k] for k in ("src", "idx", "cmp", "value", "running", "active") if k in e} for e in a["events"]]
+            doc["ev_on"] = bool(a.get("ev_on", True))
         out.append(doc)
     return out
 
@@ -174,7 +188,7 @@ def tz_minutes():
 
 def describe(a, device=None):
     """One line for the Info page: 'Schedule: ON Every day 18:00-23:59; ON Sat 01:00-02:00'."""
-    a = dict(default(), **(a or {}))
+    a = norm(a)
     if a["mode"] == "schedule":
         parts = []
         for s in a.get("sched") or []:
@@ -185,30 +199,34 @@ def describe(a, device=None):
                 d = "Every day" if len(days) == 7 else ", ".join(DAYS[i] for i in days)
             parts.append(f"{'ON' if s.get('on', True) else 'OFF'} {d} {s.get('start')}-{s.get('end')}")
         return "Schedule: " + "; ".join(parts) + f" (otherwise {a.get('else', 'off').upper()})"
-    if a["mode"] == "event" and a.get("event"):
-        ev = a["event"]
-        what = "ON" if ev.get("on", True) else "OFF"
-        mc = bool(device and device.is_mc)
-        if ev.get("src") in FLAGS:
-            who = ""
-            if ev.get("src") == "trip" and mc:
-                who = " (any channel)" if ev.get("idx") == ANY else f" ({device.channel_name(ev.get('idx', 0))})"
-            state = "" if ev.get("active", True) else " is clear"
-            return f"Event: {what} while {SOURCES[ev['src']]}{who}{state}"
-        if ev.get("src") == "session":
-            who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else \
-                ("any session" if ev.get("idx") == ANY else f"the session of {device.channel_name(ev.get('idx', 0))}")
-            return f"Event: {what} while {who} is {'running' if ev.get('running', True) else 'ended'}"
-        src = ev.get("src")
-        if src in ("temp", "hum"):
-            who = f"T{int(ev.get('idx', 0)) + 1}"
-        elif src == "bat":
-            who = ""
-        elif src in ("amp", "watt"):
-            who = "all channels" if ev.get("idx") == TOTAL else "any channel" if ev.get("idx") == ANY else (device.channel_name(ev.get("idx", 0)) if device and device.is_mc else "the line")
-        else:
-            who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else \
-                ("any session" if ev.get("idx") == ANY else device.channel_name(ev.get("idx", 0)))
-        cmp = "≥" if ev.get("cmp", "over") == "over" else "≤"
-        return " ".join(f"Event: {what} while {SOURCES.get(src, src)} {who} {cmp} {ev.get('value')} {UNITS.get(src, '')}".split())
+    if a["mode"] == "event" and a.get("events"):
+        what = "ON" if a.get("ev_on", True) else "OFF"
+        return "Event: " + f"{what} while " + " OR ".join(_describe_event(e, device) for e in a["events"])
     return "Manual"
+
+
+def _describe_event(ev, device=None):
+    """One condition: 'Tamper', 'the session is running', 'Temperature T1 ≥ 50 °C' ..."""
+    mc = bool(device and device.is_mc)
+    src = ev.get("src")
+    if src in FLAGS:
+        who = ""
+        if src == "trip" and mc:
+            who = " (any channel)" if ev.get("idx") == ANY else f" ({device.channel_name(ev.get('idx', 0))})"
+        state = "" if ev.get("active", True) else " is clear"
+        return f"{SOURCES[src]}{who}{state}"
+    if src == "session":
+        who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else \
+            ("any session" if ev.get("idx") == ANY else f"the session of {device.channel_name(ev.get('idx', 0))}")
+        return f"{who} is {'running' if ev.get('running', True) else 'ended'}"
+    if src in ("temp", "hum"):
+        who = f"T{int(ev.get('idx', 0)) + 1}"
+    elif src == "bat":
+        who = ""
+    elif src in ("amp", "watt"):
+        who = "all channels" if ev.get("idx") == TOTAL else "any channel" if ev.get("idx") == ANY else (device.channel_name(ev.get("idx", 0)) if device and device.is_mc else "the line")
+    else:
+        who = "the session" if not device or not device.is_mc or device.mc_mode != "independent" else \
+            ("any session" if ev.get("idx") == ANY else device.channel_name(ev.get("idx", 0)))
+    cmp = "≥" if ev.get("cmp", "over") == "over" else "≤"
+    return " ".join(f"{SOURCES.get(src, src)} {who} {cmp} {ev.get('value')} {UNITS.get(src, '')}".split())

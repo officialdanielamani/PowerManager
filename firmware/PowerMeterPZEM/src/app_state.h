@@ -5,13 +5,13 @@
 #include "freertos/semphr.h"
 
 enum KwhAction : uint8_t { KWH_END = 0, KWH_HOLD = 1, KWH_WARN = 2 };
-enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2 };
+enum SessMode : uint8_t { SESS_NONE = 0, SESS_DURATION = 1, SESS_DAILY = 2, SESS_WEEKLY = 3 };
 // ENDED = ended early by the voltage or tamper protection (relay off until renewed).
 enum SessStatus : uint8_t { SESS_ACTIVE = 0, SESS_QUOTA = 1, SESS_EXPIRED = 2, SESS_ENDED = 3 };
 // Voltage / tamper protection: run as usual, relay off while the problem lasts, or end the session.
 enum ProtectAction : uint8_t { ACT_RUN = 0, ACT_HOLD = 1, ACT_END = 2 };
 enum StopReason : uint8_t { STOP_NONE = 0, STOP_VOLTAGE = 1, STOP_TAMPER = 2, STOP_DISABLED = 3, STOP_SENSOR = 4, STOP_MANUAL = 5,
-                            STOP_TEMP = 6 };
+                            STOP_TEMP = 6, STOP_OTA = 7 };
 // Sensor problem: no reply at all (sensor, wiring, or no AC: the PZEM is powered from the AC side) or
 // replies that are garbled / fail the CRC (wiring, noise, wrong address).
 enum SensorErr : uint8_t { SENS_OK = 0, SENS_NO_REPLY = 1, SENS_BAD = 2 };
@@ -23,6 +23,21 @@ enum NetStatus : uint8_t {
   NET_ONLINE             // WebSocket up and hello done
 };
 
+// Schedule Next Session (docs/protocol.md §3 `next`): new limits and session details that replace the current ones at `at` (epoch).
+// The meter carries it out on its own clock, also while it is offline; at == 0: none.
+struct NextCfg {
+  uint32_t at = 0;
+  float amp_max = 0;
+  float kwh_max = 0;
+  uint8_t kwh_action = 0;
+  SessMode sess_mode = SESS_NONE;
+  uint16_t daily_utc_min = 0;
+  uint8_t nwk = 0;
+  uint16_t wk[7] = {0};
+  uint32_t dur_min = 1440;
+  bool auto_renew = false;
+};
+
 struct MeterConfig {
   uint32_t ver = 0;
   uint16_t report_s = 60;  // send to the server every ... s
@@ -30,8 +45,11 @@ struct MeterConfig {
   uint16_t offline_off_min = 0;  // 0 = disabled
   SessMode sess_mode = SESS_NONE;
   uint16_t daily_utc_min = 0;
+  uint8_t nwk = 0;         // weekly: reset times as UTC minutes of the week (Monday 00:00 UTC = 0), see weekly.h
+  uint16_t wk[7] = {0};
   uint32_t dur_min = 1440;
   bool auto_renew = false;
+  NextCfg next;       // Schedule Next Session
   float kwh_max = 0;  // channel 0; 0 = unlimited
   // What happens when kwh_max is reached:
   //   KWH_END  relay off and the session ends now (even if time is left)       [default]
@@ -42,7 +60,9 @@ struct MeterConfig {
   float volt_min = 0;  // operating voltage range; 0 = no limit on that side
   float volt_max = 0;
   uint8_t volt_action = ACT_HOLD;
-  float tare_a = 0;    // own consumption on the measured line (ESP32 + SSR)
+  float zero_a = 0;    // sensor offset with no load, subtracted from current / power after every read (docs/protocol.md §13.4)
+  float zero_w = 0;
+  float tare_a = 0;    // a connected load that counts as 0 (the meter's own supply, a charger ...)
   float tare_w = 0;
   bool tare_limits = true;  // use tared values for the kWh limit and max current
   bool tamper_protect = false;
