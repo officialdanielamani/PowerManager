@@ -272,6 +272,36 @@ void prepareRestart(bool ota) {
   relays::write(0);
 }
 
+
+// ---- Reboot asked from the server (Configuration -> General): countdown, then a plain restart. Sessions and kWh continue
+// after it (they are kept in flash); the relays switch off for the restart and come back from the saved wish.
+static uint32_t rebootDueMs_ = 0;
+static bool rebootSet_ = false;
+void scheduleReboot(uint16_t delayS) {
+  StateLock l;
+  rebootDueMs_ = millis() + (uint32_t)delayS * 1000UL;
+  rebootSet_ = true;
+  uint32_t in = delayS;
+  emitEvent("reboot_pending", [](JsonObject o, void *p) { o["in_s"] = *(uint32_t *)p; }, &in);
+  bump();
+}
+bool cancelReboot() {
+  StateLock l;
+  if (!rebootSet_) return false;
+  rebootSet_ = false;
+  emitEvent("reboot_cancelled", nullptr, nullptr);
+  bump();
+  return true;
+}
+bool rebootPending() { return rebootSet_; }
+static void checkReboot() {
+  // caller holds StateLock
+  if (!rebootSet_ || (int32_t)(millis() - rebootDueMs_) < 0) return;
+  rebootSet_ = false;
+  relays::write(0);
+  sys::reboot(500);
+}
+
 void setDisabled(bool disabled) {
   StateLock l;
   if (g.disabled == disabled) return;
@@ -673,6 +703,7 @@ static void checkNext() {
 static void checkRules(bool firstPass) {
   StateLock l;
   checkNext();
+  checkReboot();
   // No session starts on its own after pairing: the admin starts the first one with Renew.
 
   // Over-current (latched until reset).
@@ -848,6 +879,7 @@ static void auxTick() {
     in.disabled = g.disabled;
     in.tamper = g.tamper;
     in.ups = g.ups;
+    in.reboot = rebootSet_;
     in.voltOut = g.voltOut;
     in.noWifi = g.net <= NET_WIFI_CONNECTING;
     in.noServer = g.paired && g.offlineSinceMs != 0;

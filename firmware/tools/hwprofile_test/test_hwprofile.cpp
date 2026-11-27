@@ -267,6 +267,15 @@ int main() {
   { JsonDocument j; hwp::stateJson(j.to<JsonObject>()); CHECK(j["reset"].isNull()); }
   printf("config.h change ok\n");
 
+  // ---------------- a profile stored without a fingerprint (no way to know which config.h it was made for): config.h wins
+  { hwp::Profile pr = hwp::active(); pr.ch[0].clamp = 1;               // a stored profile with the 5 A clamp
+    JsonDocument j; hwp::toJson(pr, j.to<JsonObject>()); j["ver"] = 5;
+    std::string out; serializeJson(j, out); g_nvs["hw_act"] = out; }
+  g_nvs.erase("hw_dh");
+  boot();
+  CHECK(hwp::state() == hwp::ST_DEFAULT && hwp::active().ch[0].clamp == 6);
+  printf("no fingerprint ok\n");
+
   if (failures) {
     printf("%d check(s) FAILED\n", failures);
     return 1;

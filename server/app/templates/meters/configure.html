@@ -110,6 +110,13 @@
         <div class="form-text">The admin always manages every meter. Pick one manager to manage it too (configuration, control, delete, linking its own view-only users).
           Pick another manager to <strong>transfer</strong> it, or <em>None</em> to <strong>revoke</strong>; the previous manager's view-only users then lose this meter.</div></div>
       {% endif %}
+      <div class="mb-3"><label class="form-label">Reboot</label>
+        <div class="d-flex align-items-center flex-wrap gap-2">
+          <button type="button" class="btn btn-sm btn-outline-warning" id="btnReboot"><i class="bi bi-power me-1"></i>Reboot in</button>
+          <div class="input-group input-group-sm" style="width:130px"><input class="form-control" type="number" min="0" max="3600" id="rebootDelay" value="60"><span class="input-group-text">s</span></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRebootCancel">Cancel reboot</button>
+        </div>
+        <div class="form-text">Restarts the meter after the countdown (the Reboot notification and the AUX relay event "Wait for Reboot" run during it). Sessions and kWh counters continue after the restart. The meter must be online.</div></div>
       <div class="mb-3"><label class="form-label">Electricity price</label>
         <div class="input-group" style="max-width:340px">
           <input class="form-control" name="currency" maxlength="8" placeholder="MYR" value="{{ val('currency', d.currency) }}" style="max-width:100px">
@@ -808,6 +815,20 @@
   document.querySelectorAll('input[name=sess_mode]').forEach(function (r) { r.addEventListener('change', syncMode); });
   syncMode();
   PM.bindActions(actionUrl);
+  (function () {   // Reboot (General)
+    var go = document.getElementById('btnReboot'), cancel = document.getElementById('btnRebootCancel'), delay = document.getElementById('rebootDelay');
+    if (!go) return;
+    function send(body, btn) {
+      btn.disabled = true;
+      PM.post(actionUrl, body).then(function (r) { PM.toast(r.message || (r.ok ? 'Done' : r.error), r.ok ? 'success' : 'danger'); }).finally(function () { btn.disabled = false; });
+    }
+    go.addEventListener('click', function () {
+      var s = parseInt(delay.value, 10);
+      if (isNaN(s) || s < 0 || s > 3600) { PM.toast('Seconds: 0 - 3600', 'danger'); return; }
+      if (confirm('Reboot the meter in ' + s + ' s?')) send({action: 'reboot', delay_s: s}, go);
+    });
+    cancel.addEventListener('click', function () { send({action: 'reboot_cancel'}, cancel); });
+  })();
   // "Unsaved changes": shown after any edit until the form is saved; warns before leaving the page.
   var form = document.getElementById('cfgForm'), dirty = false;
   function markDirty() {

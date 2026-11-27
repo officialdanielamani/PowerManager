@@ -599,6 +599,19 @@ def action(pk):
         cmd, err = commands.issue(device, act, params, current_user)
     elif device.disabled_at and act not in ("send_now", "enable", "disable", "unsync", "remove", "get_info"):
         return jsonify(ok=False, error="disabled", message="This meter is disabled (read-only). Enable it first."), 409
+    elif act in ("reboot", "reboot_cancel"):
+        params = {}
+        if act == "reboot":
+            try:
+                params["delay_s"] = int(body.get("delay_s", 60))
+            except (TypeError, ValueError):
+                params["delay_s"] = -1
+            if not 0 <= params["delay_s"] <= 3600:
+                return jsonify(ok=False, error="bad_delay", message="Seconds: 0 to 3600."), 400
+        cmd, err = commands.issue(device, act, params, current_user)
+        if err:
+            return jsonify(ok=False, error=err, message="The meter is offline."), 409
+        return jsonify(ok=True, message=(f"The meter restarts in {params['delay_s']} s" if act == "reboot" else "Reboot cancelled"))
     elif act == "set_default":
         device.cfg = devconfig.default_for(device)
         ensure_device_defaults(device, reset=True)

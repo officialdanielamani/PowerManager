@@ -33,6 +33,9 @@ void stateJson(JsonObject o);   // protocol "state" body
 uint32_t stateVersion();        // changes whenever the state changes
 uint32_t relaySwitches();       // relay output changes since boot (diagnostics)
 void bumpState();
+void scheduleReboot(uint16_t delayS);   // restart after a countdown (command "reboot")
+bool cancelReboot();
+bool rebootPending();
 void prepareRestart(bool ota = true);  // planned restart (firmware update): the session ends, relays off
 void relayTest(bool on);    // serial "relay test": the rules stop writing the relays while it runs               // the state changed (also used by auxrelay)
 

@@ -500,8 +500,7 @@ var PM = (function () {
     }
 
     // ---- Get Data Now: ask the meter for a reading and wait for it to arrive
-    var gd = document.getElementById('btnGetData');
-    if (gd) gd.addEventListener('click', function () {
+    document.querySelectorAll('.btn-get-data').forEach(function (gd) { gd.addEventListener('click', function () {
       var before = lastLive.reading_ts || 0, html = gd.innerHTML;
       gd.disabled = true; gd.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Waiting…';
       function done(msg, kind) { gd.disabled = false; gd.innerHTML = html; if (msg) toast(msg, kind); }
@@ -516,7 +515,7 @@ var PM = (function () {
           }).catch(function () { setTimeout(check, 1000); });
         })();
       });
-    });
+    }); });
 
     // ---- Auto refresh: while this page is open, ask the meter for a fresh reading once a minute (the panel
     // itself updates every 5 s as soon as new data arrives). Skipped when the tab is hidden, the meter is

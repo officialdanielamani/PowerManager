@@ -173,7 +173,7 @@ def test_reboot_flow_does_not_archive_the_meter(app, admin, mc):
     assert len(d.cfg["aux"]) == 1
     evt(d, "hw_active", ver=1)
     assert d.hw_state == "active" and d.hw_active_ver == 1 and d.hw_current["ch"] == NEW["ch"]
-    assert any("Hardware profile v1 is active" in n.message for n in Notification.query.all())
+    assert any("The new hardware settings are active" in n.message for n in Notification.query.all())
 
     # the channel count is now 7: viewer links are not cut. Going down to 2 channels trims them.
     evt(d, "hw_active", ver=1)  # a repeated event does no harm
@@ -250,16 +250,16 @@ def test_newer_profile_replaces_queued_and_stale_ack_ignored(app, admin, mc):
     assert cancelled is None and db.session.get(Command, second.id).cancelled and d.hw_state == ""
 
 
-def test_profile_sent_again_after_factory_reset(app, admin, mc):
+def test_factory_reset_is_not_overridden_by_the_old_profile(app, admin, mc):
     d = db.session.get(Device, mc)
     cmd, _ = hwprofile.submit(d, NEW)
     cmd_ack(d, cmd, res={"state": "pending", "in_s": 60})
     hello(d, new_caps(NEW), "trial", 1, NEW)
     evt(d, "hw_active", ver=1)
     assert d.hw_state == "active"
-    hello(d, CAPS, "default", 0, DEFAULT)  # factory reset: the meter is back on its compiled tables
-    assert Command.query.filter_by(device_fk=d.id, c="hw_profile").count() == 2
-    assert d.hw_state == "queued" and d.hw_profile["ch"] == NEW["ch"]
+    hello(d, CAPS, "default", 0, DEFAULT)  # erased flash / new flash: the meter runs its config.h
+    assert Command.query.filter_by(device_fk=d.id, c="hw_profile").count() == 1   # the old profile is NOT sent again
+    assert d.hw_state == "" and not d.hw_profile and d.hw_current["ch"] == DEFAULT["ch"]
 
 
 def test_live_clamp_change_updates_the_ratings_shown(app, admin, mc):

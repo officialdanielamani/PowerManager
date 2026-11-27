@@ -326,7 +326,7 @@ void begin(const Profile &compiledDefault, uint8_t gpio, const Hooks &hooks) {
     pr.begin("pm", true);
     uint32_t was = pr.getUInt("hw_dh", 0);
     pr.end();
-    if (was && was != dfltHash) {  // config.h was changed and flashed: it wins over the profile the server stored earlier
+    if (was != dfltHash) {  // config.h was changed and flashed (or the profile has no fingerprint): config.h wins over the profile stored earlier
       Serial.printf("[hwp] config.h changed since the profile of the server was stored: using config.h\n");
       drop(K_ACT);
       drop(K_TRY);

@@ -620,6 +620,10 @@ def process_event(device, ev):
     elif e == "trip_reset":
         incidents.close_incident(device.id, "trip", ev.ts, ch=mch, event=ev, estimated=est,
                                  detail={"reset_by": d.get("by"), "reset_src": d.get("src")})
+    elif e == "reboot_pending":   # a reboot asked on the Configuration page (General): countdown running
+        notify.notify(device, "reboot_pending", f"Meter restarts in {int(d.get('in_s') or 0)} s (reboot requested)")
+    elif e == "reboot_cancelled":
+        notify.notify(device, "reboot_pending", "The requested reboot was cancelled")
     elif e in ("hw_reboot_pending", "hw_active", "hw_rollback"):
         hwprofile.on_event(device, ev)
     elif e in ("ota_progress", "ota_failed", "ota_ok"):  # firmware update over the air (docs/protocol.md §14)

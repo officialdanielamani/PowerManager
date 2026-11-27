@@ -21,6 +21,9 @@ void applyConfig(const MeterConfig &c);
 void setDisabled(bool disabled);  // server "disable" / "enable"
 bool startSensorCheck(uint8_t ch, uint8_t readings, const char *&err);  // Zero & Tare wizard (err: bad_channel / no_sensor / busy)
 bool anySessionRunning();         // a session is running (rbAmp address change is refused meanwhile)
+void scheduleReboot(uint16_t delayS);   // restart after a countdown (command "reboot")
+bool cancelReboot();
+bool rebootPending();
 void prepareRestart(bool ota = false);  // planned restart (hardware profile / OTA): sessions end, kWh + state saved, relays off
 void reportNow();           // record a reading now and send everything now ("Get Data Now")
 bool takeSendRequest();     // net: true once when it is time to send the buffered items

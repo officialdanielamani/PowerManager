@@ -317,18 +317,12 @@ def on_hello(device, hwp, conn_send=None):
         device.hw_reason, device.hw_due_at, device.hw_active_ver = None, None, 0
         notify.notify(device, "meter_status", "config.h was changed and flashed: the hardware profile stored on the server was replaced by the meter's config.h")
     elif state == "default":
+        # The meter runs the tables of its config.h (first start, erased flash, a new flash): that is the truth. A profile the
+        # server held earlier is not sent again; it applies when the admin saves a new one on the Update Device I/O page.
+        if device.hw_profile and device.hw_state not in ("rolled_back", "pending", "trial", "queued", "rejected"):
+            device.hw_profile, device.hw_ver, device.hw_state = {}, 0, ""
+            device.hw_reason, device.hw_due_at = None, None
         device.hw_active_ver = 0
-        if (device.hw_ver or 0) > 0 and device.hw_profile and device.hw_state not in (
-                "rolled_back", "pending", "trial", "queued", "rejected"):
-            # Factory reset or a new flash: the server still has the profile, send it again.
-            cmd, err = commands.issue(device, "hw_profile",
-                                      {"ver": device.hw_ver, "profile": device.hw_profile, "mode": "reboot",
-                                       "delay_s": DELAY_DEFAULT})
-            if cmd is not None:
-                device.hw_state, device.hw_due_at = "queued", None
-                return True
-        elif device.hw_state == "active":
-            device.hw_state = ""
     return False
 
 
@@ -391,7 +385,7 @@ def on_event(device, ev):
         except (TypeError, ValueError):
             device.hw_due_at = None
         notify.notify(device, "reboot_pending",
-                      f"Meter restarts in {int(d.get('in_s') or DELAY_DEFAULT)} s: hardware change (profile v{ver if ver is not None else '?'})")
+                      f"Meter restarts in {int(d.get('in_s') or DELAY_DEFAULT)} s: hardware change")
     elif ev.type == "hw_active":
         device.hw_active_ver = ver or device.hw_active_ver
         device.hw_due_at = None
@@ -400,7 +394,7 @@ def on_event(device, ev):
             device.hw_state, device.hw_reason = "active", None
             _apply_ratings(device, device.hw_current)
             _trim_viewers(device)
-            notify.notify(device, "meter_status", f"Hardware profile v{ver} is active")
+            notify.notify(device, "meter_status", "The new hardware settings are active")
     elif ev.type == "hw_rollback":
         reason = str(d.get("reason") or "unknown")
         if d.get("addr") is not None:
@@ -410,8 +404,8 @@ def on_event(device, ev):
                 pass
         device.hw_state, device.hw_reason, device.hw_due_at = "rolled_back", reason[:100], None
         notify.notify(device, "meter_status",
-                      f"Hardware profile v{ver if ver is not None else '?'} rolled back: {reason}. "
-                      "The meter uses its previous profile")
+                      f"The new hardware settings were rolled back: {reason}. "
+                      "The meter uses its previous settings")
 
 
 def view(device):

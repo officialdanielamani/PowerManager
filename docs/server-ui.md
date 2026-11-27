@@ -77,7 +77,7 @@ Switches: kWh exceeded · Voltage out of range · Session renewed · Max amp · 
 - **[Raw | Tared]** switch in *Latest data* (only when the meter has a tare on any channel; multi-channel meters: each channel is tared with its own tare, the whole-meter numbers use their sum; remembered per browser): latest data, session kWh/balance/cost, history chart + stats and the Sessions table switch between raw and tared values. Dashboard cards show tared values when a tare is set.
 - **[Get meter info]** (admin) in the *Meter* card: asks the meter for IP, Wi-Fi, MAC, battery voltage + % (if enabled), free heap, PSRAM, firmware, hardware name, `HW_INFO`, chip, uptime; shown in a dialog.
 - Historical Events (admin): checkboxes + **Delete selected**.
-- **[Get Data Now]** in *Latest data* (admin and viewers): asks the meter for a reading now and waits up to 15 s for it (rate limited to once per 5 s per meter).
+- **[Get Data Now]** in *Latest data* and in the *Channels* card of a multi-channel meter (admin and viewers): asks the meter for a reading now and waits up to 15 s for it (rate limited to once per 5 s per meter).
 - Latest data: V, A, W, PF, Hz, session kWh used / remaining.
 - Admin-only buttons: Relay ON/OFF, [Renew Now], [Reset Trip], [Send Data Now], [Configure].
 - History chart (V / A / W / kWh) with range: 1 h, 1 day, 1 week, 1 month, all time, custom; stats: min / max / avg.
@@ -128,7 +128,7 @@ The meter type comes from the firmware when it pairs (no setting). Dashboard car
 
 ## Read / send interval
 
-Configuration → General: **Read data every [X] s and send every [Y] s** (read 5 s – 1 h, send 10 s – 1 h, read ≤ send). The meter records a reading every X s and sends the buffered readings every Y s (Get Data Now and events go at once). Also in Bulk Configuration (*Read / send data*).
+Configuration → General: **Reboot in [60] s** (restarts the meter after the countdown, **Cancel reboot**; the meter must be online; sessions and kWh continue). Configuration → General: **Read data every [X] s and send every [Y] s** (read 5 s – 1 h, send 10 s – 1 h, read ≤ send). The meter records a reading every X s and sends the buffered readings every Y s (Get Data Now and events go at once). Also in Bulk Configuration (*Read / send data*).
 
 ## Sessions tab: select and delete
 

@@ -223,6 +223,18 @@
     if (e.target.classList.contains('g-d')) {   // another driver: its number of outputs (the board has 16, not the 4 of the board before)
       var rr = e.target.closest('tr'), cap = DRIVERS[e.target.value] && DRIVERS[e.target.value][1];
       if (rr && cap) rr.querySelector('.g-n').value = cap;
+      if (rr) {   // the channels on this board keep their output when it still exists; the others take a free one (none left: no relay)
+        var bi = Array.prototype.indexOf.call($('gRelays').children, rr) + 1, size = cap || parseInt(rr.querySelector('.g-n').value, 10) || 0, used = {}, todo = [];
+        document.querySelectorAll('#gChannels tr').forEach(function (ch) {
+          if (+ch.dataset.rb !== bi) return;
+          var ro = +ch.dataset.ro;
+          if (ro >= 1 && ro <= size && !used[ro]) used[ro] = 1; else todo.push(ch);
+        });
+        todo.forEach(function (ch) {
+          for (var o = 1; o <= size; o++) if (!used[o]) { used[o] = 1; ch.dataset.ro = o; return; }
+          ch.dataset.rb = 0; ch.dataset.ro = 0;
+        });
+      }
     }
     var tr = e.target.closest('#gChannels tr');
     if (tr && e.target.classList.contains('g-rb')) { tr.dataset.rb = e.target.value; tr.dataset.ro = 1; }

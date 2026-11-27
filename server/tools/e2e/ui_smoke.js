@@ -104,7 +104,7 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   check(!(await page.isDisabled('#clampBtn')) && await page.isDisabled('#saveBtn'), 'clamp-only change enables Update Clamp Model only');
   await page.click('#clampBtn');
   await page.waitForTimeout(4000);
-  check((await page.textContent('#stateBadge')) === 'Active' && (await page.textContent('#stateText')).includes('v1'), 'clamp change applied live (profile v1 active)');
+  check((await page.textContent('#stateBadge')) === 'Active' && (await page.textContent('#stateText')).includes('in use'), 'clamp change applied live (settings active)');
 
   // structure: a second rbAmp board, relay Board B (MCP23017, 4 outputs), 2 more channels, CH3 on Board B relay 3
   await page.click('#addBoard');
@@ -131,7 +131,7 @@ function check(ok, what) { console.log((ok ? 'ok    ' : 'FAIL  ') + what); if (!
   await page.click('#saveBtn');
   await page.waitForTimeout(1500);
   await page.waitForTimeout(9000);
-  check((await page.textContent('#stateBadge')) === 'Active' && (await page.textContent('#stateText')).includes('v2'), 'profile v2 applied after the restart (confirmed)');
+  check((await page.textContent('#stateBadge')) === 'Active' && (await page.textContent('#stateText')).includes('in use'), 'new profile applied after the restart (confirmed)');
   check(await page.locator('#channels tr').count() === 4, 'the meter now reports 4 channels');
   await page.screenshot({ path: process.env.SHOT || 'update_device_io.png', fullPage: true });
 

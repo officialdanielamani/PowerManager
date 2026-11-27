@@ -276,7 +276,7 @@
     var S = {'': ['secondary', 'Compiled default', 'No profile has been sent from the server; the meter uses the tables of its config.h.'],
       queued: ['info', 'Waiting', st.online ? 'Sending to the meter…' : 'The meter is offline; the profile is sent when it reconnects.'],
       pending: ['warning', 'Restart pending', ''], trial: ['warning', 'Checking', 'The meter restarted with the new profile and is checking that every part answers.'],
-      active: ['success', 'Active', 'Profile v' + st.active_ver + ' is in use.'],
+      active: ['success', 'Active', 'The settings from the server are in use.'],
       rolled_back: ['danger', 'Rolled back', 'The new profile did not work (' + PM.esc(st.reason || '') + '). The meter uses its previous profile.'],
       rejected: ['danger', 'Rejected', 'The meter refused the profile: ' + PM.esc(st.reason || '')]}[st.state] || ['secondary', st.state, ''];
     $('stateBadge').className = 'badge text-bg-' + S[0];
@@ -300,7 +300,7 @@
   PM.poll(BASE + '/status', 2500, function (s) {
     if (s.state !== lastState && s.state === 'active' && s.current && s.current.ch) {   // confirmed: show what the meter reports
       P = JSON.parse(JSON.stringify(s.current)); delete P.ver; renderAll();
-      PM.toast('Hardware profile v' + s.active_ver + ' is active', 'success');
+      PM.toast('The new hardware settings are active', 'success');
     } else if (s.state !== lastState && s.state === 'rolled_back') {
       PM.toast('Rolled back: ' + (s.reason || ''), 'danger');
     }

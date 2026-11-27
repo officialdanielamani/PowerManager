@@ -174,3 +174,15 @@ def test_config_page_shows_weekly_and_meter_panel(app, admin, mc):
     html = admin.get(f"/meters/{mc}/configure").get_data(as_text=True)
     assert "Days of the week" in html and "pm-wk-day" in html and 'name="wk_mon_at_1"' in html
     assert html.count("Schedule Next Session") >= 3          # two channels + the whole meter (Shared mode)
+
+
+def test_reboot_and_get_data_buttons(app, admin, mc, online):
+    html = admin.get(f"/meters/{mc}/configure").get_data(as_text=True)
+    assert 'id="btnReboot"' in html and 'id="rebootDelay"' in html and 'value="60"' in html
+    assert admin.get(f"/meters/{mc}").get_data(as_text=True).count("btn-get-data") >= 2      # Latest data + Channels
+    assert admin.post(f"/meters/{mc}/action", json={"action": "reboot", "delay_s": 90}).get_json()["ok"]
+    assert admin.post(f"/meters/{mc}/action", json={"action": "reboot", "delay_s": 99999}).status_code == 400
+    assert admin.post(f"/meters/{mc}/action", json={"action": "reboot_cancel"}).get_json()["ok"]
+    with app.app_context():
+        cmds = [(c.c, c.params) for c in Command.query.filter_by(device_fk=mc).order_by(Command.id)]
+    assert ("reboot", {"delay_s": 90}) in cmds and ("reboot_cancel", {}) in cmds

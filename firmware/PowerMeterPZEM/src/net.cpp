@@ -793,6 +793,17 @@ static void handleCommand(JsonObject m) {
     control::reportNow();
   } else if (!strcmp(c, "reset_trip")) {
     control::resetTrip("server", m["by"] | "");
+  } else if (!strcmp(c, "reboot")) {
+    int s = m["delay_s"] | 60;
+    if (s < 0 || s > 3600) {
+      ok = false;
+      err = "bad_delay";
+    } else {
+      control::scheduleReboot(s);
+    }
+  } else if (!strcmp(c, "reboot_cancel")) {
+    ok = control::cancelReboot();
+    if (!ok) err = "no_reboot";
   } else if (!strcmp(c, "get_state")) {
     sendState();
   } else if (!strcmp(c, "disable") || !strcmp(c, "enable")) {
