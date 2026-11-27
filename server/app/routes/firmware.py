@@ -47,11 +47,17 @@ def add():
                           chip=info["chip"], size=info["size"], sha256=info["sha256"], layout=info["layout"],
                           files=info["files"], updated_by=current_user.username)
             db.session.add(fw)
-            db.session.flush()
-            fw_svc.store(fw, files)
-            db.session.commit()
-            flash(f"Firmware {fw.title} {fw.version} added.", "success")
-            return redirect(url_for("main.firmware"))
+            db.session.commit()   # a short write; the files (several MB) are written without holding the database lock
+            try:
+                fw_svc.store(fw, files)
+            except OSError as exc:
+                db.session.delete(fw)
+                db.session.commit()
+                fw_svc.remove_files(fw.id)
+                errors.append(f"The file could not be saved on the server ({exc.strerror or exc}).")
+            else:
+                flash(f"Firmware {fw.title} {fw.version} added.", "success")
+                return redirect(url_for("main.firmware"))
     return render_template("firmware_form.html", fw=None, errors=errors, vals=vals)
 
 
