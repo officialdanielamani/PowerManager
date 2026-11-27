@@ -128,6 +128,15 @@ static void setModels(Board &b, uint8_t bi) {
       i2cbus::writeReg(b.addr, REG_CH_DATA, want);  // RAM, applies at once
       delay(2);
       uint8_t back = readApplied(b, in);
+      if (back != want) {  // the channel window did not take it: stage + bind command like inputs 1-3 (CMD 0x28 + input)
+        i2cbus::writeReg(b.addr, REG_CT_MODEL, want);
+        i2cbus::writeReg(b.addr, REG_COMMAND, CMD_SET_CT_MODEL_CH0 + in);
+        delay(6);
+        uint8_t e = 0;
+        i2cbus::readRegs(b.addr, REG_ERROR, &e, 1);
+        back = readApplied(b, in);
+        Serial.printf("[rbamp] B%u input %u: stage + command path %s (error 0x%02X)\n", bi + 1, in + 1, back == want ? "worked" : "did not work either", e);
+      }
       if (back != want) Serial.printf("[rbamp] B%u input %u: CT model %u was not taken (the module reports %u)\n", bi + 1, in + 1, want, back);
     }
     if (applied == want) continue;  // only re-applied (fw < 1.4.20): already saved, no flash write

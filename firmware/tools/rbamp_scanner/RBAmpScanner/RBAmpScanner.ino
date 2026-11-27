@@ -260,8 +260,43 @@ static void help() {
       "  drdy                 count DRDY pulses for 2 s\n"
       "  reg <reg> [n]        raw read of n registers (1..64), e.g. reg 0x54  or  reg 0x86 4\n"
       "  wreg <reg> <val>     raw write of one register (careful)\n"
+      "  ct <input 1-7> <code 0-7> [win|cmd|both]  set the clamp model of one input (code: 1=5A 2=10A 3=30A 4=50A 5=100A 6=20A 7=60A), then show the models read back; win = channel window (default for inputs 4-7), cmd = stage + command 0x28+input (inputs 1-3), both\n"
       "  addr <from> <to>     change the I2C address (ONE module on the bus!), e.g. addr 0x50 0x51  (add  force  to skip the free-address check)\n"
       "  reset                send the reset command to the module");
+}
+
+// Clamp model of one input, the two ways the meter firmware knows: the channel window (field 15) or stage + command.
+static uint8_t appliedModel(uint8_t i) {
+  uint8_t m = 0;
+  if (i < 3) {
+    readRegs(cur, REG_APPLIED_CT0 + i, &m, 1);
+  } else {
+    writeReg(cur, REG_CH_SELECT, (uint8_t)((15 << 4) | i));
+    readRegs(cur, REG_CH_DATA, &m, 1);
+  }
+  return m;
+}
+static void cmdCt(long input, long code, const char *how) {
+  if (input < 1 || input > 7 || code < 0 || code > 7) { Serial.println("usage: ct <input 1-7> <code 0-7> [win|cmd|both]"); return; }
+  uint8_t i = input - 1;
+  bool win = how ? (!strcmp(how, "win") || !strcmp(how, "both")) : i >= 3;
+  bool cm = how ? (!strcmp(how, "cmd") || !strcmp(how, "both")) : i < 3;
+  Serial.printf("input %ld: model was %u\n", input, appliedModel(i));
+  if (win) {
+    writeReg(cur, REG_CH_SELECT, (uint8_t)((15 << 4) | i));
+    writeReg(cur, REG_CH_DATA, (uint8_t)code);
+    delay(5);
+    Serial.printf("  window write done: reads back %u\n", appliedModel(i));
+  }
+  if (cm) {
+    writeReg(cur, REG_CT_MODEL, (uint8_t)code);
+    writeReg(cur, 0x01, (uint8_t)(0x28 + i));
+    delay(10);
+    uint8_t e = 0;
+    readRegs(cur, 0x02, &e, 1);
+    Serial.printf("  stage + command 0x%02X done (ERROR reg 0x%02X): reads back %u\n", 0x28 + i, e, appliedModel(i));
+  }
+  Serial.println("  (not saved to the module's flash: use  wreg 0x01 0x32  to save, or let the meter firmware do it)");
 }
 
 // ------------------------------------------------------------------ command line
@@ -291,6 +326,7 @@ static void handle(char *line) {
   else if (!strcmp(c, "drdy")) cmdDrdy();
   else if (!strcmp(c, "reg") && n >= 2) cmdReg(num(tok[1]), n >= 3 ? num(tok[2]) : 1);
   else if (!strcmp(c, "wreg") && n >= 3) Serial.printf("write %s\n", writeReg(cur, num(tok[1]), num(tok[2])) ? "ok" : "FAILED");
+  else if (!strcmp(c, "ct") && n >= 3) cmdCt(num(tok[1]), num(tok[2]), n >= 4 ? tok[3] : nullptr);
   else if (!strcmp(c, "addr") && n >= 3) cmdAddr(num(tok[1]), num(tok[2]), n >= 4 && !strcmp(tok[3], "force"));
   else if (!strcmp(c, "reset")) Serial.printf("reset %s\n", writeReg(cur, REG_COMMAND, CMD_RESET) ? "sent" : "FAILED");
   else Serial.println("unknown command: type  help");
