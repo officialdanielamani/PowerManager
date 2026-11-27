@@ -12,6 +12,7 @@ Server and firmware are versioned separately; from 1.0.0 the server needs firmwa
 - **Zero / Tare sensor check:** readings below 0 (noise with no load) count as 0, and the allowed spread of the current depends on the clamp (0.1 A up to 30 A ...), so a no-load check of a 30 A clamp no longer fails as "not stable".
 - **Hardware settings:** no more "Hardware profile vN" in the pages and notifications. A meter that reports it runs its `config.h` (first start, erased or newly flashed) is no longer overridden by a profile the server held earlier; a new profile applies only when saved on *Update Device I/O*.
 - **Clamp stayed at the old value:** a stored profile without a config.h fingerprint is now dropped at boot (config.h wins) instead of being kept over a newly flashed `config.h`.
+- **rbAmp modules card: inputs 4-7 showed a wrong clamp** (e.g. "clamp 5 A, profile says 20 A" on input 4): the module's applied model of inputs 4-7 was read from the wrong registers (PRODUCT_ID, HW_VARIANT ...). It is now read from the channel window like the meter itself does (also in the RBAmpScanner sketch); a CT model that the module does not take is logged.
 - **Generator:** changing the driver of a relay board keeps the channels' outputs that still exist and gives the others a free output (no stale selector).
 - **[Get Data Now]** also in the *Channels* card; **Reboot** (default 60 s, cancel) in Configuration → General (commands `reboot` / `reboot_cancel`, both firmwares).
 - Everything below was developed as 1.1.0 and ships in 1.2.0.

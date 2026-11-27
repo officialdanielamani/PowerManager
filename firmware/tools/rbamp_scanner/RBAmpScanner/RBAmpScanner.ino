@@ -158,7 +158,12 @@ static void cmdId() {
   uint8_t n = var <= 8 ? VARIANTS[var].inputs : 0;
   for (uint8_t i = 0; i < n; i++) {
     uint8_t m = 0;
-    readRegs(cur, REG_APPLIED_CT0 + i, &m, 1);
+    if (i < 3) {
+      readRegs(cur, REG_APPLIED_CT0 + i, &m, 1);
+    } else {  // inputs 4..7: channel window field 15 (0x51 + i would be PRODUCT_ID, HW_VARIANT ...)
+      writeReg(cur, REG_CH_SELECT, (uint8_t)((15 << 4) | i));
+      readRegs(cur, REG_CH_DATA, &m, 1);
+    }
     Serial.printf("  input %u clamp model: %u = %s\n", i + 1, m, m < 8 ? CT_NAMES[m] : "?");
   }
 }

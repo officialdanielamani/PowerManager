@@ -126,6 +126,8 @@ static void setModels(Board &b, uint8_t bi) {
       i2cbus::writeReg(b.addr, REG_CH_SELECT, (uint8_t)((F_CT_MODEL << 4) | in));
       i2cbus::writeReg(b.addr, REG_CH_DATA, want);  // RAM, applies at once
       delay(2);
+      uint8_t back = readApplied(b, in);
+      if (back != want) Serial.printf("[rbamp] B%u input %u: CT model %u was not taken (the module reports %u)\n", bi + 1, in + 1, want, back);
     }
     if (applied == want) continue;  // only re-applied (fw < 1.4.20): already saved, no flash write
     changed = true;
@@ -476,7 +478,13 @@ bool describe(uint8_t addr, JsonObject o) {
   JsonArray ct = o["ct"].to<JsonArray>();                           // what the MODULE itself says it uses (read back)
   for (uint8_t in = 0; in < n; in++) {
     uint8_t m = 0;
-    i2cbus::readRegs(addr, REG_APPLIED_CT0 + in, &m, 1);
+    if (in < 3) {
+      i2cbus::readRegs(addr, REG_APPLIED_CT0 + in, &m, 1);
+    } else {  // inputs 4..7: the applied model is in the channel window (REG_APPLIED_CT0 + in would be PRODUCT_ID, HW_VARIANT ...)
+      i2cbus::Lock l;
+      i2cbus::writeReg(addr, REG_CH_SELECT, (uint8_t)((F_CT_MODEL << 4) | in));
+      i2cbus::readRegs(addr, REG_CH_DATA, &m, 1);
+    }
     ct.add(m < sizeof(AMPS) ? AMPS[m] : 0);
   }
   JsonArray a = o["a"].to<JsonArray>(), w = o["w"].to<JsonArray>(), pf = o["pf"].to<JsonArray>();
